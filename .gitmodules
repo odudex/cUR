@@ -1,0 +1,3 @@
+[submodule "foundation-ur-py"]
+	path = foundation-ur-py
+	url = https://github.com/selfcustody/foundation-ur-py.git
