@@ -1,4 +1,10 @@
+coverage_html/
 src/obj
+src/obj_cov
 tests/test_cross_output
 *.o
 *.a
+*.info
+*.gcda
+*.gcno
+*_cov
