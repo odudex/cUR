@@ -1,3 +1,4 @@
 src/obj
+tests/test_cross_output
 *.o
 *.a
