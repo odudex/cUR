@@ -1,3 +1,5 @@
+// TODO; Check for ESP32P4 hardware hashing.
+
 /*********************************************************************
 * Filename:   sha256.h
 * Author:     Brad Conte (brad AT bradconte.com)
@@ -27,8 +29,8 @@ typedef struct {
 } CRYAL_SHA256_CTX;
 
 /*********************** FUNCTION DECLARATIONS **********************/
-void sha256_init(CRYAL_SHA256_CTX *ctx);
-void sha256_update(CRYAL_SHA256_CTX *ctx, const BYTE data[], size_t len);
-void sha256_final(CRYAL_SHA256_CTX *ctx, BYTE hash[]);
+void cur_sha256_init(CRYAL_SHA256_CTX *ctx);
+void cur_sha256_update(CRYAL_SHA256_CTX *ctx, const BYTE data[], size_t len);
+void cur_sha256_final(CRYAL_SHA256_CTX *ctx, BYTE hash[]);
 
 #endif   // SHA256_H
