@@ -21,9 +21,9 @@
 static void compute_sha256(const uint8_t *input, size_t len,
                            uint8_t output[32]) {
   CRYAL_SHA256_CTX ctx;
-  sha256_init(&ctx);
-  sha256_update(&ctx, input, len);
-  sha256_final(&ctx, output);
+  cur_sha256_init(&ctx);
+  cur_sha256_update(&ctx, input, len);
+  cur_sha256_final(&ctx, output);
 }
 
 static int compare_size_t(const void *a, const void *b) {

@@ -41,7 +41,7 @@ static const WORD k[64] = {
 };
 
 /*********************** FUNCTION DEFINITIONS ***********************/
-static void sha256_transform(CRYAL_SHA256_CTX *ctx, const BYTE data[])
+static void cur_sha256_transform(CRYAL_SHA256_CTX *ctx, const BYTE data[])
 {
 	WORD a, b, c, d, e, f, g, h, i, j, t1, t2, m[64];
 
@@ -82,7 +82,7 @@ static void sha256_transform(CRYAL_SHA256_CTX *ctx, const BYTE data[])
 	ctx->state[7] += h;
 }
 
-void sha256_init(CRYAL_SHA256_CTX *ctx)
+void cur_sha256_init(CRYAL_SHA256_CTX *ctx)
 {
 	ctx->datalen = 0;
 	ctx->bitlen = 0;
@@ -96,7 +96,7 @@ void sha256_init(CRYAL_SHA256_CTX *ctx)
 	ctx->state[7] = 0x5be0cd19;
 }
 
-void sha256_update(CRYAL_SHA256_CTX *ctx, const BYTE data[], size_t len)
+void cur_sha256_update(CRYAL_SHA256_CTX *ctx, const BYTE data[], size_t len)
 {
 	WORD i;
 
@@ -104,14 +104,14 @@ void sha256_update(CRYAL_SHA256_CTX *ctx, const BYTE data[], size_t len)
 		ctx->data[ctx->datalen] = data[i];
 		ctx->datalen++;
 		if (ctx->datalen == 64) {
-			sha256_transform(ctx, ctx->data);
+			cur_sha256_transform(ctx, ctx->data);
 			ctx->bitlen += 512;
 			ctx->datalen = 0;
 		}
 	}
 }
 
-void sha256_final(CRYAL_SHA256_CTX *ctx, BYTE hash[])
+void cur_sha256_final(CRYAL_SHA256_CTX *ctx, BYTE hash[])
 {
 	WORD i;
 
@@ -127,7 +127,7 @@ void sha256_final(CRYAL_SHA256_CTX *ctx, BYTE hash[])
 		ctx->data[i++] = 0x80;
 		while (i < 64)
 			ctx->data[i++] = 0x00;
-		sha256_transform(ctx, ctx->data);
+		cur_sha256_transform(ctx, ctx->data);
 		memset(ctx->data, 0, 56);
 	}
 
@@ -141,7 +141,7 @@ void sha256_final(CRYAL_SHA256_CTX *ctx, BYTE hash[])
 	ctx->data[58] = ctx->bitlen >> 40;
 	ctx->data[57] = ctx->bitlen >> 48;
 	ctx->data[56] = ctx->bitlen >> 56;
-	sha256_transform(ctx, ctx->data);
+	cur_sha256_transform(ctx, ctx->data);
 
 	// Since this implementation uses little endian byte ordering and SHA uses big endian,
 	// reverse all the bytes when copying the final state to the output hash.

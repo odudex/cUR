@@ -1,0 +1,17 @@
+idf_component_register(
+    SRCS
+        "src/ur.c"
+        "src/ur_encoder.c"
+        "src/ur_decoder.c"
+        "src/fountain_encoder.c"
+        "src/fountain_decoder.c"
+        "src/fountain_utils.c"
+        "src/bytewords.c"
+        "src/cbor_lite.c"
+        "src/crc32.c"
+        "src/utils.c"
+        "src/sha256/sha256.c"
+    INCLUDE_DIRS
+        "src"
+    REQUIRES
+)
