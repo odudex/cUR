@@ -11,6 +11,13 @@
 typedef struct fountain_decoder fountain_decoder_t;
 typedef struct mixed_parts_hash mixed_parts_hash_t;
 
+// Lightweight hash set for duplicate detection (stores only hashes)
+typedef struct {
+  uint32_t *hashes;
+  size_t count;
+  size_t capacity;
+} hash_set_t;
+
 // Part indexes set (simplified as dynamic array for C)
 typedef struct {
   size_t *indexes;
@@ -74,6 +81,9 @@ typedef struct fountain_decoder {
 
   // Hash-based mixed parts storage
   mixed_parts_hash_t *mixed_parts_hash;
+
+  // Lightweight duplicate detection (stores only hashes, not full parts)
+  hash_set_t received_fragments_hashes;
 
   // Processing queue
   part_queue_t queue;
