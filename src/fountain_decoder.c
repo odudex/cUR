@@ -25,8 +25,10 @@
 #define SIMPLE_PARTS_INITIAL_CAPACITY 8
 #define INDEXES_INITIAL_CAPACITY 8
 #define HASH_MIN_CAPACITY 64
-#define HASH_CAPACITY_MULTIPLIER 2
-#define CROSS_REDUCTION_MAX_ITERATIONS 5
+#define HASH_CAPACITY_MULTIPLIER 1  // Reduced from 2 to save memory
+#define MAX_MIXED_PARTS 256         // Limit mixed parts to prevent memory explosion
+#define MAX_DUPLICATE_TRACKING 512  // Limit duplicate tracking set size
+#define CROSS_REDUCTION_MAX_ITERATIONS 7
 #define FNV1A_OFFSET_BASIS 2166136261u
 #define FNV1A_PRIME 16777619u
 
@@ -54,6 +56,82 @@ static size_t hash_indexes(const part_indexes_t *indexes) {
     hash *= FNV1A_PRIME;
   }
   return hash;
+}
+
+// Hash set operations for lightweight duplicate detection
+
+// Initialize hash set
+static bool hash_set_init(hash_set_t *set, size_t capacity) {
+  if (!set || capacity == 0)
+    return false;
+
+  set->hashes = safe_malloc(capacity * sizeof(uint32_t));
+  if (!set->hashes)
+    return false;
+
+  set->count = 0;
+  set->capacity = capacity;
+  return true;
+}
+
+// Free hash set
+static void hash_set_free(hash_set_t *set) {
+  if (!set)
+    return;
+
+  if (set->hashes) {
+    free(set->hashes);
+    set->hashes = NULL;
+  }
+  set->count = 0;
+  set->capacity = 0;
+}
+
+// Check if hash set contains a hash (computed from indexes)
+static bool hash_set_contains(const hash_set_t *set, uint32_t hash) {
+  if (!set || !set->hashes)
+    return false;
+
+  for (size_t i = 0; i < set->count; i++) {
+    if (set->hashes[i] == hash) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Add hash to set (returns false if already exists or on error)
+static bool hash_set_add(hash_set_t *set, uint32_t hash) {
+  if (!set)
+    return false;
+
+  // Check if already exists
+  if (hash_set_contains(set, hash)) {
+    return false;
+  }
+
+  // Limit growth to prevent unbounded memory usage on embedded devices
+  // When limit is reached, stop tracking duplicates (seq_num check handles consecutive dupes)
+  if (set->count >= MAX_DUPLICATE_TRACKING) {
+    return false; // Limit reached, skip tracking this hash
+  }
+
+  // Expand if needed (but respect MAX_DUPLICATE_TRACKING limit)
+  if (set->count >= set->capacity) {
+    size_t new_capacity = set->capacity * 2;
+    if (new_capacity > MAX_DUPLICATE_TRACKING) {
+      new_capacity = MAX_DUPLICATE_TRACKING;
+    }
+    uint32_t *new_hashes = safe_realloc(set->hashes, new_capacity * sizeof(uint32_t));
+    if (!new_hashes)
+      return false;
+
+    set->hashes = new_hashes;
+    set->capacity = new_capacity;
+  }
+
+  set->hashes[set->count++] = hash;
+  return true;
 }
 
 // Initialize hash table with dynamic capacity
@@ -402,8 +480,13 @@ fountain_decoder_t *fountain_decoder_new(void) {
   decoder->simple_parts.count = 0;
   decoder->simple_parts.capacity = 0;
 
-  // Hash table will be initialized when we know seq_len
+  // Hash tables will be initialized when we know seq_len
   decoder->mixed_parts_hash = NULL;
+
+  // Initialize hash set for duplicate detection (will resize when we know seq_len)
+  decoder->received_fragments_hashes.hashes = NULL;
+  decoder->received_fragments_hashes.count = 0;
+  decoder->received_fragments_hashes.capacity = 0;
 
   if (!queue_init(&decoder->queue, QUEUE_INITIAL_CAPACITY)) {
     free(decoder);
@@ -464,6 +547,9 @@ void fountain_decoder_free(fountain_decoder_t *decoder) {
     free(decoder->mixed_parts_hash);
     decoder->mixed_parts_hash = NULL;
   }
+
+  // Free hash set for duplicate detection
+  hash_set_free(&decoder->received_fragments_hashes);
 
   queue_free(&decoder->queue);
 
@@ -632,6 +718,12 @@ static bool add_mixed_part(fountain_decoder_t *const decoder,
                            const mixed_part_source_t source) {
   if (!decoder || !part || is_simple_part(part) || !decoder->mixed_parts_hash)
     return false;
+
+  // Limit mixed parts to prevent memory explosion on embedded devices
+  // When limit is reached, skip adding new mixed parts but continue processing
+  if (decoder->mixed_parts_hash->count >= MAX_MIXED_PARTS) {
+    return false; // Limit reached, skip adding this mixed part
+  }
 
   // Try to add to hash table (which automatically checks for duplicates)
   if (!mixed_hash_put(decoder->mixed_parts_hash, &part->indexes, part)) {
@@ -841,16 +933,14 @@ static void reduce_mixed_against_mixed(fountain_decoder_t *const decoder) {
                 if (!part_indexes_contains(&decoder->received_part_indexes,
                                            fragment_idx)) {
                   queue_enqueue(&decoder->queue, &new_part);
-                  made_progress =
-                      true; // Only set if we actually queued something new
+                  made_progress = true;
                 }
                 decoder_part_free(&new_part);
                 break;
               } else {
                 if (add_mixed_part(decoder, &new_part,
                                    MIXED_SOURCE_CROSS_REDUCTION)) {
-                  made_progress =
-                      true; // Only set if we actually added something new
+                  made_progress = true;
                   gaussian_reduce_with_new_part(decoder, &new_part);
                 }
                 decoder_part_free(&new_part);
@@ -1186,12 +1276,36 @@ bool fountain_decoder_receive_part(fountain_decoder_t *decoder,
       decoder->mixed_parts_hash = NULL;
       return false;
     }
+
+    // Initialize lightweight hash set for duplicate detection
+    // Uses much less memory than hash table (only stores hashes, not full parts)
+    if (!hash_set_init(&decoder->received_fragments_hashes, hash_capacity)) {
+      mixed_hash_free(decoder->mixed_parts_hash);
+      free(decoder->mixed_parts_hash);
+      decoder->mixed_parts_hash = NULL;
+      return false;
+    }
   }
 
   decoder_part_t decoder_part;
   if (!create_decoder_part_from_encoder_part(part, &decoder_part)) {
     return false;
   }
+
+  // Check if this exact fragment (by index set) has already been received
+  // This prevents duplicate fragments from inflating processed_parts_count
+  // Note: We track ALL received fragments, even after they're reduced
+  // We compute a hash of the indexes and store only that (much more memory efficient)
+  uint32_t fragment_hash = (uint32_t)hash_indexes(&decoder_part.indexes);
+  if (hash_set_contains(&decoder->received_fragments_hashes, fragment_hash)) {
+    decoder_part_free(&decoder_part);
+    return true; // Already received this exact fragment, skip it
+  }
+
+  // Mark this fragment as received by adding its hash to our tracking set
+  // This persists even if the fragment gets reduced later
+  // Only stores 4 bytes per fragment instead of full part data + indexes
+  hash_set_add(&decoder->received_fragments_hashes, fragment_hash);
 
   if (decoder->last_part_indexes) {
     part_indexes_free(decoder->last_part_indexes);
