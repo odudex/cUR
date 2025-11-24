@@ -31,11 +31,9 @@ cbor_value_t *bip39_to_data_item(registry_item_t *item);
 registry_item_t *bip39_from_data_item(cbor_value_t *data_item);
 
 // Convenience functions
-uint8_t *bip39_to_cbor(bip39_data_t *bip39, size_t *out_len);
 bip39_data_t *bip39_from_cbor(const uint8_t *cbor_data, size_t len);
 
 // Accessors
 char **bip39_get_words(bip39_data_t *bip39, size_t *out_count);
-const char *bip39_get_lang(bip39_data_t *bip39);
 
 #endif // URTYPES_BIP39_H

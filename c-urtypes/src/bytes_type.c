@@ -64,10 +64,30 @@ registry_item_t *bytes_from_data_item(cbor_value_t *data_item) {
         bytes_val = cbor_value_get_tag_content(data_item);
     }
 
-    if (cbor_value_get_type(bytes_val) != CBOR_TYPE_BYTES) return NULL;
+    cbor_type_t type = cbor_value_get_type(bytes_val);
+
+    // Accept both byte strings (type 2) and text strings (type 3)
+    if (type != CBOR_TYPE_BYTES && type != CBOR_TYPE_STRING) return NULL;
 
     size_t len;
-    const uint8_t *data = cbor_value_get_bytes(bytes_val, &len);
+    const uint8_t *data;
+
+    if (type == CBOR_TYPE_STRING) {
+        // Handle text string (type 3)
+        const char *str = cbor_value_get_string(bytes_val);
+        if (!str) {
+            // Empty string case
+            len = 0;
+            data = NULL;
+        } else {
+            len = strlen(str);
+            data = (const uint8_t *)str;
+        }
+    } else {
+        // Handle byte string (type 2)
+        data = cbor_value_get_bytes(bytes_val, &len);
+    }
+
     // Allow NULL data if len is 0 (empty bytes)
     if (!data && len > 0) return NULL;
 

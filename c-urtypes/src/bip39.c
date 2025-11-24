@@ -198,20 +198,6 @@ bip39_data_t *bip39_from_registry_item(registry_item_t *item) {
 }
 
 // Convenience functions
-uint8_t *bip39_to_cbor(bip39_data_t *bip39, size_t *out_len) {
-    if (!bip39 || !out_len) return NULL;
-
-    registry_item_t *item = bip39_to_registry_item(bip39);
-    if (!item) return NULL;
-
-    uint8_t *cbor_data = registry_item_to_cbor(item, out_len);
-
-    // Free the registry item but not the bip39 data (it's still owned by caller)
-    safe_free(item);
-
-    return cbor_data;
-}
-
 bip39_data_t *bip39_from_cbor(const uint8_t *cbor_data, size_t len) {
     if (!cbor_data || len == 0) return NULL;
 
@@ -233,9 +219,4 @@ char **bip39_get_words(bip39_data_t *bip39, size_t *out_count) {
 
     *out_count = bip39->word_count;
     return bip39->words;
-}
-
-const char *bip39_get_lang(bip39_data_t *bip39) {
-    if (!bip39) return NULL;
-    return bip39->lang;
 }

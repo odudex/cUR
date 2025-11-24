@@ -64,4 +64,8 @@ bool byte_buffer_append_byte(byte_buffer_t *buf, uint8_t byte);
 uint8_t *byte_buffer_get_data(byte_buffer_t *buf);
 size_t byte_buffer_get_len(byte_buffer_t *buf);
 
+// Base58 encoding utilities
+char *base58_encode(const uint8_t *data, size_t len);
+char *base58check_encode(const uint8_t *data, size_t len);
+
 #endif // URTYPES_UTILS_H

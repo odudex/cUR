@@ -9,11 +9,11 @@
 #include "src/bytes_type.h"
 #include "src/psbt.h"
 #include "src/bip39.h"
+#include "src/output.h"
 
 // Forward declarations of MicroPython types
 static const mp_obj_type_t mp_type_urtypes_bytes;
 static const mp_obj_type_t mp_type_urtypes_psbt;
-static const mp_obj_type_t mp_type_urtypes_bip39;
 
 // ============================================================================
 // Bytes Type
@@ -226,164 +226,112 @@ static const mp_obj_type_t mp_type_urtypes_psbt = {
 };
 
 // ============================================================================
-// BIP39 Type
+// BIP39 Function
 // ============================================================================
 
-typedef struct {
-    mp_obj_base_t base;
-    bip39_data_t *bip39;
-} mp_obj_bip39_t;
-
-// BIP39 constructor
-static mp_obj_t bip39_make_new(const mp_obj_type_t *type, size_t n_args,
-                                size_t n_kw, const mp_obj_t *args) {
-    enum { ARG_words, ARG_lang };
-    static const mp_arg_t allowed_args[] = {
-        { MP_QSTR_words, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
-        { MP_QSTR_lang, MP_ARG_OBJ, {.u_obj = mp_const_none} },
-    };
-    mp_arg_val_t parsed_args[MP_ARRAY_SIZE(allowed_args)];
-    mp_arg_parse_all_kw_array(n_args, n_kw, args, MP_ARRAY_SIZE(allowed_args),
-                               allowed_args, parsed_args);
-
-    // Get words array
-    mp_obj_t words_obj = parsed_args[ARG_words].u_obj;
-    size_t word_count;
-    mp_obj_t *word_items;
-    mp_obj_get_array(words_obj, &word_count, &word_items);
-
-    if (word_count == 0) {
-        mp_raise_ValueError("Words array cannot be empty");
-    }
-
-    // Convert Python strings to C strings
-    char **words = malloc(word_count * sizeof(char *));
-    if (!words) {
-        mp_raise_msg(&mp_type_MemoryError, "Failed to allocate words array");
-    }
-
-    for (size_t i = 0; i < word_count; i++) {
-        const char *word_str = mp_obj_str_get_str(word_items[i]);
-        words[i] = (char *)word_str; // Temporary, will be copied by bip39_new
-    }
-
-    // Get lang if provided
-    const char *lang = NULL;
-    if (parsed_args[ARG_lang].u_obj != mp_const_none) {
-        lang = mp_obj_str_get_str(parsed_args[ARG_lang].u_obj);
-    }
-
-    mp_obj_bip39_t *self = m_new_obj(mp_obj_bip39_t);
-    self->base.type = type;
-    self->bip39 = bip39_new(words, word_count, lang);
-
-    free(words);
-
-    if (!self->bip39) {
-        mp_raise_msg(&mp_type_MemoryError, "Failed to create BIP39");
-    }
-
-    return MP_OBJ_FROM_PTR(self);
-}
-
-// BIP39 destructor
-static mp_obj_t bip39_del(mp_obj_t self_in) {
-    mp_obj_bip39_t *self = MP_OBJ_TO_PTR(self_in);
-    if (self->bip39) {
-        bip39_free(self->bip39);
-        self->bip39 = NULL;
-    }
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(bip39_del_obj, bip39_del);
-
-// BIP39.to_cbor() - returns CBOR encoded bytes
-static mp_obj_t bip39_to_cbor_py(mp_obj_t self_in) {
-    mp_obj_bip39_t *self = MP_OBJ_TO_PTR(self_in);
-
-    size_t cbor_len;
-    uint8_t *cbor_data = bip39_to_cbor(self->bip39, &cbor_len);
-
-    if (!cbor_data) {
-        mp_raise_msg(&mp_type_RuntimeError, "Failed to encode BIP39 to CBOR");
-    }
-
-    mp_obj_t result = mp_obj_new_bytes(cbor_data, cbor_len);
-    free(cbor_data);
-
-    return result;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(bip39_to_cbor_obj, bip39_to_cbor_py);
-
-// BIP39.from_cbor(cbor_data) - class method
-static mp_obj_t bip39_from_cbor_py(mp_obj_t cbor_data_in) {
+// BIP39.words_from_cbor(cbor_data) - static function
+// Takes CBOR data and directly returns the list of words
+static mp_obj_t bip39_words_from_cbor_py(mp_obj_t cbor_data_in) {
     mp_buffer_info_t bufinfo;
     mp_get_buffer_raise(cbor_data_in, &bufinfo, MP_BUFFER_READ);
 
+    // Decode CBOR to BIP39
     bip39_data_t *bip39 = bip39_from_cbor((const uint8_t *)bufinfo.buf, bufinfo.len);
     if (!bip39) {
         mp_raise_msg(&mp_type_ValueError, "Failed to decode BIP39 from CBOR");
     }
 
-    // Create Python object
-    mp_obj_bip39_t *self = m_new_obj(mp_obj_bip39_t);
-    self->base.type = &mp_type_urtypes_bip39;
-    self->bip39 = bip39;
-
-    return MP_OBJ_FROM_PTR(self);
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(bip39_from_cbor_obj, bip39_from_cbor_py);
-
-// BIP39.words property - returns list of words
-static mp_obj_t bip39_words_py(mp_obj_t self_in) {
-    mp_obj_bip39_t *self = MP_OBJ_TO_PTR(self_in);
-
+    // Get words
     size_t word_count;
-    char **words = bip39_get_words(self->bip39, &word_count);
+    char **words = bip39_get_words(bip39, &word_count);
 
+    // Create Python list
     mp_obj_t list = mp_obj_new_list(0, NULL);
     for (size_t i = 0; i < word_count; i++) {
         mp_obj_list_append(list, mp_obj_new_str(words[i], strlen(words[i])));
     }
 
+    // Cleanup
+    bip39_free(bip39);
+
     return list;
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(bip39_words_obj, bip39_words_py);
+static MP_DEFINE_CONST_FUN_OBJ_1(bip39_words_from_cbor_obj, bip39_words_from_cbor_py);
 
-// BIP39.lang property - returns language code or None
-static mp_obj_t bip39_lang_py(mp_obj_t self_in) {
-    mp_obj_bip39_t *self = MP_OBJ_TO_PTR(self_in);
-
-    const char *lang = bip39_get_lang(self->bip39);
-    if (lang) {
-        return mp_obj_new_str(lang, strlen(lang));
-    }
-
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(bip39_lang_obj, bip39_lang_py);
-
-// BIP39 locals dict
-static const mp_rom_map_elem_t bip39_locals_dict_table[] = {
-    { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&bip39_del_obj) },
-    { MP_ROM_QSTR(MP_QSTR_to_cbor), MP_ROM_PTR(&bip39_to_cbor_obj) },
-    { MP_ROM_QSTR(MP_QSTR_from_cbor), MP_ROM_PTR(&bip39_from_cbor_obj) },
-    { MP_ROM_QSTR(MP_QSTR_words), MP_ROM_PTR(&bip39_words_obj) },
-    { MP_ROM_QSTR(MP_QSTR_lang), MP_ROM_PTR(&bip39_lang_obj) },
+// BIP39 namespace object (not a type, just a namespace for the static method)
+static const mp_rom_map_elem_t bip39_namespace_locals_dict_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_words_from_cbor), MP_ROM_PTR(&bip39_words_from_cbor_obj) },
 };
-static MP_DEFINE_CONST_DICT(bip39_locals_dict, bip39_locals_dict_table);
+static MP_DEFINE_CONST_DICT(bip39_namespace_locals_dict, bip39_namespace_locals_dict_table);
 
-// BIP39 type definition
 static const mp_obj_type_t mp_type_urtypes_bip39 = {
     { &mp_type_type },
     .name = MP_QSTR_BIP39,
-    .make_new = bip39_make_new,
-    .locals_dict = (mp_obj_dict_t *)&bip39_locals_dict,
+    .locals_dict = (mp_obj_dict_t *)&bip39_namespace_locals_dict,
 };
+
+// ============================================================================
+// Output Descriptor Function
+// ============================================================================
+
+// output_from_cbor(cbor_data) - module function
+// Takes CBOR data and returns output descriptor string
+static mp_obj_t output_from_cbor_py(mp_obj_t cbor_data_in) {
+    mp_buffer_info_t bufinfo;
+    mp_get_buffer_raise(cbor_data_in, &bufinfo, MP_BUFFER_READ);
+
+    // Decode CBOR to Output
+    output_data_t *output = output_from_cbor((const uint8_t *)bufinfo.buf, bufinfo.len);
+    if (!output) {
+        mp_raise_msg(&mp_type_ValueError, "Failed to decode Output from CBOR");
+    }
+
+    // Generate descriptor string with checksum
+    char *descriptor = output_descriptor(output, true);
+    if (!descriptor) {
+        output_free(output);
+        mp_raise_msg(&mp_type_RuntimeError, "Failed to generate output descriptor");
+    }
+
+    // Create Python string from descriptor
+    mp_obj_t result = mp_obj_new_str(descriptor, strlen(descriptor));
+
+    // Cleanup
+    free(descriptor);
+    output_free(output);
+
+    return result;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(output_from_cbor_obj, output_from_cbor_py);
+
+// Output descriptor from Account CBOR (extracts first output)
+static mp_obj_t output_from_cbor_account_py(mp_obj_t cbor_data_in) {
+    mp_buffer_info_t bufinfo;
+    mp_get_buffer_raise(cbor_data_in, &bufinfo, MP_BUFFER_READ);
+
+    // Extract first output descriptor from Account CBOR
+    char *descriptor = output_descriptor_from_cbor_account((const uint8_t *)bufinfo.buf, bufinfo.len);
+    if (!descriptor) {
+        mp_raise_msg(&mp_type_ValueError, "Failed to extract output descriptor from Account CBOR");
+    }
+
+    // Create Python string from descriptor
+    mp_obj_t result = mp_obj_new_str(descriptor, strlen(descriptor));
+
+    // Cleanup
+    free(descriptor);
+
+    return result;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(output_from_cbor_account_obj, output_from_cbor_account_py);
 
 // ============================================================================
 // Module Definition
 // ============================================================================
+
+// Static string constants for UR type names (with hyphens)
+static const mp_obj_str_t crypto_psbt_type_str = {{&mp_type_str}, 0, 11, (const byte*)"crypto-psbt"};
+static const mp_obj_str_t crypto_bip39_type_str = {{&mp_type_str}, 0, 12, (const byte*)"crypto-bip39"};
 
 // Module globals table
 static const mp_rom_map_elem_t urtypes_globals_table[] = {
@@ -391,12 +339,17 @@ static const mp_rom_map_elem_t urtypes_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_Bytes), MP_ROM_PTR(&mp_type_urtypes_bytes) },
     { MP_ROM_QSTR(MP_QSTR_PSBT), MP_ROM_PTR(&mp_type_urtypes_psbt) },
     { MP_ROM_QSTR(MP_QSTR_BIP39), MP_ROM_PTR(&mp_type_urtypes_bip39) },
+    // Module functions
+    { MP_ROM_QSTR(MP_QSTR_output_from_cbor), MP_ROM_PTR(&output_from_cbor_obj) },
+    { MP_ROM_QSTR(MP_QSTR_output_from_cbor_account), MP_ROM_PTR(&output_from_cbor_account_obj) },
     // Tag constants (integers)
     { MP_ROM_QSTR(MP_QSTR_CRYPTO_PSBT_TAG), MP_ROM_INT(CRYPTO_PSBT_TAG) },
     { MP_ROM_QSTR(MP_QSTR_CRYPTO_BIP39_TAG), MP_ROM_INT(CRYPTO_BIP39_TAG) },
-    // Type name constants (strings for UR type field)
-    { MP_ROM_QSTR(MP_QSTR_CRYPTO_PSBT_TYPE), MP_ROM_QSTR(MP_QSTR_crypto_psbt) },
-    { MP_ROM_QSTR(MP_QSTR_CRYPTO_BIP39_TYPE), MP_ROM_QSTR(MP_QSTR_crypto_bip39) },
+    { MP_ROM_QSTR(MP_QSTR_CRYPTO_ACCOUNT_TAG), MP_ROM_INT(CRYPTO_ACCOUNT_TAG) },
+    { MP_ROM_QSTR(MP_QSTR_CRYPTO_OUTPUT_TAG), MP_ROM_INT(CRYPTO_OUTPUT_TAG) },
+    // Type name constants (strings for UR type field - with proper hyphens)
+    { MP_ROM_QSTR(MP_QSTR_CRYPTO_PSBT_TYPE), MP_ROM_PTR(&crypto_psbt_type_str) },
+    { MP_ROM_QSTR(MP_QSTR_CRYPTO_BIP39_TYPE), MP_ROM_PTR(&crypto_bip39_type_str) },
 };
 static MP_DEFINE_CONST_DICT(urtypes_globals, urtypes_globals_table);
 
