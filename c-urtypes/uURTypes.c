@@ -11,219 +11,127 @@
 #include "src/bip39.h"
 #include "src/output.h"
 
-// Forward declarations of MicroPython types
-static const mp_obj_type_t mp_type_urtypes_bytes;
-static const mp_obj_type_t mp_type_urtypes_psbt;
-
 // ============================================================================
-// Bytes Type
+// Bytes Functions
 // ============================================================================
 
-typedef struct {
-    mp_obj_base_t base;
-    bytes_data_t *bytes;
-} mp_obj_bytes_t;
-
-// Bytes constructor
-static mp_obj_t bytes_make_new(const mp_obj_type_t *type, size_t n_args,
-                                size_t n_kw, const mp_obj_t *args) {
-    mp_arg_check_num(n_args, n_kw, 1, 1, false);
-
-    // Get bytes data from argument
-    mp_buffer_info_t bufinfo;
-    mp_get_buffer_raise(args[0], &bufinfo, MP_BUFFER_READ);
-
-    mp_obj_bytes_t *self = m_new_obj(mp_obj_bytes_t);
-    self->base.type = type;
-    self->bytes = bytes_new((const uint8_t *)bufinfo.buf, bufinfo.len);
-
-    if (!self->bytes) {
-        mp_raise_msg(&mp_type_MemoryError, "Failed to create Bytes");
-    }
-
-    return MP_OBJ_FROM_PTR(self);
-}
-
-// Bytes destructor
-static mp_obj_t bytes_del(mp_obj_t self_in) {
-    mp_obj_bytes_t *self = MP_OBJ_TO_PTR(self_in);
-    if (self->bytes) {
-        bytes_free(self->bytes);
-        self->bytes = NULL;
-    }
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(bytes_del_obj, bytes_del);
-
-// Bytes.to_cbor() - returns CBOR encoded bytes
-static mp_obj_t bytes_to_cbor_py(mp_obj_t self_in) {
-    mp_obj_bytes_t *self = MP_OBJ_TO_PTR(self_in);
-
-    size_t cbor_len;
-    uint8_t *cbor_data = bytes_to_cbor(self->bytes, &cbor_len);
-
-    if (!cbor_data) {
-        mp_raise_msg(&mp_type_RuntimeError, "Failed to encode Bytes to CBOR");
-    }
-
-    mp_obj_t result = mp_obj_new_bytes(cbor_data, cbor_len);
-    free(cbor_data);
-
-    return result;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(bytes_to_cbor_obj, bytes_to_cbor_py);
-
-// Bytes.from_cbor(cbor_data) - class method
+// bytes_from_cbor(cbor_data) - module function
+// Takes CBOR data and directly returns the raw bytes
 static mp_obj_t bytes_from_cbor_py(mp_obj_t cbor_data_in) {
     mp_buffer_info_t bufinfo;
     mp_get_buffer_raise(cbor_data_in, &bufinfo, MP_BUFFER_READ);
 
+    // Decode CBOR to Bytes
     bytes_data_t *bytes = bytes_from_cbor((const uint8_t *)bufinfo.buf, bufinfo.len);
     if (!bytes) {
         mp_raise_msg(&mp_type_ValueError, "Failed to decode Bytes from CBOR");
     }
 
-    // Create Python object
-    mp_obj_bytes_t *self = m_new_obj(mp_obj_bytes_t);
-    self->base.type = &mp_type_urtypes_bytes;
-    self->bytes = bytes;
-
-    return MP_OBJ_FROM_PTR(self);
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(bytes_from_cbor_obj, bytes_from_cbor_py);
-
-// Bytes.data property - returns the raw bytes
-static mp_obj_t bytes_data_py(mp_obj_t self_in) {
-    mp_obj_bytes_t *self = MP_OBJ_TO_PTR(self_in);
-
+    // Get raw bytes data
     size_t len;
-    const uint8_t *data = bytes_get_data(self->bytes, &len);
+    const uint8_t *data = bytes_get_data(bytes, &len);
 
-    return mp_obj_new_bytes(data, len);
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(bytes_data_obj, bytes_data_py);
+    // Create Python bytes object
+    mp_obj_t result = mp_obj_new_bytes(data, len);
 
-// Bytes locals dict
-static const mp_rom_map_elem_t bytes_locals_dict_table[] = {
-    { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&bytes_del_obj) },
-    { MP_ROM_QSTR(MP_QSTR_to_cbor), MP_ROM_PTR(&bytes_to_cbor_obj) },
-    { MP_ROM_QSTR(MP_QSTR_from_cbor), MP_ROM_PTR(&bytes_from_cbor_obj) },
-    { MP_ROM_QSTR(MP_QSTR_data), MP_ROM_PTR(&bytes_data_obj) },
-};
-static MP_DEFINE_CONST_DICT(bytes_locals_dict, bytes_locals_dict_table);
-
-// Bytes type definition
-static const mp_obj_type_t mp_type_urtypes_bytes = {
-    { &mp_type_type },
-    .name = MP_QSTR_Bytes,
-    .make_new = bytes_make_new,
-    .locals_dict = (mp_obj_dict_t *)&bytes_locals_dict,
-};
-
-// ============================================================================
-// PSBT Type
-// ============================================================================
-
-typedef struct {
-    mp_obj_base_t base;
-    psbt_data_t *psbt;
-} mp_obj_psbt_t;
-
-// PSBT constructor
-static mp_obj_t psbt_make_new(const mp_obj_type_t *type, size_t n_args,
-                               size_t n_kw, const mp_obj_t *args) {
-    mp_arg_check_num(n_args, n_kw, 1, 1, false);
-
-    // Get bytes data from argument
-    mp_buffer_info_t bufinfo;
-    mp_get_buffer_raise(args[0], &bufinfo, MP_BUFFER_READ);
-
-    mp_obj_psbt_t *self = m_new_obj(mp_obj_psbt_t);
-    self->base.type = type;
-    self->psbt = psbt_new((const uint8_t *)bufinfo.buf, bufinfo.len);
-
-    if (!self->psbt) {
-        mp_raise_msg(&mp_type_MemoryError, "Failed to create PSBT");
-    }
-
-    return MP_OBJ_FROM_PTR(self);
-}
-
-// PSBT destructor
-static mp_obj_t psbt_del(mp_obj_t self_in) {
-    mp_obj_psbt_t *self = MP_OBJ_TO_PTR(self_in);
-    if (self->psbt) {
-        psbt_free(self->psbt);
-        self->psbt = NULL;
-    }
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(psbt_del_obj, psbt_del);
-
-// PSBT.to_cbor() - returns CBOR encoded bytes
-static mp_obj_t psbt_to_cbor_py(mp_obj_t self_in) {
-    mp_obj_psbt_t *self = MP_OBJ_TO_PTR(self_in);
-
-    size_t cbor_len;
-    uint8_t *cbor_data = psbt_to_cbor(self->psbt, &cbor_len);
-
-    if (!cbor_data) {
-        mp_raise_msg(&mp_type_RuntimeError, "Failed to encode PSBT to CBOR");
-    }
-
-    mp_obj_t result = mp_obj_new_bytes(cbor_data, cbor_len);
-    free(cbor_data);
+    // Cleanup
+    bytes_free(bytes);
 
     return result;
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(psbt_to_cbor_obj, psbt_to_cbor_py);
+static MP_DEFINE_CONST_FUN_OBJ_1(bytes_from_cbor_obj, bytes_from_cbor_py);
 
-// PSBT.from_cbor(cbor_data) - class method
+// bytes_to_cbor(bytes_data) - module function
+// Takes raw bytes and returns CBOR encoded bytes
+static mp_obj_t bytes_to_cbor_py(mp_obj_t bytes_data_in) {
+    mp_buffer_info_t bufinfo;
+    mp_get_buffer_raise(bytes_data_in, &bufinfo, MP_BUFFER_READ);
+
+    // Create Bytes from raw bytes
+    bytes_data_t *bytes = bytes_new((const uint8_t *)bufinfo.buf, bufinfo.len);
+    if (!bytes) {
+        mp_raise_msg(&mp_type_MemoryError, "Failed to create Bytes");
+    }
+
+    // Encode to CBOR
+    size_t cbor_len;
+    uint8_t *cbor_data = bytes_to_cbor(bytes, &cbor_len);
+    if (!cbor_data) {
+        bytes_free(bytes);
+        mp_raise_msg(&mp_type_RuntimeError, "Failed to encode Bytes to CBOR");
+    }
+
+    // Create Python bytes object
+    mp_obj_t result = mp_obj_new_bytes(cbor_data, cbor_len);
+
+    // Cleanup
+    free(cbor_data);
+    bytes_free(bytes);
+
+    return result;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(bytes_to_cbor_obj, bytes_to_cbor_py);
+
+// ============================================================================
+// PSBT Functions
+// ============================================================================
+
+// psbt_from_cbor(cbor_data) - module function
+// Takes CBOR data and directly returns the raw PSBT bytes
 static mp_obj_t psbt_from_cbor_py(mp_obj_t cbor_data_in) {
     mp_buffer_info_t bufinfo;
     mp_get_buffer_raise(cbor_data_in, &bufinfo, MP_BUFFER_READ);
 
+    // Decode CBOR to PSBT
     psbt_data_t *psbt = psbt_from_cbor((const uint8_t *)bufinfo.buf, bufinfo.len);
     if (!psbt) {
         mp_raise_msg(&mp_type_ValueError, "Failed to decode PSBT from CBOR");
     }
 
-    // Create Python object
-    mp_obj_psbt_t *self = m_new_obj(mp_obj_psbt_t);
-    self->base.type = &mp_type_urtypes_psbt;
-    self->psbt = psbt;
+    // Get raw PSBT data
+    size_t len;
+    const uint8_t *data = psbt_get_data(psbt, &len);
 
-    return MP_OBJ_FROM_PTR(self);
+    // Create Python bytes object
+    mp_obj_t result = mp_obj_new_bytes(data, len);
+
+    // Cleanup
+    psbt_free(psbt);
+
+    return result;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(psbt_from_cbor_obj, psbt_from_cbor_py);
 
-// PSBT.data property - returns the raw bytes
-static mp_obj_t psbt_data_py(mp_obj_t self_in) {
-    mp_obj_psbt_t *self = MP_OBJ_TO_PTR(self_in);
+// psbt_to_cbor(psbt_data) - module function
+// Takes raw PSBT bytes and returns CBOR encoded bytes
+static mp_obj_t psbt_to_cbor_py(mp_obj_t psbt_data_in) {
+    mp_buffer_info_t bufinfo;
+    mp_get_buffer_raise(psbt_data_in, &bufinfo, MP_BUFFER_READ);
 
-    size_t len;
-    const uint8_t *data = psbt_get_data(self->psbt, &len);
+    // Create PSBT from raw bytes
+    psbt_data_t *psbt = psbt_new((const uint8_t *)bufinfo.buf, bufinfo.len);
+    if (!psbt) {
+        mp_raise_msg(&mp_type_MemoryError, "Failed to create PSBT");
+    }
 
-    return mp_obj_new_bytes(data, len);
+    // Encode to CBOR
+    size_t cbor_len;
+    uint8_t *cbor_data = psbt_to_cbor(psbt, &cbor_len);
+    if (!cbor_data) {
+        psbt_free(psbt);
+        mp_raise_msg(&mp_type_RuntimeError, "Failed to encode PSBT to CBOR");
+    }
+
+    // Create Python bytes object
+    mp_obj_t result = mp_obj_new_bytes(cbor_data, cbor_len);
+
+    // Cleanup
+    free(cbor_data);
+    psbt_free(psbt);
+
+    return result;
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(psbt_data_obj, psbt_data_py);
-
-// PSBT locals dict
-static const mp_rom_map_elem_t psbt_locals_dict_table[] = {
-    { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&psbt_del_obj) },
-    { MP_ROM_QSTR(MP_QSTR_to_cbor), MP_ROM_PTR(&psbt_to_cbor_obj) },
-    { MP_ROM_QSTR(MP_QSTR_from_cbor), MP_ROM_PTR(&psbt_from_cbor_obj) },
-    { MP_ROM_QSTR(MP_QSTR_data), MP_ROM_PTR(&psbt_data_obj) },
-};
-static MP_DEFINE_CONST_DICT(psbt_locals_dict, psbt_locals_dict_table);
-
-// PSBT type definition
-static const mp_obj_type_t mp_type_urtypes_psbt = {
-    { &mp_type_type },
-    .name = MP_QSTR_PSBT,
-    .make_new = psbt_make_new,
-    .locals_dict = (mp_obj_dict_t *)&psbt_locals_dict,
-};
+static MP_DEFINE_CONST_FUN_OBJ_1(psbt_to_cbor_obj, psbt_to_cbor_py);
 
 // ============================================================================
 // BIP39 Function
@@ -336,10 +244,12 @@ static const mp_obj_str_t crypto_bip39_type_str = {{&mp_type_str}, 0, 12, (const
 // Module globals table
 static const mp_rom_map_elem_t urtypes_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_uURTypes) },
-    { MP_ROM_QSTR(MP_QSTR_Bytes), MP_ROM_PTR(&mp_type_urtypes_bytes) },
-    { MP_ROM_QSTR(MP_QSTR_PSBT), MP_ROM_PTR(&mp_type_urtypes_psbt) },
     { MP_ROM_QSTR(MP_QSTR_BIP39), MP_ROM_PTR(&mp_type_urtypes_bip39) },
     // Module functions
+    { MP_ROM_QSTR(MP_QSTR_bytes_from_cbor), MP_ROM_PTR(&bytes_from_cbor_obj) },
+    { MP_ROM_QSTR(MP_QSTR_bytes_to_cbor), MP_ROM_PTR(&bytes_to_cbor_obj) },
+    { MP_ROM_QSTR(MP_QSTR_psbt_from_cbor), MP_ROM_PTR(&psbt_from_cbor_obj) },
+    { MP_ROM_QSTR(MP_QSTR_psbt_to_cbor), MP_ROM_PTR(&psbt_to_cbor_obj) },
     { MP_ROM_QSTR(MP_QSTR_output_from_cbor), MP_ROM_PTR(&output_from_cbor_obj) },
     { MP_ROM_QSTR(MP_QSTR_output_from_cbor_account), MP_ROM_PTR(&output_from_cbor_account_obj) },
     // Tag constants (integers)
