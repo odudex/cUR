@@ -762,63 +762,157 @@ static void reduce_mixed_by(fountain_decoder_t *const decoder,
     return;
 
   mixed_parts_hash_t *hash = decoder->mixed_parts_hash;
-  mixed_parts_hash_t *new_hash = safe_malloc(sizeof(mixed_parts_hash_t));
-  if (!new_hash || !mixed_hash_init(new_hash, hash->capacity)) {
-    if (new_hash)
-      free(new_hash);
+
+  // Collect entries that need removal (simple parts) or rehashing (bucket changed)
+  // We can't modify the hash table while iterating, so collect first
+  size_t max_entries = hash->count;
+  hash_entry_t **to_remove = safe_malloc(max_entries * sizeof(hash_entry_t *));
+  size_t remove_count = 0;
+
+  // Track entries that need rehashing (their key changed, so bucket may change)
+  hash_entry_t **to_rehash = safe_malloc(max_entries * sizeof(hash_entry_t *));
+  size_t *old_buckets = safe_malloc(max_entries * sizeof(size_t));
+  size_t rehash_count = 0;
+
+  if (!to_remove || !to_rehash || !old_buckets) {
+    free(to_remove);
+    free(to_rehash);
+    free(old_buckets);
     return;
   }
 
-  // Reduce all entries in the current hash
+  // First pass: reduce entries in-place, mark for removal or rehashing
   for (size_t i = 0; i < hash->capacity; i++) {
     hash_entry_t *entry = hash->buckets[i];
     while (entry) {
-      decoder_part_t reduced_part = {0};
-      reduced_part.indexes.indexes = NULL;
-      reduced_part.indexes.count = 0;
-      reduced_part.indexes.capacity = 0;
-      reduced_part.data = NULL;
-      reduced_part.data_len = 0;
+      hash_entry_t *next = entry->next; // Save next before potential modification
 
-      if (reduce_part_by_part(&entry->value, part, &reduced_part)) {
-        // Part was actually reduced
-        if (is_simple_part(&reduced_part)) {
-#ifdef DEBUG_STATS
-          decoder->mixed_parts_useful++; // This reduction led to a simple part!
-#endif
-          size_t fragment_idx = get_part_index(&reduced_part);
-          if (!part_indexes_contains(&decoder->received_part_indexes,
-                                     fragment_idx)) {
-            queue_enqueue(&decoder->queue, &reduced_part);
-          }
-          decoder_part_free(&reduced_part);
-        } else {
-          // Add reduced part to new hash
-          mixed_hash_put(new_hash, &reduced_part.indexes, &reduced_part);
-          decoder_part_free(&reduced_part);
-        }
-      } else {
-        // Part wasn't reduced - keep original (must copy since we're freeing
-        // old hash)
-        if (!decoder_part_copy(&entry->value, &reduced_part)) {
-          entry = entry->next;
+      // Check if this entry can be reduced by the given part
+      if (part_indexes_is_strict_subset(&part->indexes, &entry->key)) {
+        // Reduce the entry in-place
+        part_indexes_t new_indexes = {0};
+        if (!part_indexes_difference(&entry->key, &part->indexes, &new_indexes)) {
+          entry = next;
           continue;
         }
-        mixed_hash_put(new_hash, &reduced_part.indexes, &reduced_part);
-        decoder_part_free(&reduced_part);
+
+        // XOR the data in-place
+        for (size_t j = 0; j < entry->value.data_len && j < part->data_len; j++) {
+          entry->value.data[j] ^= part->data[j];
+        }
+
+        // Update the indexes (free old, assign new)
+        if (entry->key.indexes) {
+          free(entry->key.indexes);
+        }
+        entry->key = new_indexes;
+
+        // Also update the value's indexes
+        if (entry->value.indexes.indexes) {
+          free(entry->value.indexes.indexes);
+        }
+        entry->value.indexes.indexes = NULL;
+        entry->value.indexes.count = 0;
+        entry->value.indexes.capacity = 0;
+        part_indexes_copy(&new_indexes, &entry->value.indexes);
+
+        if (is_simple_part(&entry->value)) {
+          // Mark for removal and queue
+#ifdef DEBUG_STATS
+          decoder->mixed_parts_useful++;
+#endif
+          size_t fragment_idx = get_part_index(&entry->value);
+          if (!part_indexes_contains(&decoder->received_part_indexes, fragment_idx)) {
+            queue_enqueue(&decoder->queue, &entry->value);
+          }
+          to_remove[remove_count++] = entry;
+        } else {
+          // Check if bucket changed (key hash changed)
+          size_t new_bucket = hash_indexes(&entry->key) % hash->capacity;
+          if (new_bucket != i) {
+            // Entry needs to move to a different bucket
+            to_rehash[rehash_count] = entry;
+            old_buckets[rehash_count] = i;
+            rehash_count++;
+          }
+        }
       }
 
-      entry = entry->next;
+      entry = next;
     }
   }
 
-  // Replace old hash with new hash
-  mixed_hash_free(hash);
-  *hash = *new_hash;
-  free(new_hash);
+  // Second pass: remove entries that became simple parts
+  for (size_t i = 0; i < remove_count; i++) {
+    hash_entry_t *entry = to_remove[i];
+    size_t bucket = hash_indexes(&entry->key) % hash->capacity;
+
+    // Find and unlink from bucket chain
+    hash_entry_t *curr = hash->buckets[bucket];
+    hash_entry_t *prev = NULL;
+    while (curr) {
+      if (curr == entry) {
+        if (prev) {
+          prev->next = curr->next;
+        } else {
+          hash->buckets[bucket] = curr->next;
+        }
+        // Free the entry
+        decoder_part_free(&entry->value);
+        if (entry->key.indexes) {
+          free(entry->key.indexes);
+        }
+        free(entry);
+        hash->count--;
+        break;
+      }
+      prev = curr;
+      curr = curr->next;
+    }
+  }
+
+  // Third pass: rehash entries that changed buckets
+  for (size_t i = 0; i < rehash_count; i++) {
+    hash_entry_t *entry = to_rehash[i];
+    size_t old_bucket = old_buckets[i];
+    size_t new_bucket = hash_indexes(&entry->key) % hash->capacity;
+
+    // Skip if entry was already removed (became simple part)
+    bool was_removed = false;
+    for (size_t j = 0; j < remove_count; j++) {
+      if (to_remove[j] == entry) {
+        was_removed = true;
+        break;
+      }
+    }
+    if (was_removed) continue;
+
+    // Unlink from old bucket
+    hash_entry_t *curr = hash->buckets[old_bucket];
+    hash_entry_t *prev = NULL;
+    while (curr) {
+      if (curr == entry) {
+        if (prev) {
+          prev->next = curr->next;
+        } else {
+          hash->buckets[old_bucket] = curr->next;
+        }
+        break;
+      }
+      prev = curr;
+      curr = curr->next;
+    }
+
+    // Insert into new bucket
+    entry->next = hash->buckets[new_bucket];
+    hash->buckets[new_bucket] = entry;
+  }
+
+  free(to_remove);
+  free(to_rehash);
+  free(old_buckets);
 
 #ifdef DEBUG_STATS
-  // Update maximum tracking
   if (hash->count > decoder->maximum_mixed_parts) {
     decoder->maximum_mixed_parts = hash->count;
   }
