@@ -32,8 +32,8 @@ static void test_output_pkh_ec() {
     sprintf(expected_full, "%s%s", expected_descriptor, expected_checksum);
     ASSERT_STRING_EQUAL(descriptor_with_checksum, expected_full, "Descriptor with checksum mismatch");
 
-    safe_free(descriptor);
-    safe_free(descriptor_with_checksum);
+    free(descriptor);
+    free(descriptor_with_checksum);
     output_free(output);
 }
 
@@ -56,7 +56,7 @@ static void test_output_sh_wpkh_ec() {
     ASSERT_NOT_NULL(descriptor, "Failed to generate descriptor");
     ASSERT_STRING_EQUAL(descriptor, expected_descriptor, "Descriptor mismatch");
 
-    safe_free(descriptor);
+    free(descriptor);
     output_free(output);
 }
 
@@ -83,7 +83,7 @@ static void test_output_sh_multi_ec() {
     ASSERT_NOT_NULL(descriptor, "Failed to generate descriptor");
     ASSERT_STRING_EQUAL(descriptor, expected_descriptor, "Descriptor mismatch");
 
-    safe_free(descriptor);
+    free(descriptor);
     output_free(output);
 }
 
@@ -112,7 +112,7 @@ static void test_output_pkh_hd() {
     ASSERT_NOT_NULL(descriptor, "Failed to generate descriptor");
     ASSERT_STRING_EQUAL(descriptor, expected_descriptor, "Descriptor mismatch");
 
-    safe_free(descriptor);
+    free(descriptor);
     output_free(output);
 }
 

@@ -23,7 +23,7 @@ keypath_data_t *keypath_new(path_component_t *components, size_t component_count
     if (component_count > 0 && components) {
         keypath->components = safe_malloc(component_count * sizeof(path_component_t));
         if (!keypath->components) {
-            safe_free(keypath);
+            free(keypath);
             return NULL;
         }
         memcpy(keypath->components, components, component_count * sizeof(path_component_t));
@@ -35,8 +35,8 @@ keypath_data_t *keypath_new(path_component_t *components, size_t component_count
     if (source_fingerprint) {
         keypath->source_fingerprint = safe_malloc(4);
         if (!keypath->source_fingerprint) {
-            safe_free(keypath->components);
-            safe_free(keypath);
+            free(keypath->components);
+            free(keypath);
             return NULL;
         }
         memcpy(keypath->source_fingerprint, source_fingerprint, 4);
@@ -49,16 +49,16 @@ keypath_data_t *keypath_new(path_component_t *components, size_t component_count
 
 void keypath_free(keypath_data_t *keypath) {
     if (!keypath) return;
-    safe_free(keypath->components);
-    safe_free(keypath->source_fingerprint);
-    safe_free(keypath);
+    free(keypath->components);
+    free(keypath->source_fingerprint);
+    free(keypath);
 }
 
 static void keypath_item_free(registry_item_t *item) {
     if (!item) return;
     keypath_data_t *keypath = (keypath_data_t *)item->data;
     keypath_free(keypath);
-    safe_free(item);
+    free(item);
 }
 
 // Parse Keypath from CBOR data item
@@ -89,7 +89,7 @@ registry_item_t *keypath_from_data_item(cbor_value_t *data_item) {
             cbor_value_t *hardened_val = cbor_value_get_array_item(components_val, i * 2 + 1);
 
             if (!hardened_val || cbor_value_get_type(hardened_val) != CBOR_TYPE_BOOL) {
-                safe_free(components);
+                free(components);
                 return NULL;
             }
 
@@ -107,7 +107,7 @@ registry_item_t *keypath_from_data_item(cbor_value_t *data_item) {
                 components[i].index = (uint32_t)cbor_value_get_uint(index_val);
                 components[i].hardened = hardened;
             } else {
-                safe_free(components);
+                free(components);
                 return NULL;
             }
         }
@@ -136,8 +136,8 @@ registry_item_t *keypath_from_data_item(cbor_value_t *data_item) {
     }
 
     keypath_data_t *keypath = keypath_new(components, component_count, source_fingerprint, depth);
-    safe_free(components);
-    safe_free(source_fingerprint);
+    free(components);
+    free(source_fingerprint);
 
     if (!keypath) return NULL;
 
@@ -175,7 +175,7 @@ keypath_data_t *keypath_from_cbor(const uint8_t *cbor_data, size_t len) {
 
     // Transfer ownership
     item->data = NULL;
-    safe_free(item);
+    free(item);
 
     return keypath;
 }

@@ -31,22 +31,22 @@ hd_key_data_t *hd_key_new(void) {
 void hd_key_free(hd_key_data_t *hd_key) {
     if (!hd_key) return;
 
-    safe_free(hd_key->key);
-    safe_free(hd_key->chain_code);
-    safe_free(hd_key->private_key);
-    safe_free(hd_key->parent_fingerprint);
+    free(hd_key->key);
+    free(hd_key->chain_code);
+    free(hd_key->private_key);
+    free(hd_key->parent_fingerprint);
 
     if (hd_key->origin) keypath_free(hd_key->origin);
     if (hd_key->children) keypath_free(hd_key->children);
 
-    safe_free(hd_key);
+    free(hd_key);
 }
 
 static void hd_key_item_free(registry_item_t *item) {
     if (!item) return;
     hd_key_data_t *hd_key = (hd_key_data_t *)item->data;
     hd_key_free(hd_key);
-    safe_free(item);
+    free(item);
 }
 
 // Parse HDKey from CBOR data item
@@ -121,7 +121,7 @@ registry_item_t *hd_key_from_data_item(cbor_value_t *data_item) {
         registry_item_t *origin_item = keypath_from_data_item(origin_content);
         if (origin_item) {
             hd_key->origin = keypath_from_registry_item(origin_item);
-            safe_free(origin_item);  // Transfer ownership
+            free(origin_item);  // Transfer ownership
         }
     }
 
@@ -136,7 +136,7 @@ registry_item_t *hd_key_from_data_item(cbor_value_t *data_item) {
         registry_item_t *children_item = keypath_from_data_item(children_content);
         if (children_item) {
             hd_key->children = keypath_from_registry_item(children_item);
-            safe_free(children_item);  // Transfer ownership
+            free(children_item);  // Transfer ownership
         }
     }
 
@@ -190,7 +190,7 @@ hd_key_data_t *hd_key_from_cbor(const uint8_t *cbor_data, size_t len) {
 
     // Transfer ownership
     item->data = NULL;
-    safe_free(item);
+    free(item);
 
     return hd_key;
 }
@@ -311,7 +311,7 @@ char *hd_key_bip32_key(hd_key_data_t *hd_key, bool include_derivation_path) {
         if (derivation) {
             sprintf(derivation, "[%s/%s]", fp_hex, path);
         }
-        safe_free(path);
+        free(path);
     }
 
     char *child_derivation = NULL;
@@ -322,7 +322,7 @@ char *hd_key_bip32_key(hd_key_data_t *hd_key, bool include_derivation_path) {
         if (child_derivation) {
             sprintf(child_derivation, "/%s", child_path);
         }
-        safe_free(child_path);
+        free(child_path);
     }
 
     // Concatenate: derivation + xpub + child_derivation
@@ -332,9 +332,9 @@ char *hd_key_bip32_key(hd_key_data_t *hd_key, bool include_derivation_path) {
 
     char *result = safe_malloc(total_len);
     if (!result) {
-        safe_free(xpub);
-        safe_free(derivation);
-        safe_free(child_derivation);
+        free(xpub);
+        free(derivation);
+        free(child_derivation);
         return NULL;
     }
 
@@ -343,9 +343,9 @@ char *hd_key_bip32_key(hd_key_data_t *hd_key, bool include_derivation_path) {
     strcat(result, xpub);
     if (child_derivation) strcat(result, child_derivation);
 
-    safe_free(xpub);
-    safe_free(derivation);
-    safe_free(child_derivation);
+    free(xpub);
+    free(derivation);
+    free(child_derivation);
 
     return result;
 }

@@ -52,7 +52,7 @@ output_data_t *output_new(void) {
 void output_free(output_data_t *output) {
     if (!output) return;
 
-    safe_free(output->script_expressions);
+    free(output->script_expressions);
 
     // Free the appropriate key type
     switch (output->key_type) {
@@ -67,14 +67,14 @@ void output_free(output_data_t *output) {
             break;
     }
 
-    safe_free(output);
+    free(output);
 }
 
 static void output_item_free(registry_item_t *item) {
     if (!item) return;
     output_data_t *output = (output_data_t *)item->data;
     output_free(output);
-    safe_free(item);
+    free(item);
 }
 
 // Parse Output from CBOR data item
@@ -100,7 +100,7 @@ registry_item_t *output_from_data_item(cbor_value_t *data_item) {
             script_expression_t **new_exprs = safe_realloc(expressions,
                                                            expr_count * sizeof(script_expression_t *));
             if (!new_exprs) {
-                safe_free(expressions);
+                free(expressions);
                 output_free(output);
                 return NULL;
             }
@@ -152,12 +152,12 @@ registry_item_t *output_from_data_item(cbor_value_t *data_item) {
         }
         hd_key_data_t *hd_key = hd_key_from_registry_item(item);
         if (!hd_key) {
-            safe_free(item);
+            free(item);
             output_free(output);
             return NULL;
         }
         item->data = NULL;  // Transfer ownership
-        safe_free(item);
+        free(item);
         output->key_type = KEY_TYPE_HD;
         output->crypto_key.hd_key = hd_key;
     } else {
@@ -173,12 +173,12 @@ registry_item_t *output_from_data_item(cbor_value_t *data_item) {
         }
         ec_key_data_t *ec_key = ec_key_from_registry_item(item);
         if (!ec_key) {
-            safe_free(item);
+            free(item);
             output_free(output);
             return NULL;
         }
         item->data = NULL;  // Transfer ownership
-        safe_free(item);
+        free(item);
         output->key_type = KEY_TYPE_EC;
         output->crypto_key.ec_key = ec_key;
     }
@@ -217,7 +217,7 @@ output_data_t *output_from_cbor(const uint8_t *cbor_data, size_t len) {
 
     // Transfer ownership
     item->data = NULL;
-    safe_free(item);
+    free(item);
 
     return output;
 }
@@ -307,13 +307,13 @@ char *output_descriptor(output_data_t *output, bool include_checksum) {
         char *key_str = ec_key_descriptor_key(output->crypto_key.ec_key);
         if (key_str) {
             byte_buffer_append(buf, (const uint8_t *)key_str, strlen(key_str));
-            safe_free(key_str);
+            free(key_str);
         }
     } else if (output->key_type == KEY_TYPE_HD) {
         char *key_str = hd_key_descriptor_key(output->crypto_key.hd_key);
         if (key_str) {
             byte_buffer_append(buf, (const uint8_t *)key_str, strlen(key_str));
-            safe_free(key_str);
+            free(key_str);
         }
     } else if (output->key_type == KEY_TYPE_MULTI) {
         multi_key_data_t *mk = output->crypto_key.multi_key;
@@ -323,7 +323,7 @@ char *output_descriptor(output_data_t *output, bool include_checksum) {
             char *key_str = ec_key_descriptor_key(mk->ec_keys[i]);
             if (key_str) {
                 byte_buffer_append(buf, (const uint8_t *)key_str, strlen(key_str));
-                safe_free(key_str);
+                free(key_str);
             }
             if (i < mk->ec_key_count - 1 || mk->hd_key_count > 0) {
                 byte_buffer_append_byte(buf, ',');
@@ -335,7 +335,7 @@ char *output_descriptor(output_data_t *output, bool include_checksum) {
             char *key_str = hd_key_descriptor_key(mk->hd_keys[i]);
             if (key_str) {
                 byte_buffer_append(buf, (const uint8_t *)key_str, strlen(key_str));
-                safe_free(key_str);
+                free(key_str);
             }
             if (i < mk->hd_key_count - 1) {
                 byte_buffer_append_byte(buf, ',');
@@ -362,11 +362,11 @@ char *output_descriptor(output_data_t *output, bool include_checksum) {
             char *result = safe_malloc(desc_len + 1 + 8 + 1);  // descriptor + # + checksum + null
             if (result) {
                 sprintf(result, "%s#%s", descriptor, checksum);
-                safe_free(descriptor);
-                safe_free(checksum);
+                free(descriptor);
+                free(checksum);
                 return result;
             }
-            safe_free(checksum);
+            free(checksum);
         }
     }
 
@@ -420,7 +420,7 @@ char *output_descriptor_from_cbor_account(const uint8_t *account_cbor, size_t le
 
     output_data_t *output = output_from_registry_item(output_item);
     if (!output) {
-        safe_free(output_item);
+        free(output_item);
         cbor_value_free(cbor_val);
         return NULL;
     }
@@ -430,7 +430,7 @@ char *output_descriptor_from_cbor_account(const uint8_t *account_cbor, size_t le
 
     // Cleanup
     output_item->data = NULL;  // Prevent double free
-    safe_free(output_item);
+    free(output_item);
     cbor_value_free(cbor_val);
     output_free(output);
 

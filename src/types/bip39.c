@@ -20,7 +20,7 @@ bip39_data_t *bip39_new(char **words, size_t word_count, const char *lang) {
     // Copy words array
     bip39->words = safe_malloc(word_count * sizeof(char *));
     if (!bip39->words) {
-        safe_free(bip39);
+        free(bip39);
         return NULL;
     }
 
@@ -29,10 +29,10 @@ bip39_data_t *bip39_new(char **words, size_t word_count, const char *lang) {
         if (!bip39->words[i]) {
             // Free previously allocated words
             for (size_t j = 0; j < i; j++) {
-                safe_free(bip39->words[j]);
+                free(bip39->words[j]);
             }
-            safe_free(bip39->words);
-            safe_free(bip39);
+            free(bip39->words);
+            free(bip39);
             return NULL;
         }
     }
@@ -48,13 +48,13 @@ void bip39_free(bip39_data_t *bip39) {
 
     if (bip39->words) {
         for (size_t i = 0; i < bip39->word_count; i++) {
-            safe_free(bip39->words[i]);
+            free(bip39->words[i]);
         }
-        safe_free(bip39->words);
+        free(bip39->words);
     }
 
-    safe_free(bip39->lang);
-    safe_free(bip39);
+    free(bip39->lang);
+    free(bip39);
 }
 
 static void bip39_item_free(registry_item_t *item) {
@@ -62,7 +62,7 @@ static void bip39_item_free(registry_item_t *item) {
 
     bip39_data_t *bip39 = (bip39_data_t *)item->data;
     bip39_free(bip39);
-    safe_free(item);
+    free(item);
 }
 
 // CBOR conversion functions
@@ -137,9 +137,9 @@ registry_item_t *bip39_from_data_item(cbor_value_t *data_item) {
         cbor_value_t *word_val = cbor_value_get_array_item(words_array, i);
         if (!word_val || cbor_value_get_type(word_val) != CBOR_TYPE_STRING) {
             for (size_t j = 0; j < i; j++) {
-                safe_free(words[j]);
+                free(words[j]);
             }
-            safe_free(words);
+            free(words);
             return NULL;
         }
 
@@ -147,9 +147,9 @@ registry_item_t *bip39_from_data_item(cbor_value_t *data_item) {
         words[i] = safe_strdup(word_str);
         if (!words[i]) {
             for (size_t j = 0; j < i; j++) {
-                safe_free(words[j]);
+                free(words[j]);
             }
-            safe_free(words);
+            free(words);
             return NULL;
         }
     }
@@ -166,10 +166,10 @@ registry_item_t *bip39_from_data_item(cbor_value_t *data_item) {
 
     // Free temporary arrays
     for (size_t i = 0; i < word_count; i++) {
-        safe_free(words[i]);
+        free(words[i]);
     }
-    safe_free(words);
-    safe_free(lang);
+    free(words);
+    free(lang);
 
     if (!bip39) return NULL;
 
@@ -208,7 +208,7 @@ bip39_data_t *bip39_from_cbor(const uint8_t *cbor_data, size_t len) {
 
     // Transfer ownership of bip39 to caller and free the registry item wrapper
     item->data = NULL; // Don't free the bip39 data
-    safe_free(item);
+    free(item);
 
     return bip39;
 }

@@ -181,7 +181,7 @@ urtypes_cbor_encoder_t *urtypes_cbor_encoder_new(void) {
 
     encoder->buffer = byte_buffer_new();
     if (!encoder->buffer) {
-        safe_free(encoder);
+        free(encoder);
         return NULL;
     }
 
@@ -192,7 +192,7 @@ void urtypes_cbor_encoder_free(urtypes_cbor_encoder_t *encoder) {
     if (!encoder) return;
 
     byte_buffer_free(encoder->buffer);
-    safe_free(encoder);
+    free(encoder);
 }
 
 // Encode CBOR value

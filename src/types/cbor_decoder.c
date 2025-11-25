@@ -15,7 +15,7 @@
 
 static void set_error(urtypes_cbor_decoder_t *decoder, const char *error) {
     if (decoder->error) {
-        safe_free(decoder->error);
+        free(decoder->error);
     }
     decoder->error = safe_strdup(error);
 }
@@ -105,12 +105,12 @@ static cbor_value_t *decode_bytes(urtypes_cbor_decoder_t *decoder, uint8_t addit
     }
 
     if (!read_bytes(decoder, data, (size_t)len)) {
-        safe_free(data);
+        free(data);
         return NULL;
     }
 
     cbor_value_t *value = cbor_value_new_bytes(data, (size_t)len);
-    safe_free(data);
+    free(data);
     return value;
 }
 
@@ -130,13 +130,13 @@ static cbor_value_t *decode_string(urtypes_cbor_decoder_t *decoder, uint8_t addi
     }
 
     if (!read_bytes(decoder, (uint8_t *)str, (size_t)len)) {
-        safe_free(str);
+        free(str);
         return NULL;
     }
 
     str[len] = '\0';
     cbor_value_t *value = cbor_value_new_string(str);
-    safe_free(str);
+    free(str);
     return value;
 }
 
@@ -346,9 +346,9 @@ void urtypes_cbor_decoder_free(urtypes_cbor_decoder_t *decoder) {
     if (!decoder) return;
 
     if (decoder->error) {
-        safe_free(decoder->error);
+        free(decoder->error);
     }
-    safe_free(decoder);
+    free(decoder);
 }
 
 // Decode CBOR value

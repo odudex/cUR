@@ -6,50 +6,18 @@
 #include <ctype.h>
 #include <stdio.h>
 
-// Memory management utilities
-void *urtypes_safe_malloc(size_t size) {
-    if (size == 0) return NULL;
-    void *ptr = malloc(size);
-    if (ptr) {
-        memset(ptr, 0, size);
-    }
-    return ptr;
-}
-
-void *urtypes_safe_realloc(void *ptr, size_t size) {
-    if (size == 0) {
-        free(ptr);
-        return NULL;
-    }
-    void *new_ptr = realloc(ptr, size);
-    return new_ptr;
-}
-
-char *urtypes_safe_strdup(const char *str) {
-    if (!str) return NULL;
-    size_t len = strlen(str);
-    char *dup = urtypes_safe_malloc(len + 1);
-    if (dup) {
-        memcpy(dup, str, len + 1);
-    }
-    return dup;
-}
-
-void urtypes_safe_free(void *ptr) {
-    if (ptr) {
-        free(ptr);
-    }
-}
+// Memory management utilities removed - now using root utils.h implementation directly
+// (safe_malloc, safe_realloc, safe_strdup, free)
 
 // String utilities
 char *urtypes_str_concat(const char *s1, const char *s2) {
     if (!s1 && !s2) return NULL;
-    if (!s1) return urtypes_safe_strdup(s2);
-    if (!s2) return urtypes_safe_strdup(s1);
+    if (!s1) return safe_strdup(s2);
+    if (!s2) return safe_strdup(s1);
 
     size_t len1 = strlen(s1);
     size_t len2 = strlen(s2);
-    char *result = urtypes_safe_malloc(len1 + len2 + 1);
+    char *result = safe_malloc(len1 + len2 + 1);
     if (result) {
         memcpy(result, s1, len1);
         memcpy(result + len1, s2, len2 + 1);
@@ -74,7 +42,7 @@ char *urtypes_str_concat_n(int count, ...) {
     va_end(args);
 
     // Allocate and concatenate
-    char *result = urtypes_safe_malloc(total_len + 1);
+    char *result = safe_malloc(total_len + 1);
     if (!result) return NULL;
 
     char *ptr = result;
@@ -96,7 +64,7 @@ char *urtypes_str_concat_n(int count, ...) {
 char *urtypes_bytes_to_hex(const uint8_t *data, size_t len) {
     if (!data || len == 0) return NULL;
 
-    char *hex = urtypes_safe_malloc(len * 2 + 1);
+    char *hex = safe_malloc(len * 2 + 1);
     if (!hex) return NULL;
 
     for (size_t i = 0; i < len; i++) {
@@ -114,7 +82,7 @@ uint8_t *urtypes_hex_to_bytes(const char *hex, size_t *out_len) {
     if (hex_len % 2 != 0) return NULL;
 
     size_t byte_len = hex_len / 2;
-    uint8_t *bytes = urtypes_safe_malloc(byte_len);
+    uint8_t *bytes = safe_malloc(byte_len);
     if (!bytes) return NULL;
 
     for (size_t i = 0; i < byte_len; i++) {
@@ -128,7 +96,7 @@ uint8_t *urtypes_hex_to_bytes(const char *hex, size_t *out_len) {
 
 // Array utilities
 urtypes_array_t *urtypes_array_new(void) {
-    urtypes_array_t *arr = urtypes_safe_malloc(sizeof(urtypes_array_t));
+    urtypes_array_t *arr = safe_malloc(sizeof(urtypes_array_t));
     if (!arr) return NULL;
 
     arr->items = NULL;
@@ -141,8 +109,8 @@ urtypes_array_t *urtypes_array_new(void) {
 void urtypes_array_free(urtypes_array_t *arr) {
     if (!arr) return;
 
-    urtypes_safe_free(arr->items);
-    urtypes_safe_free(arr);
+    free(arr->items);
+    free(arr);
 }
 
 bool urtypes_array_append(urtypes_array_t *arr, void *item) {
@@ -150,7 +118,7 @@ bool urtypes_array_append(urtypes_array_t *arr, void *item) {
 
     if (arr->count >= arr->capacity) {
         size_t new_capacity = arr->capacity == 0 ? 4 : arr->capacity * 2;
-        void **new_items = urtypes_safe_realloc(arr->items, new_capacity * sizeof(void *));
+        void **new_items = safe_realloc(arr->items, new_capacity * sizeof(void *));
         if (!new_items) return false;
 
         arr->items = new_items;
@@ -177,12 +145,12 @@ byte_buffer_t *byte_buffer_new(void) {
 }
 
 byte_buffer_t *byte_buffer_new_with_capacity(size_t capacity) {
-    byte_buffer_t *buf = urtypes_safe_malloc(sizeof(byte_buffer_t));
+    byte_buffer_t *buf = safe_malloc(sizeof(byte_buffer_t));
     if (!buf) return NULL;
 
-    buf->data = urtypes_safe_malloc(capacity);
+    buf->data = safe_malloc(capacity);
     if (!buf->data) {
-        urtypes_safe_free(buf);
+        free(buf);
         return NULL;
     }
 
@@ -207,8 +175,8 @@ byte_buffer_t *byte_buffer_new_from_data(const uint8_t *data, size_t len) {
 void byte_buffer_free(byte_buffer_t *buf) {
     if (!buf) return;
 
-    urtypes_safe_free(buf->data);
-    urtypes_safe_free(buf);
+    free(buf->data);
+    free(buf);
 }
 
 bool byte_buffer_append(byte_buffer_t *buf, const uint8_t *data, size_t len) {
@@ -223,7 +191,7 @@ bool byte_buffer_append(byte_buffer_t *buf, const uint8_t *data, size_t len) {
             new_capacity *= 2;
         }
 
-        uint8_t *new_data = urtypes_safe_realloc(buf->data, new_capacity);
+        uint8_t *new_data = safe_realloc(buf->data, new_capacity);
         if (!new_data) return false;
 
         buf->data = new_data;
@@ -289,7 +257,7 @@ char *base58_encode(const uint8_t *data, size_t len) {
     size_t result_len = leading_zeros + output_len;
     char *result = safe_malloc(result_len + 1);
     if (!result) {
-        safe_free(encoded);
+        free(encoded);
         return NULL;
     }
 
@@ -304,7 +272,7 @@ char *base58_encode(const uint8_t *data, size_t len) {
     }
     result[result_len] = '\0';
 
-    safe_free(encoded);
+    free(encoded);
     return result;
 }
 
@@ -333,7 +301,7 @@ char *base58check_encode(const uint8_t *data, size_t len) {
 
     // Encode with base58
     char *result = base58_encode(data_with_checksum, len + 4);
-    safe_free(data_with_checksum);
+    free(data_with_checksum);
 
     return result;
 }

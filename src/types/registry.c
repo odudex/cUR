@@ -35,7 +35,7 @@ void registry_item_free(registry_item_t *item) {
     if (item->free_item) {
         item->free_item(item);
     } else {
-        safe_free(item);
+        free(item);
     }
 }
 

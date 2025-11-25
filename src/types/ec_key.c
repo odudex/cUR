@@ -19,7 +19,7 @@ ec_key_data_t *ec_key_new(const uint8_t *data, size_t data_len, int curve, bool 
 
     ec_key->data = safe_malloc(data_len);
     if (!ec_key->data) {
-        safe_free(ec_key);
+        free(ec_key);
         return NULL;
     }
 
@@ -33,15 +33,15 @@ ec_key_data_t *ec_key_new(const uint8_t *data, size_t data_len, int curve, bool 
 
 void ec_key_free(ec_key_data_t *ec_key) {
     if (!ec_key) return;
-    safe_free(ec_key->data);
-    safe_free(ec_key);
+    free(ec_key->data);
+    free(ec_key);
 }
 
 static void ec_key_item_free(registry_item_t *item) {
     if (!item) return;
     ec_key_data_t *ec_key = (ec_key_data_t *)item->data;
     ec_key_free(ec_key);
-    safe_free(item);
+    free(item);
 }
 
 // Parse ECKey from CBOR data item
@@ -112,7 +112,7 @@ ec_key_data_t *ec_key_from_cbor(const uint8_t *cbor_data, size_t len) {
 
     // Transfer ownership
     item->data = NULL;
-    safe_free(item);
+    free(item);
 
     return ec_key;
 }

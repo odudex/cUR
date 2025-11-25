@@ -24,7 +24,7 @@ static void psbt_item_free(registry_item_t *item) {
 
     psbt_data_t *psbt = (psbt_data_t *)item->data;
     psbt_free(psbt);
-    safe_free(item);
+    free(item);
 }
 
 // CBOR conversion functions
@@ -85,7 +85,7 @@ uint8_t *psbt_to_cbor(psbt_data_t *psbt, size_t *out_len) {
     uint8_t *cbor_data = registry_item_to_cbor(item, out_len);
 
     // Free the registry item but not the psbt data (it's still owned by caller)
-    safe_free(item);
+    free(item);
 
     return cbor_data;
 }
@@ -100,7 +100,7 @@ psbt_data_t *psbt_from_cbor(const uint8_t *cbor_data, size_t len) {
 
     // Transfer ownership of psbt to caller and free the registry item wrapper
     item->data = NULL; // Don't free the psbt data
-    safe_free(item);
+    free(item);
 
     return psbt;
 }

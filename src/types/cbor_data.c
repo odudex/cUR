@@ -30,7 +30,7 @@ cbor_value_t *cbor_value_new_bytes(const uint8_t *data, size_t len) {
     if (len > 0 && data != NULL) {
         v->value.bytes_val.data = safe_malloc(len);
         if (!v->value.bytes_val.data) {
-            safe_free(v);
+            free(v);
             return NULL;
         }
         memcpy(v->value.bytes_val.data, data, len);
@@ -53,7 +53,7 @@ cbor_value_t *cbor_value_new_string(const char *str) {
     v->type = CBOR_TYPE_STRING;
     v->value.string_val = safe_strdup(str);
     if (!v->value.string_val) {
-        safe_free(v);
+        free(v);
         return NULL;
     }
 
@@ -164,8 +164,8 @@ bool cbor_map_set(cbor_value_t *map, cbor_value_t *key, cbor_value_t *value) {
                                              new_count * sizeof(cbor_value_t *));
 
     if (!new_keys || !new_values) {
-        safe_free(new_keys);
-        safe_free(new_values);
+        free(new_keys);
+        free(new_values);
         return false;
     }
 
@@ -324,24 +324,24 @@ void cbor_value_free(cbor_value_t *val) {
 
     switch (val->type) {
         case CBOR_TYPE_BYTES:
-            safe_free(val->value.bytes_val.data);
+            free(val->value.bytes_val.data);
             break;
         case CBOR_TYPE_STRING:
-            safe_free(val->value.string_val);
+            free(val->value.string_val);
             break;
         case CBOR_TYPE_ARRAY:
             for (size_t i = 0; i < val->value.array_val.count; i++) {
                 cbor_value_free(val->value.array_val.items[i]);
             }
-            safe_free(val->value.array_val.items);
+            free(val->value.array_val.items);
             break;
         case CBOR_TYPE_MAP:
             for (size_t i = 0; i < val->value.map_val.count; i++) {
                 cbor_value_free(val->value.map_val.keys[i]);
                 cbor_value_free(val->value.map_val.values[i]);
             }
-            safe_free(val->value.map_val.keys);
-            safe_free(val->value.map_val.values);
+            free(val->value.map_val.keys);
+            free(val->value.map_val.values);
             break;
         case CBOR_TYPE_TAG:
             cbor_value_free(val->value.tag_val.content);
@@ -350,5 +350,5 @@ void cbor_value_free(cbor_value_t *val) {
             break;
     }
 
-    safe_free(val);
+    free(val);
 }

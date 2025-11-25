@@ -4,12 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
-
-// Memory management utilities (prefixed to avoid conflicts with bc-ur)
-void *urtypes_safe_malloc(size_t size);
-void *urtypes_safe_realloc(void *ptr, size_t size);
-char *urtypes_safe_strdup(const char *str);
-void urtypes_safe_free(void *ptr);
+#include <stdlib.h>  // For free()
+#include "../utils.h"  // Use root utils for memory management (safe_malloc, safe_realloc, safe_strdup)
 
 // String utilities
 char *urtypes_str_concat(const char *s1, const char *s2);
@@ -18,10 +14,6 @@ char *urtypes_bytes_to_hex(const uint8_t *data, size_t len);
 uint8_t *urtypes_hex_to_bytes(const char *hex, size_t *out_len);
 
 // Wrapper macros for convenience (so the rest of the code doesn't need changes)
-#define safe_malloc urtypes_safe_malloc
-#define safe_realloc urtypes_safe_realloc
-#define safe_strdup urtypes_safe_strdup
-#define safe_free urtypes_safe_free
 #define str_concat urtypes_str_concat
 #define str_concat_n urtypes_str_concat_n
 #define bytes_to_hex urtypes_bytes_to_hex

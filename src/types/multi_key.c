@@ -24,17 +24,17 @@ void multi_key_free(multi_key_data_t *multi_key) {
         for (size_t i = 0; i < multi_key->ec_key_count; i++) {
             ec_key_free(multi_key->ec_keys[i]);
         }
-        safe_free(multi_key->ec_keys);
+        free(multi_key->ec_keys);
     }
 
     if (multi_key->hd_keys) {
         for (size_t i = 0; i < multi_key->hd_key_count; i++) {
             hd_key_free(multi_key->hd_keys[i]);
         }
-        safe_free(multi_key->hd_keys);
+        free(multi_key->hd_keys);
     }
 
-    safe_free(multi_key);
+    free(multi_key);
 }
 
 bool multi_key_add_ec_key(multi_key_data_t *multi_key, ec_key_data_t *ec_key) {
@@ -110,7 +110,7 @@ multi_key_data_t *multi_key_from_data_item(cbor_value_t *data_item) {
                     item->data = NULL;  // Transfer ownership
                     multi_key_add_hd_key(multi_key, hd_key);
                 }
-                safe_free(item);
+                free(item);
             }
         } else if (tag == CRYPTO_ECKEY_TAG) {
             // ECKey - unwrap the tag to get the map content
@@ -121,7 +121,7 @@ multi_key_data_t *multi_key_from_data_item(cbor_value_t *data_item) {
                     item->data = NULL;  // Transfer ownership
                     multi_key_add_ec_key(multi_key, ec_key);
                 }
-                safe_free(item);
+                free(item);
             }
         }
     }

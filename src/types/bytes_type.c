@@ -18,7 +18,7 @@ bytes_data_t *bytes_new(const uint8_t *data, size_t len) {
     if (len > 0 && data != NULL) {
         bytes->data = safe_malloc(len);
         if (!bytes->data) {
-            safe_free(bytes);
+            free(bytes);
             return NULL;
         }
         memcpy(bytes->data, data, len);
@@ -35,8 +35,8 @@ bytes_data_t *bytes_new(const uint8_t *data, size_t len) {
 void bytes_free(bytes_data_t *bytes) {
     if (!bytes) return;
 
-    safe_free(bytes->data);
-    safe_free(bytes);
+    free(bytes->data);
+    free(bytes);
 }
 
 static void bytes_item_free(registry_item_t *item) {
@@ -44,7 +44,7 @@ static void bytes_item_free(registry_item_t *item) {
 
     bytes_data_t *bytes = (bytes_data_t *)item->data;
     bytes_free(bytes);
-    safe_free(item);
+    free(item);
 }
 
 // CBOR conversion functions
@@ -128,7 +128,7 @@ uint8_t *bytes_to_cbor(bytes_data_t *bytes, size_t *out_len) {
     uint8_t *cbor_data = registry_item_to_cbor(item, out_len);
 
     // Free the registry item but not the bytes data (it's still owned by caller)
-    safe_free(item);
+    free(item);
 
     return cbor_data;
 }
@@ -143,7 +143,7 @@ bytes_data_t *bytes_from_cbor(const uint8_t *cbor_data, size_t len) {
 
     // Transfer ownership of bytes to caller and free the registry item wrapper
     item->data = NULL; // Don't free the bytes data
-    safe_free(item);
+    free(item);
 
     return bytes;
 }
