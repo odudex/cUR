@@ -733,18 +733,6 @@ static mp_obj_t bip39_words_from_cbor_py(mp_obj_t cbor_data_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(bip39_words_from_cbor_obj, bip39_words_from_cbor_py);
 
-// BIP39 namespace object (not a type, just a namespace for the static method)
-static const mp_rom_map_elem_t bip39_namespace_locals_dict_table[] = {
-    { MP_ROM_QSTR(MP_QSTR_words_from_cbor), MP_ROM_PTR(&bip39_words_from_cbor_obj) },
-};
-static MP_DEFINE_CONST_DICT(bip39_namespace_locals_dict, bip39_namespace_locals_dict_table);
-
-static const mp_obj_type_t mp_type_bip39 = {
-    { &mp_type_type },
-    .name = MP_QSTR_BIP39,
-    .locals_dict = (mp_obj_dict_t *)&bip39_namespace_locals_dict,
-};
-
 // ============================================================================
 // Output Descriptor Functions
 // ============================================================================
@@ -817,7 +805,7 @@ static const mp_rom_map_elem_t types_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_bytes_to_cbor), MP_ROM_PTR(&bytes_to_cbor_obj) },
     { MP_ROM_QSTR(MP_QSTR_psbt_from_cbor), MP_ROM_PTR(&psbt_from_cbor_obj) },
     { MP_ROM_QSTR(MP_QSTR_psbt_to_cbor), MP_ROM_PTR(&psbt_to_cbor_obj) },
-    { MP_ROM_QSTR(MP_QSTR_BIP39), MP_ROM_PTR(&mp_type_bip39) },
+    { MP_ROM_QSTR(MP_QSTR_bip39_words_from_cbor), MP_ROM_PTR(&bip39_words_from_cbor_obj) },
     { MP_ROM_QSTR(MP_QSTR_output_from_cbor), MP_ROM_PTR(&output_from_cbor_obj) },
     { MP_ROM_QSTR(MP_QSTR_output_from_cbor_account), MP_ROM_PTR(&output_from_cbor_account_obj) },
     // Tag constants (integers)
