@@ -1,5 +1,5 @@
 #include "utils.h"
-#include "sha256.h"
+#include "../sha256/sha256.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>

@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "test_framework.h"
-#include "../src/bytes_type.h"
+#include "../src/types/bytes_type.h"
 
 void test_bytes_creation(void) {
     TEST_CASE("Bytes creation and data access");

@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "test_framework.h"
-#include "../src/bip39.h"
+#include "../src/types/bip39.h"
 
 // Test vector from Python urtypes test
 void test_bip39_from_cbor(void) {

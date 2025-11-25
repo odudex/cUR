@@ -7,7 +7,9 @@ SRCDIR = src
 OBJDIR = src/obj
 
 # Source files (exclude test files)
-SOURCES = utils.c bytewords.c cbor_lite.c fountain_decoder.c fountain_encoder.c fountain_utils.c crc32.c ur_decoder.c ur_encoder.c ur.c sha256/sha256.c
+SOURCES = utils.c bytewords.c cbor_lite.c fountain_decoder.c fountain_encoder.c fountain_utils.c crc32.c ur_decoder.c ur_encoder.c ur.c sha256/sha256.c \
+          types/utils.c types/cbor_data.c types/cbor_encoder.c types/cbor_decoder.c types/registry.c types/bytes_type.c types/psbt.c types/bip39.c \
+          types/keypath.c types/ec_key.c types/hd_key.c types/multi_key.c types/output.c
 
 # Object files
 OBJECTS = $(SOURCES:%.c=$(OBJDIR)/%.o)
@@ -25,7 +27,19 @@ TEST_ENCODER_SOURCES = tests/test_ur_encoder.c
 TEST_PRINT_FRAGMENTS_TARGET = tests/test_print_fragments
 TEST_PRINT_FRAGMENTS_SOURCES = tests/test_print_fragments.c
 
-.PHONY: all clean test-decoder test-encoder test-print-fragments
+TEST_BYTES_TARGET = tests/test_bytes
+TEST_BYTES_SOURCES = tests/test_bytes.c
+
+TEST_PSBT_TARGET = tests/test_psbt
+TEST_PSBT_SOURCES = tests/test_psbt.c
+
+TEST_BIP39_TARGET = tests/test_bip39
+TEST_BIP39_SOURCES = tests/test_bip39.c
+
+TEST_OUTPUT_TARGET = tests/test_output
+TEST_OUTPUT_SOURCES = tests/test_output.c
+
+.PHONY: all clean test-decoder test-encoder test-print-fragments test-bytes test-psbt test-bip39 test-output
 
 all: $(TARGET)
 
@@ -56,8 +70,36 @@ test-print-fragments: $(TARGET) $(TEST_PRINT_FRAGMENTS_TARGET)
 $(TEST_PRINT_FRAGMENTS_TARGET): $(TEST_PRINT_FRAGMENTS_SOURCES) $(TARGET)
 	$(CC) $(CFLAGS) $(INCLUDES) $< -L$(SRCDIR) -lur -lm -o $@
 
+# Build and run bytes test
+test-bytes: $(TARGET) $(TEST_BYTES_TARGET)
+	./$(TEST_BYTES_TARGET)
+
+$(TEST_BYTES_TARGET): $(TEST_BYTES_SOURCES) $(TARGET)
+	$(CC) $(CFLAGS) $(INCLUDES) $< -L$(SRCDIR) -lur -lm -o $@
+
+# Build and run PSBT test
+test-psbt: $(TARGET) $(TEST_PSBT_TARGET)
+	./$(TEST_PSBT_TARGET)
+
+$(TEST_PSBT_TARGET): $(TEST_PSBT_SOURCES) $(TARGET)
+	$(CC) $(CFLAGS) $(INCLUDES) $< -L$(SRCDIR) -lur -lm -o $@
+
+# Build and run BIP39 test
+test-bip39: $(TARGET) $(TEST_BIP39_TARGET)
+	./$(TEST_BIP39_TARGET)
+
+$(TEST_BIP39_TARGET): $(TEST_BIP39_SOURCES) $(TARGET)
+	$(CC) $(CFLAGS) $(INCLUDES) $< -L$(SRCDIR) -lur -lm -o $@
+
+# Build and run Output test
+test-output: $(TARGET) $(TEST_OUTPUT_TARGET)
+	./$(TEST_OUTPUT_TARGET)
+
+$(TEST_OUTPUT_TARGET): $(TEST_OUTPUT_SOURCES) $(TARGET)
+	$(CC) $(CFLAGS) $(INCLUDES) $< -L$(SRCDIR) -lur -lm -o $@
+
 clean:
-	rm -rf $(OBJDIR) $(TARGET) $(TEST_DECODER_TARGET) $(TEST_ENCODER_TARGET) $(TEST_PRINT_FRAGMENTS_TARGET) tests/test_cross_output
+	rm -rf $(OBJDIR) $(TARGET) $(TEST_DECODER_TARGET) $(TEST_ENCODER_TARGET) $(TEST_PRINT_FRAGMENTS_TARGET) $(TEST_BYTES_TARGET) $(TEST_PSBT_TARGET) $(TEST_BIP39_TARGET) $(TEST_OUTPUT_TARGET) tests/test_cross_output
 
 # Dependencies
 $(OBJDIR)/utils.o: $(SRCDIR)/utils.c $(SRCDIR)/utils.h

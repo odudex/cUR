@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
-#include "../src/output.h"
+#include "../src/types/output.h"
 #include "../src/utils.h"
 
 // Test vector 1: P2PKH with EC key
