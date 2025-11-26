@@ -10,8 +10,21 @@ idf_component_register(
         "src/cbor_lite.c"
         "src/crc32.c"
         "src/utils.c"
-        "src/sha256/sha256.c"
+        "src/types/bip39.c"
+        "src/types/cbor_data.c"
+        "src/types/bytes_type.c"
+        "src/types/cbor_encoder.c"
+        "src/types/cbor_decoder.c"
+        "src/types/hd_key.c"
+        "src/types/ec_key.c"
+        "src/types/multi_key.c"
+        "src/types/output.c"
+        "src/types/psbt.c"
+        "src/types/keypath.c"
+        "src/types/registry.c"
+        "src/types/utils.c"
     INCLUDE_DIRS
         "src"
     REQUIRES
+        mbedtls
 )
