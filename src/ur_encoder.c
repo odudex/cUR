@@ -189,7 +189,8 @@ static bool encode_part(const char *type, const fountain_encoder_part_t *part,
 
   // Create sequence string: "seq_num-seq_len"
   char seq_str[64];
-  snprintf(seq_str, sizeof(seq_str), "%u-%u", part->seq_num, (unsigned int)part->seq_len);
+  snprintf(seq_str, sizeof(seq_str), "%u-%u", part->seq_num,
+           (unsigned int)part->seq_len);
 
   // Encode part to CBOR
   uint8_t *cbor = NULL;

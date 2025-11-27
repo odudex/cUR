@@ -1,19 +1,19 @@
 #ifndef URTYPES_MULTI_KEY_H
 #define URTYPES_MULTI_KEY_H
 
-#include <stdint.h>
-#include <stddef.h>
-#include "registry.h"
 #include "ec_key.h"
 #include "hd_key.h"
+#include "registry.h"
+#include <stddef.h>
+#include <stdint.h>
 
 // MultiKey type structure (no tag, embedded in other types)
 typedef struct {
-    uint32_t threshold;           // M in M-of-N multisig
-    ec_key_data_t **ec_keys;      // Array of EC keys
-    size_t ec_key_count;
-    hd_key_data_t **hd_keys;      // Array of HD keys
-    size_t hd_key_count;
+  uint32_t threshold;      // M in M-of-N multisig
+  ec_key_data_t **ec_keys; // Array of EC keys
+  size_t ec_key_count;
+  hd_key_data_t **hd_keys; // Array of HD keys
+  size_t hd_key_count;
 } multi_key_data_t;
 
 // Create and destroy MultiKey

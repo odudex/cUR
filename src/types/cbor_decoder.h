@@ -1,21 +1,22 @@
 #ifndef URTYPES_CBOR_DECODER_H
 #define URTYPES_CBOR_DECODER_H
 
-#include <stdint.h>
-#include <stddef.h>
-#include <stdbool.h>
 #include "cbor_data.h"
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 // CBOR decoder (prefixed to avoid conflicts with bc-ur)
 typedef struct {
-    const uint8_t *data;
-    size_t len;
-    size_t offset;
-    char *error;
+  const uint8_t *data;
+  size_t len;
+  size_t offset;
+  char *error;
 } urtypes_cbor_decoder_t;
 
 // Create and destroy decoder
-urtypes_cbor_decoder_t *urtypes_cbor_decoder_new(const uint8_t *data, size_t len);
+urtypes_cbor_decoder_t *urtypes_cbor_decoder_new(const uint8_t *data,
+                                                 size_t len);
 void urtypes_cbor_decoder_free(urtypes_cbor_decoder_t *decoder);
 
 // Decode CBOR value

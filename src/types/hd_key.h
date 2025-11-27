@@ -1,27 +1,28 @@
 #ifndef URTYPES_HD_KEY_H
 #define URTYPES_HD_KEY_H
 
-#include <stdint.h>
-#include <stddef.h>
-#include <stdbool.h>
-#include "registry.h"
 #include "keypath.h"
+#include "registry.h"
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 // HDKey tag number
 #define CRYPTO_HDKEY_TAG 303
 
 // HDKey type structure
 typedef struct {
-    bool master;                        // Is this a master key
-    uint8_t *key;                       // Public key (33 bytes) or private key (32 bytes)
-    size_t key_len;
-    uint8_t *chain_code;                // Chain code (32 bytes, optional)
-    uint8_t *private_key;               // Private key data (optional)
-    size_t private_key_len;
-    keypath_data_t *origin;             // Origin path (optional)
-    keypath_data_t *children;           // Children derivation path (optional)
-    uint8_t *parent_fingerprint;        // Parent fingerprint (4 bytes, optional)
-    // Note: use_info, name, note omitted for simplicity (not needed for descriptors)
+  bool master;  // Is this a master key
+  uint8_t *key; // Public key (33 bytes) or private key (32 bytes)
+  size_t key_len;
+  uint8_t *chain_code;  // Chain code (32 bytes, optional)
+  uint8_t *private_key; // Private key data (optional)
+  size_t private_key_len;
+  keypath_data_t *origin;      // Origin path (optional)
+  keypath_data_t *children;    // Children derivation path (optional)
+  uint8_t *parent_fingerprint; // Parent fingerprint (4 bytes, optional)
+  // Note: use_info, name, note omitted for simplicity (not needed for
+  // descriptors)
 } hd_key_data_t;
 
 // HDKey registry type

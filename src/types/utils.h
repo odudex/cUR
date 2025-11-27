@@ -1,11 +1,11 @@
 #ifndef URTYPES_UTILS_H
 #define URTYPES_UTILS_H
 
+#include "../utils.h" // Use root utils for memory management (safe_malloc, safe_realloc, safe_strdup)
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdbool.h>
-#include <stdlib.h>  // For free()
-#include "../utils.h"  // Use root utils for memory management (safe_malloc, safe_realloc, safe_strdup)
+#include <stdlib.h> // For free()
 
 // String utilities
 char *urtypes_str_concat(const char *s1, const char *s2);
@@ -21,9 +21,9 @@ uint8_t *urtypes_hex_to_bytes(const char *hex, size_t *out_len);
 
 // Array utilities (prefixed to avoid conflicts)
 typedef struct {
-    void **items;
-    size_t count;
-    size_t capacity;
+  void **items;
+  size_t count;
+  size_t capacity;
 } urtypes_array_t;
 
 urtypes_array_t *urtypes_array_new(void);
@@ -42,9 +42,9 @@ size_t urtypes_array_count(urtypes_array_t *arr);
 
 // Byte buffer utilities
 typedef struct {
-    uint8_t *data;
-    size_t len;
-    size_t capacity;
+  uint8_t *data;
+  size_t len;
+  size_t capacity;
 } byte_buffer_t;
 
 byte_buffer_t *byte_buffer_new(void);

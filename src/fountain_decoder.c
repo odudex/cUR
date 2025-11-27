@@ -25,9 +25,9 @@
 #define SIMPLE_PARTS_INITIAL_CAPACITY 8
 #define INDEXES_INITIAL_CAPACITY 8
 #define HASH_MIN_CAPACITY 64
-#define HASH_CAPACITY_MULTIPLIER 1  // Reduced from 2 to save memory
-#define MAX_MIXED_PARTS 256         // Limit mixed parts to prevent memory explosion
-#define MAX_DUPLICATE_TRACKING 512  // Limit duplicate tracking set size
+#define HASH_CAPACITY_MULTIPLIER 1 // Reduced from 2 to save memory
+#define MAX_MIXED_PARTS 256 // Limit mixed parts to prevent memory explosion
+#define MAX_DUPLICATE_TRACKING 512 // Limit duplicate tracking set size
 #define CROSS_REDUCTION_MAX_ITERATIONS 7
 #define FNV1A_OFFSET_BASIS 2166136261u
 #define FNV1A_PRIME 16777619u
@@ -36,7 +36,7 @@
 typedef struct hash_entry {
   part_indexes_t key;
   decoder_part_t value;
-  size_t key_hash;  // Cached hash for fast collision filtering
+  size_t key_hash; // Cached hash for fast collision filtering
   struct hash_entry *next;
 } hash_entry_t;
 
@@ -112,7 +112,8 @@ static bool hash_set_add(hash_set_t *set, uint32_t hash) {
   }
 
   // Limit growth to prevent unbounded memory usage on embedded devices
-  // When limit is reached, stop tracking duplicates (seq_num check handles consecutive dupes)
+  // When limit is reached, stop tracking duplicates (seq_num check handles
+  // consecutive dupes)
   if (set->count >= MAX_DUPLICATE_TRACKING) {
     return false; // Limit reached, skip tracking this hash
   }
@@ -123,7 +124,8 @@ static bool hash_set_add(hash_set_t *set, uint32_t hash) {
     if (new_capacity > MAX_DUPLICATE_TRACKING) {
       new_capacity = MAX_DUPLICATE_TRACKING;
     }
-    uint32_t *new_hashes = safe_realloc(set->hashes, new_capacity * sizeof(uint32_t));
+    uint32_t *new_hashes =
+        safe_realloc(set->hashes, new_capacity * sizeof(uint32_t));
     if (!new_hashes)
       return false;
 
@@ -220,7 +222,7 @@ static bool mixed_hash_put(mixed_parts_hash_t *hash, const part_indexes_t *key,
   if (!new_entry)
     return false;
 
-  new_entry->key_hash = key_hash;  // Cache the hash
+  new_entry->key_hash = key_hash; // Cache the hash
 
   if (!part_indexes_copy(key, &new_entry->key)) {
     free(new_entry);
@@ -449,7 +451,8 @@ fountain_decoder_t *fountain_decoder_new(void) {
   // Hash tables will be initialized when we know seq_len
   decoder->mixed_parts_hash = NULL;
 
-  // Initialize hash set for duplicate detection (will resize when we know seq_len)
+  // Initialize hash set for duplicate detection (will resize when we know
+  // seq_len)
   decoder->received_fragments_hashes.hashes = NULL;
   decoder->received_fragments_hashes.count = 0;
   decoder->received_fragments_hashes.capacity = 0;
@@ -729,8 +732,8 @@ static void reduce_mixed_by(fountain_decoder_t *const decoder,
 
   mixed_parts_hash_t *hash = decoder->mixed_parts_hash;
 
-  // Collect entries that need removal (simple parts) or rehashing (bucket changed)
-  // We can't modify the hash table while iterating, so collect first
+  // Collect entries that need removal (simple parts) or rehashing (bucket
+  // changed) We can't modify the hash table while iterating, so collect first
   size_t max_entries = hash->count;
   hash_entry_t **to_remove = safe_malloc(max_entries * sizeof(hash_entry_t *));
   size_t remove_count = 0;
@@ -751,19 +754,22 @@ static void reduce_mixed_by(fountain_decoder_t *const decoder,
   for (size_t i = 0; i < hash->capacity; i++) {
     hash_entry_t *entry = hash->buckets[i];
     while (entry) {
-      hash_entry_t *next = entry->next; // Save next before potential modification
+      hash_entry_t *next =
+          entry->next; // Save next before potential modification
 
       // Check if this entry can be reduced by the given part
       if (part_indexes_is_strict_subset(&part->indexes, &entry->key)) {
         // Reduce the entry in-place
         part_indexes_t new_indexes = {0};
-        if (!part_indexes_difference(&entry->key, &part->indexes, &new_indexes)) {
+        if (!part_indexes_difference(&entry->key, &part->indexes,
+                                     &new_indexes)) {
           entry = next;
           continue;
         }
 
         // XOR the data in-place
-        for (size_t j = 0; j < entry->value.data_len && j < part->data_len; j++) {
+        for (size_t j = 0; j < entry->value.data_len && j < part->data_len;
+             j++) {
           entry->value.data[j] ^= part->data[j];
         }
 
@@ -788,7 +794,8 @@ static void reduce_mixed_by(fountain_decoder_t *const decoder,
           decoder->mixed_parts_useful++;
 #endif
           size_t fragment_idx = get_part_index(&entry->value);
-          if (!part_indexes_contains(&decoder->received_part_indexes, fragment_idx)) {
+          if (!part_indexes_contains(&decoder->received_part_indexes,
+                                     fragment_idx)) {
             queue_enqueue(&decoder->queue, &entry->value);
           }
           to_remove[remove_count++] = entry;
@@ -851,7 +858,8 @@ static void reduce_mixed_by(fountain_decoder_t *const decoder,
         break;
       }
     }
-    if (was_removed) continue;
+    if (was_removed)
+      continue;
 
     // Unlink from old bucket
     hash_entry_t *curr = hash->buckets[old_bucket];
@@ -1030,11 +1038,11 @@ static void gaussian_reduce_with_new_part(fountain_decoder_t *const decoder,
   for (size_t b = 0; b < decoder->mixed_parts_hash->capacity; b++) {
     hash_entry_t *entry = decoder->mixed_parts_hash->buckets[b];
     hash_entry_t *prev = NULL;
-    
+
     while (entry) {
       // Save next pointer BEFORE any potential modification
       hash_entry_t *next = entry->next;
-      
+
       // Skip if this is the pivot itself
       if (part_indexes_equal(&entry->key, &pivot->indexes)) {
         prev = entry;
@@ -1057,7 +1065,7 @@ static void gaussian_reduce_with_new_part(fountain_decoder_t *const decoder,
           } else {
             decoder->mixed_parts_hash->buckets[b] = next;
           }
-          
+
           // Free the entry
           decoder_part_free(&entry->value);
           if (entry->key.indexes) {
@@ -1065,7 +1073,7 @@ static void gaussian_reduce_with_new_part(fountain_decoder_t *const decoder,
           }
           free(entry);
           decoder->mixed_parts_hash->count--;
-          
+
           // Handle reduced part
           if (is_simple_part(&reduced)) {
             size_t fragment_idx = get_part_index(&reduced);
@@ -1078,14 +1086,14 @@ static void gaussian_reduce_with_new_part(fountain_decoder_t *const decoder,
             add_mixed_part(decoder, &reduced, MIXED_SOURCE_REDUCTION);
           }
           decoder_part_free(&reduced);
-          
+
           // Don't update prev - it still points to the previous valid entry
           // (or is NULL if we removed the head)
           entry = next;
           continue;
         }
       }
-      
+
       prev = entry;
       entry = next;
     }
@@ -1352,7 +1360,8 @@ bool fountain_decoder_receive_part(fountain_decoder_t *decoder,
     }
 
     // Initialize lightweight hash set for duplicate detection
-    // Uses much less memory than hash table (only stores hashes, not full parts)
+    // Uses much less memory than hash table (only stores hashes, not full
+    // parts)
     if (!hash_set_init(&decoder->received_fragments_hashes, hash_capacity)) {
       mixed_hash_free(decoder->mixed_parts_hash);
       free(decoder->mixed_parts_hash);
@@ -1369,7 +1378,8 @@ bool fountain_decoder_receive_part(fountain_decoder_t *decoder,
   // Check if this exact fragment (by index set) has already been received
   // This prevents duplicate fragments from inflating processed_parts_count
   // Note: We track ALL received fragments, even after they're reduced
-  // We compute a hash of the indexes and store only that (much more memory efficient)
+  // We compute a hash of the indexes and store only that (much more memory
+  // efficient)
   uint32_t fragment_hash = (uint32_t)hash_indexes(&decoder_part.indexes);
   if (hash_set_contains(&decoder->received_fragments_hashes, fragment_hash)) {
     decoder_part_free(&decoder_part);
