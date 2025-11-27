@@ -242,42 +242,6 @@ static bool mixed_hash_put(mixed_parts_hash_t *hash, const part_indexes_t *key,
   return true;
 }
 
-// Remove an entry from hash table by key
-static bool mixed_hash_remove(mixed_parts_hash_t *hash,
-                              const part_indexes_t *key) {
-  if (!hash || !hash->buckets || !key)
-    return false;
-
-  size_t key_hash = hash_indexes(key);
-  size_t bucket = key_hash % hash->capacity;
-  hash_entry_t *entry = hash->buckets[bucket];
-  hash_entry_t *prev = NULL;
-
-  while (entry) {
-    // Fast path: compare cached hash first
-    if (entry->key_hash == key_hash && part_indexes_equal(&entry->key, key)) {
-      // Found the entry, remove it
-      if (prev) {
-        prev->next = entry->next;
-      } else {
-        hash->buckets[bucket] = entry->next;
-      }
-
-      decoder_part_free(&entry->value);
-      if (entry->key.indexes) {
-        free(entry->key.indexes);
-      }
-      free(entry);
-      hash->count--;
-      return true;
-    }
-    prev = entry;
-    entry = entry->next;
-  }
-
-  return false;
-}
-
 bool queue_init(part_queue_t *queue, size_t capacity) {
   if (!queue || capacity == 0)
     return false;
