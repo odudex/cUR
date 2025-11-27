@@ -1,10 +1,10 @@
 #ifndef URTYPES_PSBT_H
 #define URTYPES_PSBT_H
 
-#include <stdint.h>
-#include <stddef.h>
-#include "registry.h"
 #include "bytes_type.h"
+#include "registry.h"
+#include <stddef.h>
+#include <stdint.h>
 
 // PSBT tag number
 #define CRYPTO_PSBT_TAG 310

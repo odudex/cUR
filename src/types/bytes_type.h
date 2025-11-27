@@ -1,14 +1,14 @@
 #ifndef URTYPES_BYTES_TYPE_H
 #define URTYPES_BYTES_TYPE_H
 
-#include <stdint.h>
-#include <stddef.h>
 #include "registry.h"
+#include <stddef.h>
+#include <stdint.h>
 
 // Bytes type structure
 typedef struct {
-    uint8_t *data;
-    size_t len;
+  uint8_t *data;
+  size_t len;
 } bytes_data_t;
 
 // Bytes registry type

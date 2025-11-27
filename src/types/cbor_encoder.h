@@ -1,14 +1,14 @@
 #ifndef URTYPES_CBOR_ENCODER_H
 #define URTYPES_CBOR_ENCODER_H
 
-#include <stdint.h>
-#include <stddef.h>
 #include "cbor_data.h"
 #include "utils.h"
+#include <stddef.h>
+#include <stdint.h>
 
 // CBOR encoder (prefixed to avoid conflicts with bc-ur)
 typedef struct {
-    byte_buffer_t *buffer;
+  byte_buffer_t *buffer;
 } urtypes_cbor_encoder_t;
 
 // Create and destroy encoder
@@ -16,10 +16,12 @@ urtypes_cbor_encoder_t *urtypes_cbor_encoder_new(void);
 void urtypes_cbor_encoder_free(urtypes_cbor_encoder_t *encoder);
 
 // Encode CBOR value
-bool urtypes_cbor_encoder_encode(urtypes_cbor_encoder_t *encoder, cbor_value_t *value);
+bool urtypes_cbor_encoder_encode(urtypes_cbor_encoder_t *encoder,
+                                 cbor_value_t *value);
 
 // Get encoded data
-uint8_t *urtypes_cbor_encoder_get_data(urtypes_cbor_encoder_t *encoder, size_t *out_len);
+uint8_t *urtypes_cbor_encoder_get_data(urtypes_cbor_encoder_t *encoder,
+                                       size_t *out_len);
 
 // Wrapper macros
 #define cbor_encoder_t urtypes_cbor_encoder_t

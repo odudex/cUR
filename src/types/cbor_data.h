@@ -1,24 +1,24 @@
 #ifndef URTYPES_CBOR_DATA_H
 #define URTYPES_CBOR_DATA_H
 
-#include <stdint.h>
-#include <stdbool.h>
 #include "utils.h"
+#include <stdbool.h>
+#include <stdint.h>
 
 // CBOR value types
 typedef enum {
-    CBOR_TYPE_UNSIGNED_INT,
-    CBOR_TYPE_NEGATIVE_INT,
-    CBOR_TYPE_BYTES,
-    CBOR_TYPE_STRING,
-    CBOR_TYPE_ARRAY,
-    CBOR_TYPE_MAP,
-    CBOR_TYPE_TAG,
-    CBOR_TYPE_SIMPLE,
-    CBOR_TYPE_FLOAT,
-    CBOR_TYPE_BOOL,
-    CBOR_TYPE_NULL,
-    CBOR_TYPE_UNDEFINED
+  CBOR_TYPE_UNSIGNED_INT,
+  CBOR_TYPE_NEGATIVE_INT,
+  CBOR_TYPE_BYTES,
+  CBOR_TYPE_STRING,
+  CBOR_TYPE_ARRAY,
+  CBOR_TYPE_MAP,
+  CBOR_TYPE_TAG,
+  CBOR_TYPE_SIMPLE,
+  CBOR_TYPE_FLOAT,
+  CBOR_TYPE_BOOL,
+  CBOR_TYPE_NULL,
+  CBOR_TYPE_UNDEFINED
 } cbor_type_t;
 
 // Forward declarations
@@ -26,31 +26,31 @@ typedef struct cbor_value cbor_value_t;
 
 // CBOR value structure
 struct cbor_value {
-    cbor_type_t type;
-    union {
-        uint64_t uint_val;
-        int64_t int_val;
-        struct {
-            uint8_t *data;
-            size_t len;
-        } bytes_val;
-        char *string_val;
-        struct {
-            cbor_value_t **items;
-            size_t count;
-        } array_val;
-        struct {
-            cbor_value_t **keys;
-            cbor_value_t **values;
-            size_t count;
-        } map_val;
-        struct {
-            uint64_t tag;
-            cbor_value_t *content;
-        } tag_val;
-        double float_val;
-        bool bool_val;
-    } value;
+  cbor_type_t type;
+  union {
+    uint64_t uint_val;
+    int64_t int_val;
+    struct {
+      uint8_t *data;
+      size_t len;
+    } bytes_val;
+    char *string_val;
+    struct {
+      cbor_value_t **items;
+      size_t count;
+    } array_val;
+    struct {
+      cbor_value_t **keys;
+      cbor_value_t **values;
+      size_t count;
+    } map_val;
+    struct {
+      uint64_t tag;
+      cbor_value_t *content;
+    } tag_val;
+    double float_val;
+    bool bool_val;
+  } value;
 };
 
 // CBOR value creation functions

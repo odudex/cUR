@@ -1,14 +1,14 @@
 #ifndef URTYPES_REGISTRY_H
 #define URTYPES_REGISTRY_H
 
-#include <stdint.h>
-#include <stdbool.h>
 #include "cbor_data.h"
+#include <stdbool.h>
+#include <stdint.h>
 
 // Registry type definition
 typedef struct {
-    const char *name;
-    uint64_t tag;  // 0 means no tag
+  const char *name;
+  uint64_t tag; // 0 means no tag
 } registry_type_t;
 
 // Registry item interface - all UR types implement these functions
@@ -21,11 +21,11 @@ typedef void (*free_fn)(registry_item_t *item);
 
 // Registry item base structure
 struct registry_item {
-    registry_type_t *type;
-    to_data_item_fn to_data_item;
-    from_data_item_fn from_data_item;
-    free_fn free_item;
-    void *data; // Pointer to actual type-specific data
+  registry_type_t *type;
+  to_data_item_fn to_data_item;
+  from_data_item_fn from_data_item;
+  free_fn free_item;
+  void *data; // Pointer to actual type-specific data
 };
 
 // Registry item helper functions

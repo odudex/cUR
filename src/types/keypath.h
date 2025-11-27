@@ -1,34 +1,35 @@
 #ifndef URTYPES_KEYPATH_H
 #define URTYPES_KEYPATH_H
 
-#include <stdint.h>
-#include <stddef.h>
-#include <stdbool.h>
 #include "registry.h"
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 // Keypath tag number
 #define CRYPTO_KEYPATH_TAG 304
 
 // Path component structure
 typedef struct {
-    uint32_t index;     // Path index (ignored if wildcard is true)
-    bool hardened;      // Whether this component is hardened
-    bool wildcard;      // Whether this is a wildcard component (*)
+  uint32_t index; // Path index (ignored if wildcard is true)
+  bool hardened;  // Whether this component is hardened
+  bool wildcard;  // Whether this is a wildcard component (*)
 } path_component_t;
 
 // Keypath type structure
 typedef struct {
-    path_component_t *components;
-    size_t component_count;
-    uint8_t *source_fingerprint;  // 4 bytes, optional (can be NULL)
-    int depth;                     // -1 means not set
+  path_component_t *components;
+  size_t component_count;
+  uint8_t *source_fingerprint; // 4 bytes, optional (can be NULL)
+  int depth;                   // -1 means not set
 } keypath_data_t;
 
 // Keypath registry type
 extern registry_type_t KEYPATH_TYPE;
 
 // Create and destroy Keypath
-keypath_data_t *keypath_new(path_component_t *components, size_t component_count,
+keypath_data_t *keypath_new(path_component_t *components,
+                            size_t component_count,
                             const uint8_t *source_fingerprint, int depth);
 void keypath_free(keypath_data_t *keypath);
 

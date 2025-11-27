@@ -1,18 +1,18 @@
 #ifndef URTYPES_BIP39_H
 #define URTYPES_BIP39_H
 
-#include <stdint.h>
-#include <stddef.h>
 #include "registry.h"
+#include <stddef.h>
+#include <stdint.h>
 
 // BIP39 tag number
 #define CRYPTO_BIP39_TAG 301
 
 // BIP39 type structure
 typedef struct {
-    char **words;      // Array of word strings
-    size_t word_count;
-    char *lang;        // Language code (optional, can be NULL)
+  char **words; // Array of word strings
+  size_t word_count;
+  char *lang; // Language code (optional, can be NULL)
 } bip39_data_t;
 
 // BIP39 registry type
