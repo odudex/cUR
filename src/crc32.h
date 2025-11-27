@@ -13,10 +13,4 @@
  */
 uint32_t crc32_calculate(const uint8_t *data, size_t length);
 
-/**
- * Initialize CRC32 lookup table (called automatically)
- * Safe to call multiple times
- */
-void crc32_init(void);
-
 #endif // CRC32_H

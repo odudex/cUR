@@ -21,7 +21,7 @@
 #include <string.h>
 
 // Configuration constants
-#define QUEUE_INITIAL_CAPACITY 100
+#define QUEUE_INITIAL_CAPACITY 16
 #define SIMPLE_PARTS_INITIAL_CAPACITY 8
 #define INDEXES_INITIAL_CAPACITY 8
 #define HASH_MIN_CAPACITY 64

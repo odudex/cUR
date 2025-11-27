@@ -17,7 +17,6 @@
 #include "crc32.h"
 #include "fountain_utils.h"
 #include "utils.h"
-#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -88,7 +87,8 @@ size_t fountain_encoder_find_nominal_fragment_length(size_t message_len,
 
   for (size_t fragment_count = 1; fragment_count <= max_fragment_count;
        fragment_count++) {
-    fragment_len = (size_t)ceil((double)message_len / fragment_count);
+    // Integer ceiling division: ceil(a/b) = (a + b - 1) / b
+    fragment_len = (message_len + fragment_count - 1) / fragment_count;
     if (fragment_len <= max_fragment_len) {
       break;
     }
