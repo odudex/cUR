@@ -300,8 +300,8 @@ bool bytewords_encode(bytewords_style_t style, const uint8_t *data,
     char *pos = *encoded;
     for (size_t i = 0; i < total_len; i++) {
       const char *word = bytewords + buf[i] * 4;
-      *pos++ = word[0];
-      *pos++ = word[3];
+      *pos++ = toupper(word[0]);
+      *pos++ = toupper(word[3]);
     }
     *pos = '\0';
   } else {
@@ -316,8 +316,9 @@ bool bytewords_encode(bytewords_style_t style, const uint8_t *data,
     char *pos = *encoded;
     for (size_t i = 0; i < total_len; i++) {
       const char *word = bytewords + buf[i] * 4;
-      strncpy(pos, word, 4);
-      pos += 4;
+      for (int j = 0; j < 4; j++) {
+        *pos++ = toupper(word[j]);
+      }
       if (i < total_len - 1) {
         *pos++ = separator;
       }
@@ -426,8 +427,8 @@ bool bytewords_encode_raw(bytewords_style_t style, const uint8_t *data,
     char *pos = *encoded;
     for (size_t i = 0; i < data_len; i++) {
       const char *word = bytewords + data[i] * 4;
-      *pos++ = word[0];
-      *pos++ = word[3];
+      *pos++ = toupper(word[0]);
+      *pos++ = toupper(word[3]);
     }
     *pos = '\0';
   } else {
@@ -440,8 +441,9 @@ bool bytewords_encode_raw(bytewords_style_t style, const uint8_t *data,
     char *pos = *encoded;
     for (size_t i = 0; i < data_len; i++) {
       const char *word = bytewords + data[i] * 4;
-      strncpy(pos, word, 4);
-      pos += 4;
+      for (int j = 0; j < 4; j++) {
+        *pos++ = toupper(word[j]);
+      }
       if (i < data_len - 1) {
         *pos++ = separator;
       }
