@@ -36,6 +36,7 @@
 typedef struct hash_entry {
   part_indexes_t key;
   decoder_part_t value;
+  size_t key_hash;  // Cached hash for fast collision filtering
   struct hash_entry *next;
 } hash_entry_t;
 
@@ -177,11 +178,13 @@ static bool mixed_hash_contains(const mixed_parts_hash_t *hash,
   if (!hash || !hash->buckets || !key)
     return false;
 
-  size_t bucket = hash_indexes(key) % hash->capacity;
+  size_t key_hash = hash_indexes(key);
+  size_t bucket = key_hash % hash->capacity;
   hash_entry_t *entry = hash->buckets[bucket];
 
   while (entry) {
-    if (part_indexes_equal(&entry->key, key)) {
+    // Fast path: compare cached hash first
+    if (entry->key_hash == key_hash && part_indexes_equal(&entry->key, key)) {
       return true;
     }
     entry = entry->next;
@@ -196,31 +199,28 @@ static bool mixed_hash_put(mixed_parts_hash_t *hash, const part_indexes_t *key,
   if (!hash || !hash->buckets || !key || !value)
     return false;
 
-  size_t bucket = hash_indexes(key) % hash->capacity;
+  size_t key_hash = hash_indexes(key);
+  size_t bucket = key_hash % hash->capacity;
 
   // Check if already exists
   hash_entry_t *entry = hash->buckets[bucket];
   while (entry) {
-    if (part_indexes_equal(&entry->key, key)) {
+    // Fast path: compare cached hash first
+    if (entry->key_hash == key_hash && part_indexes_equal(&entry->key, key)) {
       // Already exists, don't add duplicate
       return false;
     }
     entry = entry->next;
   }
 
-  // Create new entry
-  hash_entry_t *new_entry = safe_malloc(sizeof(hash_entry_t));
+  // Create new entry using calloc to zero-initialize
+  // This is important: if malloc reuses freed memory, zeroed fields
+  // help detect stale pointers (key.indexes will be NULL)
+  hash_entry_t *new_entry = calloc(1, sizeof(hash_entry_t));
   if (!new_entry)
     return false;
 
-  new_entry->key.indexes = NULL;
-  new_entry->key.count = 0;
-  new_entry->key.capacity = 0;
-  new_entry->value.indexes.indexes = NULL;
-  new_entry->value.indexes.count = 0;
-  new_entry->value.indexes.capacity = 0;
-  new_entry->value.data = NULL;
-  new_entry->value.data_len = 0;
+  new_entry->key_hash = key_hash;  // Cache the hash
 
   if (!part_indexes_copy(key, &new_entry->key)) {
     free(new_entry);
@@ -248,12 +248,14 @@ static bool mixed_hash_remove(mixed_parts_hash_t *hash,
   if (!hash || !hash->buckets || !key)
     return false;
 
-  size_t bucket = hash_indexes(key) % hash->capacity;
+  size_t key_hash = hash_indexes(key);
+  size_t bucket = key_hash % hash->capacity;
   hash_entry_t *entry = hash->buckets[bucket];
   hash_entry_t *prev = NULL;
 
   while (entry) {
-    if (part_indexes_equal(&entry->key, key)) {
+    // Fast path: compare cached hash first
+    if (entry->key_hash == key_hash && part_indexes_equal(&entry->key, key)) {
       // Found the entry, remove it
       if (prev) {
         prev->next = entry->next;
@@ -1057,59 +1059,73 @@ static void gaussian_reduce_with_new_part(fountain_decoder_t *const decoder,
   if (!decoder || !pivot || is_simple_part(pivot) || !decoder->mixed_parts_hash)
     return;
 
-  // Collect entries to reduce (we can't modify the hash table while iterating)
-  size_t entry_count = decoder->mixed_parts_hash->count;
-  hash_entry_t **entries = safe_malloc(sizeof(hash_entry_t *) * entry_count);
-  if (!entries)
-    return;
-
-  size_t idx = 0;
-  for (size_t b = 0;
-       b < decoder->mixed_parts_hash->capacity && idx < entry_count; b++) {
+  // We iterate over buckets directly to avoid stale pointer issues.
+  // When we remove an entry and add a new one, we need to be careful:
+  // - The new entry goes to the HEAD of its bucket
+  // - We only continue with 'next' which was valid before the modification
+  for (size_t b = 0; b < decoder->mixed_parts_hash->capacity; b++) {
     hash_entry_t *entry = decoder->mixed_parts_hash->buckets[b];
-    while (entry && idx < entry_count) {
-      entries[idx++] = entry;
-      entry = entry->next;
-    }
-  }
-
-  // Process each entry
-  for (size_t i = 0; i < idx; i++) {
-    hash_entry_t *entry = entries[i];
-
-    if (part_indexes_equal(&entry->key, &pivot->indexes)) {
-      continue;
-    }
-
-    if (part_indexes_is_strict_subset(&pivot->indexes, &entry->key)) {
-      decoder_part_t reduced = {0};
-      reduced.indexes.indexes = NULL;
-      reduced.indexes.count = 0;
-      reduced.indexes.capacity = 0;
-      reduced.data = NULL;
-      reduced.data_len = 0;
-
-      if (reduce_part_by_part(&entry->value, pivot, &reduced)) {
-        // Remove old entry and add reduced one
-        part_indexes_t old_key = entry->key;
-        mixed_hash_remove(decoder->mixed_parts_hash, &old_key);
-
-        if (is_simple_part(&reduced)) {
-          size_t fragment_idx = get_part_index(&reduced);
-          if (!part_indexes_contains(&decoder->received_part_indexes,
-                                     fragment_idx)) {
-            queue_enqueue(&decoder->queue, &reduced);
-          }
-        } else {
-          // Add reduced mixed part back
-          add_mixed_part(decoder, &reduced, MIXED_SOURCE_REDUCTION);
-        }
-        decoder_part_free(&reduced);
+    hash_entry_t *prev = NULL;
+    
+    while (entry) {
+      // Save next pointer BEFORE any potential modification
+      hash_entry_t *next = entry->next;
+      
+      // Skip if this is the pivot itself
+      if (part_indexes_equal(&entry->key, &pivot->indexes)) {
+        prev = entry;
+        entry = next;
+        continue;
       }
+
+      if (part_indexes_is_strict_subset(&pivot->indexes, &entry->key)) {
+        decoder_part_t reduced = {0};
+        reduced.indexes.indexes = NULL;
+        reduced.indexes.count = 0;
+        reduced.indexes.capacity = 0;
+        reduced.data = NULL;
+        reduced.data_len = 0;
+
+        if (reduce_part_by_part(&entry->value, pivot, &reduced)) {
+          // Unlink entry from bucket chain BEFORE freeing
+          if (prev) {
+            prev->next = next;
+          } else {
+            decoder->mixed_parts_hash->buckets[b] = next;
+          }
+          
+          // Free the entry
+          decoder_part_free(&entry->value);
+          if (entry->key.indexes) {
+            free(entry->key.indexes);
+          }
+          free(entry);
+          decoder->mixed_parts_hash->count--;
+          
+          // Handle reduced part
+          if (is_simple_part(&reduced)) {
+            size_t fragment_idx = get_part_index(&reduced);
+            if (!part_indexes_contains(&decoder->received_part_indexes,
+                                       fragment_idx)) {
+              queue_enqueue(&decoder->queue, &reduced);
+            }
+          } else {
+            // Add reduced mixed part back
+            add_mixed_part(decoder, &reduced, MIXED_SOURCE_REDUCTION);
+          }
+          decoder_part_free(&reduced);
+          
+          // Don't update prev - it still points to the previous valid entry
+          // (or is NULL if we removed the head)
+          entry = next;
+          continue;
+        }
+      }
+      
+      prev = entry;
+      entry = next;
     }
   }
-
-  free(entries);
 }
 
 static void process_simple_part(fountain_decoder_t *const decoder,
