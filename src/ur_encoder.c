@@ -14,6 +14,7 @@
 #include "ur_encoder.h"
 #include "bytewords.h"
 #include "utils.h"
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,16 +37,22 @@ static char *encode_uri(const char *scheme, const char **path_components,
     return NULL;
   }
 
-  // Build the URI
-  strcpy(result, scheme);
-  strcat(result, ":");
+  // Build the URI with uppercase conversion for alphanumeric QR encoding
+  char *pos = result;
+  for (const char *p = scheme; *p; p++) {
+    *pos++ = toupper(*p);
+  }
+  *pos++ = ':';
 
   for (size_t i = 0; i < component_count; i++) {
-    strcat(result, path_components[i]);
+    for (const char *p = path_components[i]; *p; p++) {
+      *pos++ = toupper(*p);
+    }
     if (i < component_count - 1) {
-      strcat(result, "/");
+      *pos++ = '/';
     }
   }
+  *pos = '\0';
 
   return result;
 }
