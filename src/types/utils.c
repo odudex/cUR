@@ -309,16 +309,16 @@ char *base58check_encode(const uint8_t *data, size_t len) {
   if (!data || len == 0)
     return NULL;
 
-    // Calculate checksum (first 4 bytes of double SHA256)
-    // Use ESP32P4 hardware-accelerated SHA256 via mbedtls
-    uint8_t hash1[32];
-    uint8_t hash2[32];
+  // Calculate checksum (first 4 bytes of double SHA256)
+  // Use ESP32P4 hardware-accelerated SHA256 via mbedtls
+  uint8_t hash1[32];
+  uint8_t hash2[32];
 
-    // First SHA256
-    mbedtls_sha256(data, len, hash1, 0);  // 0 = SHA256 (not SHA224)
+  // First SHA256
+  mbedtls_sha256(data, len, hash1, 0);  // 0 = SHA256 (not SHA224)
 
-    // Second SHA256
-    mbedtls_sha256(hash1, 32, hash2, 0);
+  // Second SHA256
+  mbedtls_sha256(hash1, 32, hash2, 0);
 
   // Append checksum to data
   uint8_t *data_with_checksum = safe_malloc(len + 4);
