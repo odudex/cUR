@@ -10,7 +10,7 @@
  * tests/test_cases/
  */
 
-#include "../src/ur_encoder.h"
+#include "../../src/ur_encoder.h"
 #include <ctype.h>
 #include <dirent.h>
 #include <stdio.h>

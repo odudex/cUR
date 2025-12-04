@@ -1,7 +1,15 @@
+/*
+ * test_ur_output_decoder.c
+ *
+ * Test URDecoder with crypto-output data
+ * Reads .UR_fragments.txt files, decodes to crypto-output,
+ * then verifies against expected descriptor.
+ */
+
 #define _POSIX_C_SOURCE 200809L
 #include "../src/ur.h"
 #include "../src/ur_decoder.h"
-#include "../src/types/psbt.h"
+#include "../src/types/output.h"
 #include "../src/utils.h"
 #include "test_utils.h"
 #include <dirent.h>
@@ -10,7 +18,7 @@
 #include <string.h>
 #include <sys/types.h>
 
-#define TEST_CASES_DIR "tests/test_cases/PSBTs"
+#define TEST_CASES_DIR "tests/test_cases/output"
 
 // Function to test a single file
 int test_file(const char *filepath) {
@@ -26,36 +34,35 @@ int test_file(const char *filepath) {
 
   printf("Found %d fragments\n", fragment_count);
 
-  // Generate expected binary filename
+  // Generate expected descriptor filename
   char expected_path[512];
   strncpy(expected_path, filepath, sizeof(expected_path) - 1);
   expected_path[sizeof(expected_path) - 1] = '\0';
 
   char *ext = strstr(expected_path, ".UR_fragments.txt");
   if (ext) {
-    strcpy(ext, ".psbt.bin");
+    strcpy(ext, ".txt");
   } else {
     free_fragments(fragments, fragment_count);
     fprintf(stderr, "❌ Invalid filename format\n");
     return 1;
   }
 
-  // Read expected PSBT bytes
-  size_t expected_len = 0;
-  uint8_t *expected_bytes = read_binary_file(expected_path, &expected_len);
-  if (!expected_bytes) {
-    fprintf(stderr, "❌ Failed to read expected PSBT bytes: %s\n", expected_path);
+  // Read expected descriptor
+  char *expected_descriptor = read_text_file_first_line(expected_path);
+  if (!expected_descriptor) {
+    fprintf(stderr, "❌ Failed to read expected descriptor: %s\n", expected_path);
     free_fragments(fragments, fragment_count);
     return 1;
   }
-  printf("Expected PSBT length: %zu bytes\n", expected_len);
+  printf("Expected descriptor: %s\n", expected_descriptor);
 
   // Create decoder
   ur_decoder_t *decoder = ur_decoder_new();
   if (!decoder) {
     fprintf(stderr, "❌ Failed to create UR decoder\n");
     free_fragments(fragments, fragment_count);
-    free(expected_bytes);
+    free(expected_descriptor);
     return 1;
   }
 
@@ -87,45 +94,36 @@ int test_file(const char *filepath) {
       size_t cbor_len = result->cbor_len;
 
       if (cbor_data && cbor_len > 0) {
-        // Decode PSBT from CBOR
-        psbt_data_t *psbt = psbt_from_cbor(cbor_data, cbor_len);
+        printf("CBOR length: %zu bytes\n", cbor_len);
 
-        if (psbt) {
-          // Get PSBT data
-          size_t psbt_len;
-          const uint8_t *psbt_data = psbt_get_data(psbt, &psbt_len);
+        // Decode output from CBOR
+        output_data_t *output = output_from_cbor(cbor_data, cbor_len);
 
-          printf("Actual PSBT length: %zu bytes\n", psbt_len);
+        if (output) {
+          // Generate descriptor (with checksum)
+          char *actual_descriptor = output_descriptor(output, true);
 
-          if (psbt_data && psbt_len > 0) {
-            // Compare with expected bytes
-            if (psbt_len == expected_len && memcmp(psbt_data, expected_bytes, psbt_len) == 0) {
-              printf("✅ PASS - PSBT bytes match expected\n");
+          if (actual_descriptor) {
+            printf("Actual descriptor: %s\n", actual_descriptor);
+
+            // Compare descriptors
+            if (strcmp(actual_descriptor, expected_descriptor) == 0) {
+              printf("✅ PASS - Descriptor matches expected\n");
               success = 1;
             } else {
-              printf("❌ FAIL - PSBT bytes mismatch\n");
-              printf("Expected length: %zu, Actual length: %zu\n", expected_len, psbt_len);
-
-              // Show first bytes that differ
-              if (psbt_len != expected_len) {
-                printf("Length mismatch!\n");
-              } else {
-                for (size_t i = 0; i < psbt_len; i++) {
-                  if (psbt_data[i] != expected_bytes[i]) {
-                    printf("First mismatch at byte %zu: expected 0x%02x, got 0x%02x\n",
-                           i, expected_bytes[i], psbt_data[i]);
-                    break;
-                  }
-                }
-              }
+              printf("❌ FAIL - Descriptor mismatch\n");
+              printf("Expected: %s\n", expected_descriptor);
+              printf("Actual:   %s\n", actual_descriptor);
             }
+
+            free(actual_descriptor);
           } else {
-            fprintf(stderr, "❌ Failed to get PSBT data\n");
+            fprintf(stderr, "❌ Failed to generate descriptor\n");
           }
 
-          psbt_free(psbt);
+          output_free(output);
         } else {
-          fprintf(stderr, "❌ Failed to decode PSBT from CBOR\n");
+          fprintf(stderr, "❌ Failed to decode output from CBOR\n");
         }
       } else {
         fprintf(stderr, "❌ Failed to get CBOR data\n");
@@ -139,13 +137,13 @@ int test_file(const char *filepath) {
 
   ur_decoder_free(decoder);
   free_fragments(fragments, fragment_count);
-  free(expected_bytes);
+  free(expected_descriptor);
 
   return success ? 0 : 1;
 }
 
 int main(int argc, char *argv[]) {
-  printf("=== UR Decoder Test (PSBT) ===\n");
+  printf("=== UR Decoder Test (crypto-output) ===\n");
 
   // Check if a specific test vector file was provided
   if (argc > 1) {

@@ -17,15 +17,29 @@ OBJECTS = $(SOURCES:%.c=$(OBJDIR)/%.o)
 # Target library
 TARGET = $(SRCDIR)/libur.a
 
+# Test utilities
+TEST_UTILS_SOURCES = tests/test_utils.c
+TEST_UTILS_OBJECT = tests/test_utils.o
+
 # Test programs
-TEST_PRINT_FRAGMENTS_TARGET = tests/test_print_fragments
-TEST_PRINT_FRAGMENTS_SOURCES = tests/test_print_fragments.c
+# Cross-implementation testing
+TEST_PRINT_FRAGMENTS_TARGET = tests/cross_implementation_tests/test_print_fragments
+TEST_PRINT_FRAGMENTS_SOURCES = tests/cross_implementation_tests/test_print_fragments.c
 
-TEST_BYTES_TARGET = tests/test_bytes
-TEST_BYTES_SOURCES = tests/test_bytes.c
+TEST_PRINT_PSBT_FRAGMENTS_TARGET = tests/cross_implementation_tests/test_print_psbt_fragments
+TEST_PRINT_PSBT_FRAGMENTS_SOURCES = tests/cross_implementation_tests/test_print_psbt_fragments.c
 
-TEST_OUTPUT_TARGET = tests/test_output
-TEST_OUTPUT_SOURCES = tests/test_output.c
+TEST_BYTES_DECODER_TARGET = tests/test_ur_bytes_decoder
+TEST_BYTES_DECODER_SOURCES = tests/test_ur_bytes_decoder.c
+
+TEST_BYTES_ENCODER_TARGET = tests/test_ur_bytes_encoder
+TEST_BYTES_ENCODER_SOURCES = tests/test_ur_bytes_encoder.c
+
+TEST_OUTPUT_DECODER_TARGET = tests/test_ur_output_decoder
+TEST_OUTPUT_DECODER_SOURCES = tests/test_ur_output_decoder.c
+
+TEST_OUTPUT_ENCODER_TARGET = tests/test_ur_output_encoder
+TEST_OUTPUT_ENCODER_SOURCES = tests/test_ur_output_encoder.c
 
 TEST_PSBT_DECODER_TARGET = tests/test_ur_PSBT_decoder
 TEST_PSBT_DECODER_SOURCES = tests/test_ur_PSBT_decoder.c
@@ -36,7 +50,7 @@ TEST_PSBT_ENCODER_SOURCES = tests/test_ur_PSBT_encoder.c
 TEST_BIP39_DECODER_TARGET = tests/test_ur_bip39_decoder
 TEST_BIP39_DECODER_SOURCES = tests/test_ur_bip39_decoder.c
 
-.PHONY: all clean test-print-fragments test-bytes test-output test-PSBT-decoder test-PSBT-encoder test-bip39-decoder
+.PHONY: all clean test-print-fragments test-print-psbt-fragments test-bytes-decoder test-bytes-encoder test-output-decoder test-output-encoder test-PSBT-decoder test-PSBT-encoder test-bip39-decoder
 
 all: $(TARGET)
 
@@ -47,39 +61,63 @@ $(OBJDIR)/%.o: $(SRCDIR)/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
+# Test utilities
+$(TEST_UTILS_OBJECT): $(TEST_UTILS_SOURCES) tests/test_utils.h
+	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
+
 # Build fragment printer for cross-implementation testing
 test-print-fragments: $(TARGET) $(TEST_PRINT_FRAGMENTS_TARGET)
 
 $(TEST_PRINT_FRAGMENTS_TARGET): $(TEST_PRINT_FRAGMENTS_SOURCES) $(TARGET)
 	$(CC) $(CFLAGS) $(INCLUDES) $< -L$(SRCDIR) -lur -lm -o $@
 
-# Build and run bytes test
-test-bytes: $(TARGET) $(TEST_BYTES_TARGET)
-	./$(TEST_BYTES_TARGET)
+# Build PSBT fragment printer for cross-implementation testing
+test-print-psbt-fragments: $(TARGET) $(TEST_UTILS_OBJECT) $(TEST_PRINT_PSBT_FRAGMENTS_TARGET)
 
-$(TEST_BYTES_TARGET): $(TEST_BYTES_SOURCES) $(TARGET)
-	$(CC) $(CFLAGS) $(INCLUDES) $< -L$(SRCDIR) -lur -lm -o $@
+$(TEST_PRINT_PSBT_FRAGMENTS_TARGET): $(TEST_PRINT_PSBT_FRAGMENTS_SOURCES) $(TEST_UTILS_OBJECT) $(TARGET)
+	$(CC) $(CFLAGS) $(INCLUDES) $< $(TEST_UTILS_OBJECT) -L$(SRCDIR) -lur -lm -o $@
 
-# Build and run Output test
-test-output: $(TARGET) $(TEST_OUTPUT_TARGET)
-	./$(TEST_OUTPUT_TARGET)
+# Build and run Bytes decoder test
+test-bytes-decoder: $(TARGET) $(TEST_UTILS_OBJECT) $(TEST_BYTES_DECODER_TARGET)
+	./$(TEST_BYTES_DECODER_TARGET)
 
-$(TEST_OUTPUT_TARGET): $(TEST_OUTPUT_SOURCES) $(TARGET)
-	$(CC) $(CFLAGS) $(INCLUDES) $< -L$(SRCDIR) -lur -lm -o $@
+$(TEST_BYTES_DECODER_TARGET): $(TEST_BYTES_DECODER_SOURCES) $(TEST_UTILS_OBJECT) $(TARGET)
+	$(CC) $(CFLAGS) $(INCLUDES) $< $(TEST_UTILS_OBJECT) -L$(SRCDIR) -lur -lm -o $@
+
+# Build and run Bytes encoder test
+test-bytes-encoder: $(TARGET) $(TEST_UTILS_OBJECT) $(TEST_BYTES_ENCODER_TARGET)
+	./$(TEST_BYTES_ENCODER_TARGET)
+
+$(TEST_BYTES_ENCODER_TARGET): $(TEST_BYTES_ENCODER_SOURCES) $(TEST_UTILS_OBJECT) $(TARGET)
+	$(CC) $(CFLAGS) $(INCLUDES) $< $(TEST_UTILS_OBJECT) -L$(SRCDIR) -lur -lm -o $@
+
+# Build and run Output decoder test
+test-output-decoder: $(TARGET) $(TEST_UTILS_OBJECT) $(TEST_OUTPUT_DECODER_TARGET)
+	./$(TEST_OUTPUT_DECODER_TARGET)
+
+$(TEST_OUTPUT_DECODER_TARGET): $(TEST_OUTPUT_DECODER_SOURCES) $(TEST_UTILS_OBJECT) $(TARGET)
+	$(CC) $(CFLAGS) $(INCLUDES) $< $(TEST_UTILS_OBJECT) -L$(SRCDIR) -lur -lm -o $@
+
+# Build and run Output encoder test
+test-output-encoder: $(TARGET) $(TEST_UTILS_OBJECT) $(TEST_OUTPUT_ENCODER_TARGET)
+	./$(TEST_OUTPUT_ENCODER_TARGET)
+
+$(TEST_OUTPUT_ENCODER_TARGET): $(TEST_OUTPUT_ENCODER_SOURCES) $(TEST_UTILS_OBJECT) $(TARGET)
+	$(CC) $(CFLAGS) $(INCLUDES) $< $(TEST_UTILS_OBJECT) -L$(SRCDIR) -lur -lm -o $@
 
 # Build and run PSBT decoder test
-test-PSBT-decoder: $(TARGET) $(TEST_PSBT_DECODER_TARGET)
+test-PSBT-decoder: $(TARGET) $(TEST_UTILS_OBJECT) $(TEST_PSBT_DECODER_TARGET)
 	./$(TEST_PSBT_DECODER_TARGET)
 
-$(TEST_PSBT_DECODER_TARGET): $(TEST_PSBT_DECODER_SOURCES) $(TARGET)
-	$(CC) $(CFLAGS) $(INCLUDES) $< -L$(SRCDIR) -lur -lm -o $@
+$(TEST_PSBT_DECODER_TARGET): $(TEST_PSBT_DECODER_SOURCES) $(TEST_UTILS_OBJECT) $(TARGET)
+	$(CC) $(CFLAGS) $(INCLUDES) $< $(TEST_UTILS_OBJECT) -L$(SRCDIR) -lur -lm -o $@
 
 # Build and run PSBT encoder test
-test-PSBT-encoder: $(TARGET) $(TEST_PSBT_ENCODER_TARGET)
+test-PSBT-encoder: $(TARGET) $(TEST_UTILS_OBJECT) $(TEST_PSBT_ENCODER_TARGET)
 	./$(TEST_PSBT_ENCODER_TARGET)
 
-$(TEST_PSBT_ENCODER_TARGET): $(TEST_PSBT_ENCODER_SOURCES) $(TARGET)
-	$(CC) $(CFLAGS) $(INCLUDES) $< -L$(SRCDIR) -lur -lm -o $@
+$(TEST_PSBT_ENCODER_TARGET): $(TEST_PSBT_ENCODER_SOURCES) $(TEST_UTILS_OBJECT) $(TARGET)
+	$(CC) $(CFLAGS) $(INCLUDES) $< $(TEST_UTILS_OBJECT) -L$(SRCDIR) -lur -lm -o $@
 
 # Build and run BIP39 decoder test
 test-bip39-decoder: $(TARGET) $(TEST_BIP39_DECODER_TARGET)
@@ -89,7 +127,7 @@ $(TEST_BIP39_DECODER_TARGET): $(TEST_BIP39_DECODER_SOURCES) $(TARGET)
 	$(CC) $(CFLAGS) $(INCLUDES) $< -L$(SRCDIR) -lur -lm -o $@
 
 clean:
-	rm -rf $(OBJDIR) $(TARGET) $(TEST_PRINT_FRAGMENTS_TARGET) $(TEST_BYTES_TARGET) $(TEST_OUTPUT_TARGET) $(TEST_PSBT_DECODER_TARGET) $(TEST_PSBT_ENCODER_TARGET) $(TEST_BIP39_DECODER_TARGET) tests/test_cross_output
+	rm -rf $(OBJDIR) $(TARGET) $(TEST_UTILS_OBJECT) $(TEST_PRINT_FRAGMENTS_TARGET) $(TEST_PRINT_PSBT_FRAGMENTS_TARGET) $(TEST_BYTES_DECODER_TARGET) $(TEST_BYTES_ENCODER_TARGET) $(TEST_OUTPUT_DECODER_TARGET) $(TEST_OUTPUT_ENCODER_TARGET) $(TEST_PSBT_DECODER_TARGET) $(TEST_PSBT_ENCODER_TARGET) $(TEST_BIP39_DECODER_TARGET) tests/cross_implementation_tests/test_cross_output
 
 # Dependencies
 $(OBJDIR)/utils.o: $(SRCDIR)/utils.c $(SRCDIR)/utils.h

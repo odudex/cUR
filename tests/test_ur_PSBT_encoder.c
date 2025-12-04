@@ -10,151 +10,22 @@
 #include "../src/ur_decoder.h"
 #include "../src/ur_encoder.h"
 #include "../src/types/psbt.h"
+#include "test_utils.h"
 #include <ctype.h>
 #include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-// Base64 decode table
-static const int b64_decode_table[256] = {
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, 62, -1, -1, -1, 63, 52, 53, 54, 55, 56, 57, 58, 59, 60,
-    61, -1, -1, -1, -1, -1, -1, -1, 0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10,
-    11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, -1, -1, -1, -1,
-    -1, -1, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42,
-    43, 44, 45, 46, 47, 48, 49, 50, 51, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1};
-
-// Function to decode base64
-static bool base64_decode(const char *input, uint8_t **output, size_t *out_len) {
-  size_t input_len = strlen(input);
-  if (input_len == 0)
-    return false;
-
-  // Calculate output length
-  size_t max_output_len = (input_len / 4) * 3;
-  uint8_t *decoded = (uint8_t *)malloc(max_output_len);
-  if (!decoded)
-    return false;
-
-  size_t output_idx = 0;
-  uint32_t buffer = 0;
-  int bits_in_buffer = 0;
-
-  for (size_t i = 0; i < input_len; i++) {
-    unsigned char c = input[i];
-
-    // Skip whitespace
-    if (isspace(c))
-      continue;
-
-    // End of data
-    if (c == '=')
-      break;
-
-    int value = b64_decode_table[c];
-    if (value == -1) {
-      free(decoded);
-      return false;
-    }
-
-    buffer = (buffer << 6) | value;
-    bits_in_buffer += 6;
-
-    if (bits_in_buffer >= 8) {
-      bits_in_buffer -= 8;
-      decoded[output_idx++] = (buffer >> bits_in_buffer) & 0xFF;
-    }
-  }
-
-  *output = decoded;
-  *out_len = output_idx;
-  return true;
-}
-
-// Function to encode data to base64
-static char *base64_encode(const uint8_t *data, size_t len) {
-  size_t encoded_len = 4 * ((len + 2) / 3);
-  char *encoded = (char *)malloc(encoded_len + 1);
-  if (!encoded) {
-    return NULL;
-  }
-
-  static const char b64_table[] =
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  for (size_t i = 0, j = 0; i < len;) {
-    uint32_t octet_a = i < len ? data[i++] : 0;
-    uint32_t octet_b = i < len ? data[i++] : 0;
-    uint32_t octet_c = i < len ? data[i++] : 0;
-
-    uint32_t triple = (octet_a << 16) | (octet_b << 8) | octet_c;
-
-    encoded[j++] = b64_table[(triple >> 18) & 0x3F];
-    encoded[j++] = b64_table[(triple >> 12) & 0x3F];
-    encoded[j++] = (i > len + 1) ? '=' : b64_table[(triple >> 6) & 0x3F];
-    encoded[j++] = (i > len) ? '=' : b64_table[triple & 0x3F];
-  }
-  encoded[encoded_len] = '\0';
-
-  return encoded;
-}
-
-// Helper: Read PSBT bytes from binary file
-static bool read_psbt_from_file(const char *filename, uint8_t **bytes_out, size_t *len_out) {
-  FILE *f = fopen(filename, "rb");
-  if (!f) {
-    fprintf(stderr, "Cannot open file: %s\n", filename);
-    return false;
-  }
-
-  // Get file size
-  fseek(f, 0, SEEK_END);
-  long file_size = ftell(f);
-  fseek(f, 0, SEEK_SET);
-
-  if (file_size <= 0) {
-    fclose(f);
-    return false;
-  }
-
-  // Allocate buffer
-  uint8_t *bytes = (uint8_t *)malloc(file_size);
-  if (!bytes) {
-    fclose(f);
-    return false;
-  }
-
-  // Read file
-  size_t read_size = fread(bytes, 1, file_size, f);
-  fclose(f);
-
-  if (read_size != (size_t)file_size) {
-    free(bytes);
-    return false;
-  }
-
-  *bytes_out = bytes;
-  *len_out = file_size;
-  return true;
-}
-
 // Test one file: encode base64 PSBT to UR, decode back, verify roundtrip
 static bool test_file(const char *filename) {
   printf("\n=== Testing: %s ===\n", filename);
 
   // Read PSBT bytes from binary file
-  uint8_t *original_psbt_bytes = NULL;
   size_t original_psbt_len = 0;
+  uint8_t *original_psbt_bytes = read_binary_file(filename, &original_psbt_len);
 
-  if (!read_psbt_from_file(filename, &original_psbt_bytes, &original_psbt_len)) {
+  if (!original_psbt_bytes) {
     printf("❌ Failed to read file\n");
     return false;
   }

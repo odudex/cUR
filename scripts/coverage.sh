@@ -68,24 +68,37 @@ done
 echo -e "${YELLOW}Creating coverage library...${NC}"
 ar rcs src/libur_cov.a "$COV_OBJDIR"/*.o "$COV_OBJDIR"/sha256/*.o "$COV_OBJDIR"/types/*.o
 
-# Build and run all tests
+# Discover and run all tests
+echo -e "${YELLOW}Discovering tests in tests/ folder...${NC}"
+
+# Find all test_*.c files in tests folder (excluding test_utils.c)
+TEST_FILES=($(find tests -maxdepth 1 -name "test_*.c" ! -name "test_utils.c" -type f | sort))
+
+if [ ${#TEST_FILES[@]} -eq 0 ]; then
+    echo -e "${RED}Error: No test files found in tests/ folder${NC}"
+    exit 1
+fi
+
+echo -e "Found ${GREEN}${#TEST_FILES[@]}${NC} test files"
+
+# Build test utilities if needed
+echo -e "${YELLOW}Building test utilities...${NC}"
+if [ -f "tests/test_utils.c" ]; then
+    gcc $CFLAGS $INCLUDES -c "tests/test_utils.c" -o "tests/test_utils_cov.o"
+    TEST_UTILS_OBJ="tests/test_utils_cov.o"
+else
+    TEST_UTILS_OBJ=""
+fi
+
+# Build and run each test
 echo -e "${YELLOW}Building and running tests...${NC}"
+for test_file in "${TEST_FILES[@]}"; do
+    test_name=$(basename "$test_file" .c)
+    echo -e "  Building ${test_name}..."
+    gcc $CFLAGS $INCLUDES "$test_file" $TEST_UTILS_OBJ -Lsrc -lur_cov -lm -o "tests/${test_name}_cov" --coverage
 
-TESTS=(
-    "test_ur_decoder"
-    "test_ur_encoder"
-    "test_bytes"
-    "test_psbt"
-    "test_bip39"
-    "test_output"
-)
-
-for test in "${TESTS[@]}"; do
-    echo -e "  Building ${test}..."
-    gcc $CFLAGS $INCLUDES "tests/${test}.c" -Lsrc -lur_cov -lm -o "tests/${test}_cov" --coverage
-    
-    echo -e "  Running ${test}..."
-    "./tests/${test}_cov" || true
+    echo -e "  Running ${test_name}..."
+    "./tests/${test_name}_cov" || true
 done
 
 # Generate coverage data
@@ -95,9 +108,19 @@ echo -e "${YELLOW}Generating coverage report...${NC}"
 lcov --capture --directory . --output-file coverage.info
 
 # Filter to only include src/ files (exclude tests and system headers)
-lcov --remove coverage.info '/usr/*' '*/tests/*' --output-file coverage.info
+lcov --remove coverage.info '/usr/*' '*/tests/*' --output-file coverage.info --ignore-errors unused
+
+# Clean up intermediary files before generating HTML
+echo -e "${YELLOW}Cleaning up intermediary files...${NC}"
+find . -name "*.gcda" -delete
+find . -name "*.gcno" -delete
+rm -f tests/*_cov
+rm -f tests/test_utils_cov.o
+rm -f src/libur_cov.a
+rm -rf "$COV_OBJDIR"
 
 # Generate HTML report
+echo -e "${YELLOW}Generating HTML coverage report...${NC}"
 genhtml coverage.info --output-directory coverage_html --title "BC_UR Coverage Report"
 
 # Print summary
@@ -105,11 +128,9 @@ echo ""
 echo -e "${GREEN}=== Coverage Summary ===${NC}"
 lcov --summary coverage.info 2>&1 || true
 
+# Clean up coverage.info
+rm -f coverage.info
+
 echo ""
 echo -e "${GREEN}HTML report generated: ${PROJECT_ROOT}/coverage_html/index.html${NC}"
 echo -e "Open with: ${YELLOW}xdg-open coverage_html/index.html${NC}"
-
-# Cleanup coverage binaries (keep .gcda/.gcno for re-runs)
-rm -f tests/*_cov
-rm -f src/libur_cov.a
-rm -rf "$COV_OBJDIR"
