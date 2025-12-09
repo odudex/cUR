@@ -34,28 +34,38 @@ int test_file(const char *filepath) {
 
   printf("Found %d fragments\n", fragment_count);
 
-  // Generate expected data filename
+  // Generate expected data filename - try .bin first, then .decoded.txt
   char expected_path[512];
   strncpy(expected_path, filepath, sizeof(expected_path) - 1);
   expected_path[sizeof(expected_path) - 1] = '\0';
 
   char *ext = strstr(expected_path, ".UR_fragments.txt");
-  if (ext) {
-    strcpy(ext, ".decoded.txt");
-  } else {
+  if (!ext) {
     free_fragments(fragments, fragment_count);
     fprintf(stderr, "❌ Invalid filename format\n");
     return 1;
   }
 
-  // Read expected data
+  // Read expected data - prioritize .bin for bytes type
   size_t expected_len = 0;
-  uint8_t *expected_data = read_binary_file(expected_path, &expected_len);
+  uint8_t *expected_data = NULL;
+
+  // First try .bin file
+  strcpy(ext, ".bin");
+  expected_data = read_binary_file(expected_path, &expected_len);
+
   if (!expected_data) {
-    fprintf(stderr, "❌ Failed to read expected data: %s\n", expected_path);
+    // Fall back to .decoded.txt
+    strcpy(ext, ".decoded.txt");
+    expected_data = read_binary_file(expected_path, &expected_len);
+  }
+
+  if (!expected_data) {
+    fprintf(stderr, "❌ Failed to read expected data (tried .bin and .decoded.txt)\n");
     free_fragments(fragments, fragment_count);
     return 1;
   }
+  printf("Expected data file: %s\n", expected_path);
   printf("Expected data length: %zu bytes\n", expected_len);
 
   // Create decoder
