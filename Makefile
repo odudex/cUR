@@ -9,7 +9,7 @@ OBJDIR = src/obj
 # Source files (exclude test files)
 SOURCES = utils.c bytewords.c cbor_lite.c fountain_decoder.c fountain_encoder.c fountain_utils.c crc32.c ur_decoder.c ur_encoder.c ur.c sha256/sha256.c \
           types/utils.c types/cbor_data.c types/cbor_encoder.c types/cbor_decoder.c types/registry.c types/bytes_type.c types/psbt.c types/bip39.c \
-          types/keypath.c types/ec_key.c types/hd_key.c types/multi_key.c types/output.c
+          types/keypath.c types/hd_key.c types/multi_key.c types/output.c
 
 # Object files
 OBJECTS = $(SOURCES:%.c=$(OBJDIR)/%.o)

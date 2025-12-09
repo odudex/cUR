@@ -43,14 +43,6 @@ void hd_key_free(hd_key_data_t *hd_key) {
   free(hd_key);
 }
 
-static void hd_key_item_free(registry_item_t *item) {
-  if (!item)
-    return;
-  hd_key_data_t *hd_key = (hd_key_data_t *)item->data;
-  hd_key_free(hd_key);
-  free(item);
-}
-
 // Parse HDKey from CBOR data item
 registry_item_t *hd_key_from_data_item(cbor_value_t *data_item) {
   if (!data_item)
@@ -178,7 +170,7 @@ registry_item_t *hd_key_to_registry_item(hd_key_data_t *hd_key) {
   item->data = hd_key;
   item->to_data_item = NULL; // Not needed for read-only
   item->from_data_item = hd_key_from_data_item;
-  item->free_item = hd_key_item_free;
+  item->free_item = NULL;
 
   return item;
 }
@@ -187,24 +179,6 @@ hd_key_data_t *hd_key_from_registry_item(registry_item_t *item) {
   if (!item || item->type != &HDKEY_TYPE)
     return NULL;
   return (hd_key_data_t *)item->data;
-}
-
-hd_key_data_t *hd_key_from_cbor(const uint8_t *cbor_data, size_t len) {
-  if (!cbor_data || len == 0)
-    return NULL;
-
-  registry_item_t *item =
-      registry_item_from_cbor(cbor_data, len, hd_key_from_data_item);
-  if (!item)
-    return NULL;
-
-  hd_key_data_t *hd_key = hd_key_from_registry_item(item);
-
-  // Transfer ownership
-  item->data = NULL;
-  free(item);
-
-  return hd_key;
 }
 
 // Generate BIP32 extended key (xpub/xprv format)

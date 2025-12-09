@@ -132,13 +132,27 @@ static bool test_file(const char *filepath) {
     return false;
   }
 
-  // Create UREncoder using the original CBOR data
+  // Encode bytes to CBOR (tests bytes_to_cbor path)
+  size_t encoded_cbor_len = 0;
+  uint8_t *encoded_cbor = bytes_to_cbor(original_bytes, &encoded_cbor_len);
+  if (!encoded_cbor) {
+    printf("❌ Failed to encode bytes to CBOR\n");
+    bytes_free(original_bytes);
+    ur_decoder_free(decoder1);
+    free_fragments(fragments, fragment_count);
+    free(expected_data);
+    return false;
+  }
+  printf("Encoded CBOR size: %zu bytes\n", encoded_cbor_len);
+
+  // Create UREncoder using the encoded CBOR data
   size_t max_fragment_len = 200; // Reasonable fragment size
   ur_encoder_t *encoder =
-      ur_encoder_new("bytes", original_cbor, original_cbor_len, max_fragment_len, 0, 10);
+      ur_encoder_new("bytes", encoded_cbor, encoded_cbor_len, max_fragment_len, 0, 10);
 
   if (!encoder) {
     printf("❌ Failed to create encoder\n");
+    free(encoded_cbor);
     bytes_free(original_bytes);
     ur_decoder_free(decoder1);
     free_fragments(fragments, fragment_count);
@@ -156,6 +170,7 @@ static bool test_file(const char *filepath) {
   if (!decoder2) {
     printf("❌ Failed to create roundtrip decoder\n");
     ur_encoder_free(encoder);
+    free(encoded_cbor);
     bytes_free(original_bytes);
     ur_decoder_free(decoder1);
     free_fragments(fragments, fragment_count);
@@ -177,6 +192,7 @@ static bool test_file(const char *filepath) {
       printf("❌ Failed to get next part\n");
       ur_decoder_free(decoder2);
       ur_encoder_free(encoder);
+      free(encoded_cbor);
       bytes_free(original_bytes);
       ur_decoder_free(decoder1);
       free_fragments(fragments, fragment_count);
@@ -259,6 +275,7 @@ static bool test_file(const char *filepath) {
 
   ur_decoder_free(decoder2);
   ur_encoder_free(encoder);
+  free(encoded_cbor);
   bytes_free(original_bytes);
   ur_decoder_free(decoder1);
   free_fragments(fragments, fragment_count);

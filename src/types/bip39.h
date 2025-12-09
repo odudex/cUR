@@ -26,8 +26,7 @@ void bip39_free(bip39_data_t *bip39);
 registry_item_t *bip39_to_registry_item(bip39_data_t *bip39);
 bip39_data_t *bip39_from_registry_item(registry_item_t *item);
 
-// CBOR conversion functions
-cbor_value_t *bip39_to_data_item(registry_item_t *item);
+// CBOR conversion functions (decode only)
 registry_item_t *bip39_from_data_item(cbor_value_t *data_item);
 
 // Convenience functions

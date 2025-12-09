@@ -14,15 +14,6 @@ psbt_data_t *psbt_new(const uint8_t *data, size_t len) {
 
 void psbt_free(psbt_data_t *psbt) { bytes_free(psbt); }
 
-static void psbt_item_free(registry_item_t *item) {
-  if (!item)
-    return;
-
-  psbt_data_t *psbt = (psbt_data_t *)item->data;
-  psbt_free(psbt);
-  free(item);
-}
-
 // CBOR conversion functions
 cbor_value_t *psbt_to_data_item(registry_item_t *item) {
   if (!item || !item->data)
@@ -68,7 +59,7 @@ registry_item_t *psbt_to_registry_item(psbt_data_t *psbt) {
   item->data = psbt;
   item->to_data_item = psbt_to_data_item;
   item->from_data_item = psbt_from_data_item;
-  item->free_item = psbt_item_free;
+  item->free_item = NULL;
 
   return item;
 }

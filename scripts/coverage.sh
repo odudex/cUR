@@ -55,7 +55,7 @@ SOURCES=(
     sha256/sha256.c
     types/utils.c types/cbor_data.c types/cbor_encoder.c types/cbor_decoder.c
     types/registry.c types/bytes_type.c types/psbt.c types/bip39.c
-    types/keypath.c types/ec_key.c types/hd_key.c types/multi_key.c types/output.c
+    types/keypath.c types/hd_key.c types/multi_key.c types/output.c
 )
 
 for src in "${SOURCES[@]}"; do

@@ -13,16 +13,6 @@ cbor_value_t *cbor_value_new_unsigned_int(uint64_t val) {
   return v;
 }
 
-cbor_value_t *cbor_value_new_negative_int(int64_t val) {
-  cbor_value_t *v = safe_malloc(sizeof(cbor_value_t));
-  if (!v)
-    return NULL;
-
-  v->type = CBOR_TYPE_NEGATIVE_INT;
-  v->value.int_val = val;
-  return v;
-}
-
 cbor_value_t *cbor_value_new_bytes(const uint8_t *data, size_t len) {
   cbor_value_t *v = safe_malloc(sizeof(cbor_value_t));
   if (!v)
@@ -39,7 +29,6 @@ cbor_value_t *cbor_value_new_bytes(const uint8_t *data, size_t len) {
     memcpy(v->value.bytes_val.data, data, len);
     v->value.bytes_val.len = len;
   } else {
-    // Handle empty bytes case
     v->value.bytes_val.data = NULL;
     v->value.bytes_val.len = 0;
   }
@@ -112,34 +101,6 @@ cbor_value_t *cbor_value_new_bool(bool val) {
   return v;
 }
 
-cbor_value_t *cbor_value_new_null(void) {
-  cbor_value_t *v = safe_malloc(sizeof(cbor_value_t));
-  if (!v)
-    return NULL;
-
-  v->type = CBOR_TYPE_NULL;
-  return v;
-}
-
-cbor_value_t *cbor_value_new_undefined(void) {
-  cbor_value_t *v = safe_malloc(sizeof(cbor_value_t));
-  if (!v)
-    return NULL;
-
-  v->type = CBOR_TYPE_UNDEFINED;
-  return v;
-}
-
-cbor_value_t *cbor_value_new_float(double val) {
-  cbor_value_t *v = safe_malloc(sizeof(cbor_value_t));
-  if (!v)
-    return NULL;
-
-  v->type = CBOR_TYPE_FLOAT;
-  v->value.float_val = val;
-  return v;
-}
-
 // CBOR value manipulation
 bool cbor_array_append(cbor_value_t *array, cbor_value_t *item) {
   if (!array || array->type != CBOR_TYPE_ARRAY || !item)
@@ -161,13 +122,15 @@ bool cbor_map_set(cbor_value_t *map, cbor_value_t *key, cbor_value_t *value) {
   if (!map || map->type != CBOR_TYPE_MAP || !key || !value)
     return false;
 
-  // Check if key already exists
+  // Check if key already exists (only unsigned int keys used in Bitcoin URs)
   for (size_t i = 0; i < map->value.map_val.count; i++) {
-    if (cbor_value_equals(map->value.map_val.keys[i], key)) {
+    if (map->value.map_val.keys[i]->type == CBOR_TYPE_UNSIGNED_INT &&
+        key->type == CBOR_TYPE_UNSIGNED_INT &&
+        map->value.map_val.keys[i]->value.uint_val == key->value.uint_val) {
       // Update existing value
       cbor_value_free(map->value.map_val.values[i]);
       map->value.map_val.values[i] = value;
-      cbor_value_free(key); // Free the duplicate key
+      cbor_value_free(key);
       return true;
     }
   }
@@ -197,8 +160,13 @@ cbor_value_t *cbor_map_get(cbor_value_t *map, cbor_value_t *key) {
   if (!map || map->type != CBOR_TYPE_MAP || !key)
     return NULL;
 
+  // Only unsigned int keys used in Bitcoin URs
+  if (key->type != CBOR_TYPE_UNSIGNED_INT)
+    return NULL;
+
   for (size_t i = 0; i < map->value.map_val.count; i++) {
-    if (cbor_value_equals(map->value.map_val.keys[i], key)) {
+    if (map->value.map_val.keys[i]->type == CBOR_TYPE_UNSIGNED_INT &&
+        map->value.map_val.keys[i]->value.uint_val == key->value.uint_val) {
       return map->value.map_val.values[i];
     }
   }
@@ -207,8 +175,10 @@ cbor_value_t *cbor_map_get(cbor_value_t *map, cbor_value_t *key) {
 }
 
 cbor_value_t *cbor_map_get_int(cbor_value_t *map, int64_t key) {
-  cbor_value_t *key_val = key >= 0 ? cbor_value_new_unsigned_int(key)
-                                   : cbor_value_new_negative_int(key);
+  if (key < 0)
+    return NULL; // Negative keys not used
+
+  cbor_value_t *key_val = cbor_value_new_unsigned_int((uint64_t)key);
   if (!key_val)
     return NULL;
 
@@ -220,7 +190,7 @@ cbor_value_t *cbor_map_get_int(cbor_value_t *map, int64_t key) {
 // CBOR value accessors
 cbor_type_t cbor_value_get_type(cbor_value_t *val) {
   if (!val)
-    return CBOR_TYPE_NULL;
+    return CBOR_TYPE_UNSIGNED_INT; // Safe default
   return val->type;
 }
 
@@ -228,16 +198,6 @@ uint64_t cbor_value_get_uint(cbor_value_t *val) {
   if (!val || val->type != CBOR_TYPE_UNSIGNED_INT)
     return 0;
   return val->value.uint_val;
-}
-
-int64_t cbor_value_get_int(cbor_value_t *val) {
-  if (!val)
-    return 0;
-  if (val->type == CBOR_TYPE_UNSIGNED_INT)
-    return (int64_t)val->value.uint_val;
-  if (val->type == CBOR_TYPE_NEGATIVE_INT)
-    return val->value.int_val;
-  return 0;
 }
 
 const uint8_t *cbor_value_get_bytes(cbor_value_t *val, size_t *out_len) {
@@ -267,22 +227,10 @@ cbor_value_t *cbor_value_get_array_item(cbor_value_t *val, size_t index) {
   return val->value.array_val.items[index];
 }
 
-size_t cbor_value_get_map_size(cbor_value_t *val) {
-  if (!val || val->type != CBOR_TYPE_MAP)
-    return 0;
-  return val->value.map_val.count;
-}
-
 bool cbor_value_get_bool(cbor_value_t *val) {
   if (!val || val->type != CBOR_TYPE_BOOL)
     return false;
   return val->value.bool_val;
-}
-
-double cbor_value_get_float(cbor_value_t *val) {
-  if (!val || val->type != CBOR_TYPE_FLOAT)
-    return 0.0;
-  return val->value.float_val;
 }
 
 uint64_t cbor_value_get_tag(cbor_value_t *val) {
@@ -295,66 +243,6 @@ cbor_value_t *cbor_value_get_tag_content(cbor_value_t *val) {
   if (!val || val->type != CBOR_TYPE_TAG)
     return NULL;
   return val->value.tag_val.content;
-}
-
-// CBOR value comparison
-bool cbor_value_equals(cbor_value_t *a, cbor_value_t *b) {
-  if (!a && !b)
-    return true;
-  if (!a || !b)
-    return false;
-  if (a->type != b->type)
-    return false;
-
-  switch (a->type) {
-  case CBOR_TYPE_UNSIGNED_INT:
-    return a->value.uint_val == b->value.uint_val;
-  case CBOR_TYPE_NEGATIVE_INT:
-    return a->value.int_val == b->value.int_val;
-  case CBOR_TYPE_BYTES:
-    if (a->value.bytes_val.len != b->value.bytes_val.len)
-      return false;
-    return memcmp(a->value.bytes_val.data, b->value.bytes_val.data,
-                  a->value.bytes_val.len) == 0;
-  case CBOR_TYPE_STRING:
-    return strcmp(a->value.string_val, b->value.string_val) == 0;
-  case CBOR_TYPE_BOOL:
-    return a->value.bool_val == b->value.bool_val;
-  case CBOR_TYPE_NULL:
-  case CBOR_TYPE_UNDEFINED:
-    return true;
-  case CBOR_TYPE_FLOAT:
-    return a->value.float_val == b->value.float_val;
-  case CBOR_TYPE_TAG:
-    return a->value.tag_val.tag == b->value.tag_val.tag &&
-           cbor_value_equals(a->value.tag_val.content,
-                             b->value.tag_val.content);
-  case CBOR_TYPE_ARRAY:
-    if (a->value.array_val.count != b->value.array_val.count)
-      return false;
-    for (size_t i = 0; i < a->value.array_val.count; i++) {
-      if (!cbor_value_equals(a->value.array_val.items[i],
-                             b->value.array_val.items[i])) {
-        return false;
-      }
-    }
-    return true;
-  case CBOR_TYPE_MAP:
-    if (a->value.map_val.count != b->value.map_val.count)
-      return false;
-    // Simple comparison - assumes same key ordering
-    for (size_t i = 0; i < a->value.map_val.count; i++) {
-      if (!cbor_value_equals(a->value.map_val.keys[i],
-                             b->value.map_val.keys[i]) ||
-          !cbor_value_equals(a->value.map_val.values[i],
-                             b->value.map_val.values[i])) {
-        return false;
-      }
-    }
-    return true;
-  default:
-    return false;
-  }
 }
 
 // CBOR value cleanup

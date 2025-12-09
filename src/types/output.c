@@ -42,8 +42,8 @@ output_data_t *output_new(void) {
 
   output->script_expressions = NULL;
   output->script_expression_count = 0;
-  output->key_type = KEY_TYPE_EC;
-  output->crypto_key.ec_key = NULL;
+  output->key_type = KEY_TYPE_HD;
+  output->crypto_key.hd_key = NULL;
 
   return output;
 }
@@ -56,9 +56,6 @@ void output_free(output_data_t *output) {
 
   // Free the appropriate key type
   switch (output->key_type) {
-  case KEY_TYPE_EC:
-    ec_key_free(output->crypto_key.ec_key);
-    break;
   case KEY_TYPE_HD:
     hd_key_free(output->crypto_key.hd_key);
     break;
@@ -68,14 +65,6 @@ void output_free(output_data_t *output) {
   }
 
   free(output);
-}
-
-static void output_item_free(registry_item_t *item) {
-  if (!item)
-    return;
-  output_data_t *output = (output_data_t *)item->data;
-  output_free(output);
-  free(item);
 }
 
 // Parse Output from CBOR data item
@@ -164,26 +153,9 @@ registry_item_t *output_from_data_item(cbor_value_t *data_item) {
     output->key_type = KEY_TYPE_HD;
     output->crypto_key.hd_key = hd_key;
   } else {
-    // Parse as ECKey (default) - unwrap the tag if present
-    cbor_value_t *key_content = key_item;
-    if (cbor_value_get_type(key_item) == CBOR_TYPE_TAG) {
-      key_content = cbor_value_get_tag_content(key_item);
-    }
-    registry_item_t *item = ec_key_from_data_item(key_content);
-    if (!item) {
-      output_free(output);
-      return NULL;
-    }
-    ec_key_data_t *ec_key = ec_key_from_registry_item(item);
-    if (!ec_key) {
-      free(item);
-      output_free(output);
-      return NULL;
-    }
-    item->data = NULL; // Transfer ownership
-    free(item);
-    output->key_type = KEY_TYPE_EC;
-    output->crypto_key.ec_key = ec_key;
+    // Unknown key type
+    output_free(output);
+    return NULL;
   }
 
   return output_to_registry_item(output);
@@ -202,7 +174,7 @@ registry_item_t *output_to_registry_item(output_data_t *output) {
   item->data = output;
   item->to_data_item = NULL; // Not needed for read-only
   item->from_data_item = output_from_data_item;
-  item->free_item = output_item_free;
+  item->free_item = NULL;
 
   return item;
 }
@@ -324,13 +296,7 @@ char *output_descriptor(output_data_t *output, bool include_checksum) {
   }
 
   // Write keys
-  if (output->key_type == KEY_TYPE_EC) {
-    char *key_str = ec_key_descriptor_key(output->crypto_key.ec_key);
-    if (key_str) {
-      byte_buffer_append(buf, (const uint8_t *)key_str, strlen(key_str));
-      free(key_str);
-    }
-  } else if (output->key_type == KEY_TYPE_HD) {
+  if (output->key_type == KEY_TYPE_HD) {
     char *key_str = hd_key_descriptor_key(output->crypto_key.hd_key);
     if (key_str) {
       byte_buffer_append(buf, (const uint8_t *)key_str, strlen(key_str));
@@ -338,18 +304,6 @@ char *output_descriptor(output_data_t *output, bool include_checksum) {
     }
   } else if (output->key_type == KEY_TYPE_MULTI) {
     multi_key_data_t *mk = output->crypto_key.multi_key;
-
-    // Write EC keys
-    for (size_t i = 0; i < mk->ec_key_count; i++) {
-      char *key_str = ec_key_descriptor_key(mk->ec_keys[i]);
-      if (key_str) {
-        byte_buffer_append(buf, (const uint8_t *)key_str, strlen(key_str));
-        free(key_str);
-      }
-      if (i < mk->ec_key_count - 1 || mk->hd_key_count > 0) {
-        byte_buffer_append_byte(buf, ',');
-      }
-    }
 
     // Write HD keys
     for (size_t i = 0; i < mk->hd_key_count; i++) {

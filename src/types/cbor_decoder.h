@@ -11,7 +11,6 @@ typedef struct {
   const uint8_t *data;
   size_t len;
   size_t offset;
-  char *error;
 } urtypes_cbor_decoder_t;
 
 // Create and destroy decoder
@@ -22,15 +21,11 @@ void urtypes_cbor_decoder_free(urtypes_cbor_decoder_t *decoder);
 // Decode CBOR value
 cbor_value_t *urtypes_cbor_decoder_decode(urtypes_cbor_decoder_t *decoder);
 
-// Get error message
-const char *urtypes_cbor_decoder_get_error(urtypes_cbor_decoder_t *decoder);
-
 // Wrapper macros
 #define cbor_decoder_t urtypes_cbor_decoder_t
 #define cbor_decoder_new urtypes_cbor_decoder_new
 #define cbor_decoder_free urtypes_cbor_decoder_free
 #define cbor_decoder_decode urtypes_cbor_decoder_decode
-#define cbor_decoder_get_error urtypes_cbor_decoder_get_error
 
 // Convenience function to decode bytes to a value
 cbor_value_t *cbor_decode(const uint8_t *data, size_t len);
