@@ -1,17 +1,19 @@
 //
-// cbor_lite.c
+// cbor_encoder_lite.c
 //
 // Copyright © 2025 Krux Contributors
 // Licensed under the "BSD-2-Clause Plus Patent License"
 //
-// Lightweight CBOR encoder/decoder implementation for UR encoding.
+// Lightweight CBOR encoder implementation for UR fountain encoding.
 // Follows CBOR specification RFC 8949.
 //
 // This is an independent implementation written using
 // foundation-ur-py as a reference for testing and validation.
 //
+// Note: Decoder functionality removed - all decoding done by types/cbor_decoder.c
+//
 
-#include "cbor_lite.h"
+#include "cbor_encoder_lite.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -158,142 +160,5 @@ bool cbor_encode_bytes(cbor_encoder_t *enc, const uint8_t *data, size_t len) {
 
   memcpy(enc->buffer + enc->size, data, len);
   enc->size += len;
-  return true;
-}
-
-size_t cbor_encoded_unsigned_size(uint64_t value) {
-  return 1 + get_byte_length(value);
-}
-
-// Decoder functions
-void cbor_decoder_init(cbor_decoder_t *dec, const uint8_t *buffer,
-                       size_t size) {
-  if (dec) {
-    dec->buffer = buffer;
-    dec->size = size;
-    dec->pos = 0;
-  }
-}
-
-// Helper: Decode tag and additional info
-static bool decode_tag_and_additional(cbor_decoder_t *dec, uint8_t *major_out,
-                                      uint8_t *additional_out) {
-  if (!dec || dec->pos >= dec->size)
-    return false;
-
-  uint8_t byte = dec->buffer[dec->pos++];
-  *major_out = byte & CBOR_MAJOR_MASK;
-  *additional_out = byte & CBOR_MINOR_MASK;
-  return true;
-}
-
-// Helper: Decode value from additional info
-static bool decode_value_from_additional(cbor_decoder_t *dec,
-                                         uint8_t additional,
-                                         uint64_t *value_out) {
-  if (!dec || !value_out)
-    return false;
-
-  if (additional < CBOR_MINOR_LENGTH1) {
-    *value_out = additional;
-    return true;
-  }
-
-  uint64_t value = 0;
-
-  if (additional == CBOR_MINOR_LENGTH1) {
-    if (dec->pos + 1 > dec->size)
-      return false;
-    value = dec->buffer[dec->pos++];
-  } else if (additional == CBOR_MINOR_LENGTH2) {
-    if (dec->pos + 2 > dec->size)
-      return false;
-    value = ((uint64_t)dec->buffer[dec->pos] << 8) |
-            (uint64_t)dec->buffer[dec->pos + 1];
-    dec->pos += 2;
-  } else if (additional == CBOR_MINOR_LENGTH4) {
-    if (dec->pos + 4 > dec->size)
-      return false;
-    value = ((uint64_t)dec->buffer[dec->pos] << 24) |
-            ((uint64_t)dec->buffer[dec->pos + 1] << 16) |
-            ((uint64_t)dec->buffer[dec->pos + 2] << 8) |
-            (uint64_t)dec->buffer[dec->pos + 3];
-    dec->pos += 4;
-  } else if (additional == CBOR_MINOR_LENGTH8) {
-    if (dec->pos + 8 > dec->size)
-      return false;
-    value = ((uint64_t)dec->buffer[dec->pos] << 56) |
-            ((uint64_t)dec->buffer[dec->pos + 1] << 48) |
-            ((uint64_t)dec->buffer[dec->pos + 2] << 40) |
-            ((uint64_t)dec->buffer[dec->pos + 3] << 32) |
-            ((uint64_t)dec->buffer[dec->pos + 4] << 24) |
-            ((uint64_t)dec->buffer[dec->pos + 5] << 16) |
-            ((uint64_t)dec->buffer[dec->pos + 6] << 8) |
-            (uint64_t)dec->buffer[dec->pos + 7];
-    dec->pos += 8;
-  } else {
-    return false;
-  }
-
-  *value_out = value;
-  return true;
-}
-
-bool cbor_decode_unsigned(cbor_decoder_t *dec, uint64_t *value_out) {
-  if (!dec || !value_out)
-    return false;
-
-  uint8_t major, additional;
-  if (!decode_tag_and_additional(dec, &major, &additional))
-    return false;
-
-  if (major != CBOR_MAJOR_UNSIGNED)
-    return false;
-
-  return decode_value_from_additional(dec, additional, value_out);
-}
-
-bool cbor_decode_array_start(cbor_decoder_t *dec, size_t *count_out) {
-  if (!dec || !count_out)
-    return false;
-
-  uint8_t major, additional;
-  if (!decode_tag_and_additional(dec, &major, &additional))
-    return false;
-
-  if (major != CBOR_MAJOR_ARRAY)
-    return false;
-
-  uint64_t count;
-  if (!decode_value_from_additional(dec, additional, &count))
-    return false;
-
-  *count_out = (size_t)count;
-  return true;
-}
-
-bool cbor_decode_bytes(cbor_decoder_t *dec, const uint8_t **data_out,
-                       size_t *len_out) {
-  if (!dec || !data_out || !len_out)
-    return false;
-
-  uint8_t major, additional;
-  if (!decode_tag_and_additional(dec, &major, &additional))
-    return false;
-
-  if (major != CBOR_MAJOR_BYTES)
-    return false;
-
-  uint64_t len;
-  if (!decode_value_from_additional(dec, additional, &len))
-    return false;
-
-  if (dec->pos + len > dec->size)
-    return false;
-
-  *data_out = dec->buffer + dec->pos;
-  *len_out = (size_t)len;
-  dec->pos += len;
-
   return true;
 }

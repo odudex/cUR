@@ -13,7 +13,7 @@
 //
 
 #include "fountain_encoder.h"
-#include "cbor_lite.h"
+#include "cbor_encoder_lite.h"
 #include "crc32.h"
 #include "fountain_utils.h"
 #include "utils.h"

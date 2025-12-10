@@ -50,7 +50,7 @@ INCLUDES="-Isrc"
 
 # Compile all source files with coverage
 SOURCES=(
-    utils.c bytewords.c cbor_lite.c fountain_decoder.c fountain_encoder.c
+    utils.c bytewords.c cbor_encoder_lite.c fountain_decoder.c fountain_encoder.c
     fountain_utils.c crc32.c ur_decoder.c ur_encoder.c ur.c
     sha256/sha256.c
     types/utils.c types/cbor_data.c types/cbor_encoder.c types/cbor_decoder.c
