@@ -141,13 +141,6 @@ bool fountain_decoder_is_complete(fountain_decoder_t *decoder);
 bool fountain_decoder_is_success(fountain_decoder_t *decoder);
 
 /**
- * Check if decoding failed
- * @param decoder Pointer to fountain decoder
- * @return true if failed, false otherwise
- */
-bool fountain_decoder_is_failure(fountain_decoder_t *decoder);
-
-/**
  * Get expected part count
  * @param decoder Pointer to fountain decoder
  * @return Expected part count

@@ -61,15 +61,34 @@ int test_file(const char *filepath) {
 
   int success = 0;
   int parts_used = 0;
+  int progress_reported = 0;
 
   // Feed all fragments
   for (int i = 0; i < fragment_count; i++) {
     if (ur_decoder_receive_part(decoder, fragments[i])) {
       parts_used++;
 
+      // Check ongoing decode status using the functions we want to cover
+      size_t expected_parts = ur_decoder_expected_part_count(decoder);
+      size_t processed_parts = ur_decoder_processed_parts_count(decoder);
+      double percent_complete = ur_decoder_estimated_percent_complete(decoder);
+
+      // Report progress once after first part (to avoid too much output)
+      if (!progress_reported && expected_parts > 0) {
+        printf("Expected parts: %zu, Processed: %zu, Progress: %.1f%%\n",
+               expected_parts, processed_parts, percent_complete * 100.0);
+        progress_reported = 1;
+      }
+
       if (ur_decoder_is_complete(decoder)) {
         printf("Decoder complete after %d parts\n", parts_used);
         break;
+      }
+    } else {
+      // Check error status if receive_part failed
+      ur_decoder_error_t error = ur_decoder_get_last_error(decoder);
+      if (error != UR_DECODER_OK) {
+        fprintf(stderr, "Decode error at fragment %d: %d\n", i, error);
       }
     }
   }

@@ -144,13 +144,6 @@ void ur_encoder_free(ur_encoder_t *encoder) {
   free(encoder);
 }
 
-uint32_t ur_encoder_seq_num(const ur_encoder_t *encoder) {
-  if (!encoder || !encoder->fountain_encoder) {
-    return 0;
-  }
-  return fountain_encoder_seq_num(encoder->fountain_encoder);
-}
-
 size_t ur_encoder_seq_len(const ur_encoder_t *encoder) {
   if (!encoder || !encoder->fountain_encoder) {
     return 0;
@@ -158,19 +151,12 @@ size_t ur_encoder_seq_len(const ur_encoder_t *encoder) {
   return fountain_encoder_seq_len(encoder->fountain_encoder);
 }
 
-const part_indexes_t *
-ur_encoder_last_part_indexes(const ur_encoder_t *encoder) {
-  if (!encoder || !encoder->fountain_encoder) {
-    return NULL;
-  }
-  return fountain_encoder_last_part_indexes(encoder->fountain_encoder);
-}
-
 bool ur_encoder_is_complete(const ur_encoder_t *encoder) {
   if (!encoder || !encoder->fountain_encoder) {
     return false;
   }
-  return fountain_encoder_is_complete(encoder->fountain_encoder);
+  return encoder->fountain_encoder->seq_num >=
+         encoder->fountain_encoder->fragments.count;
 }
 
 bool ur_encoder_is_single_part(const ur_encoder_t *encoder) {

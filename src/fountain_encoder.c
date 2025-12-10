@@ -191,24 +191,8 @@ void fountain_encoder_free(fountain_encoder_t *encoder) {
   free(encoder);
 }
 
-uint32_t fountain_encoder_seq_num(const fountain_encoder_t *encoder) {
-  return encoder ? encoder->seq_num : 0;
-}
-
 size_t fountain_encoder_seq_len(const fountain_encoder_t *encoder) {
   return encoder ? encoder->fragments.count : 0;
-}
-
-const part_indexes_t *
-fountain_encoder_last_part_indexes(const fountain_encoder_t *encoder) {
-  return encoder ? &encoder->last_part_indexes : NULL;
-}
-
-bool fountain_encoder_is_complete(const fountain_encoder_t *encoder) {
-  if (!encoder) {
-    return false;
-  }
-  return encoder->seq_num >= encoder->fragments.count;
 }
 
 bool fountain_encoder_is_single_part(const fountain_encoder_t *encoder) {
