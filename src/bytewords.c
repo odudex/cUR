@@ -10,6 +10,8 @@
 // This is an independent implementation written using
 // foundation-ur-py as a reference for testing and validation.
 //
+// Note: Optimized for MINIMAL style only (2-char encoding)
+//
 
 #include "bytewords.h"
 #include "crc32.h"
@@ -35,7 +37,7 @@ static const char bytewords[] =
     "urgeuservastveryvetovialvibeviewvisavoidvowswallwandwarmwaspwavewaxywebswh"
     "atwhenwhizwolfworkyankyawnyellyogayurtzapszerozestzinczonezoom";
 
-// Optimized lookup table for fast word-to-byte mapping
+// Optimized lookup table for fast word-to-byte mapping (2-char minimal style)
 // Uses first and last character positions to create 2D hash
 static const int16_t lookup_table[] = {
     4,   14,  29,  37,  -1,  -1,  73,  -1,  99,  -1,  -1,  128, -1,  -1,  -1,
@@ -85,197 +87,13 @@ static const int16_t lookup_table[] = {
     -1,  -1,  -1,  -1,  -1,  -1,  180, -1,  -1,  -1,  -1,  -1,  242, -1,  -1,
     -1};
 
-// Helper function to count occurrences of a character in a string
-static size_t count_char_occurrences(const char *str, char ch) {
-  if (!str)
-    return 0;
-
-  size_t count = 0;
-  const char *ptr = str;
-  while (*ptr) {
-    if (*ptr == ch) {
-      count++;
-    }
-    ptr++;
-  }
-  return count;
-}
-
-// Helper function to calculate dynamic word count with safety margin
-static size_t calculate_word_count_with_margin(const char *encoded,
-                                               size_t word_len,
-                                               char separator) {
-  if (!encoded)
-    return 0;
-
-  size_t estimated_words;
-  if (word_len == 4) {
-    estimated_words = count_char_occurrences(encoded, separator) + 1;
-  } else {
-    estimated_words = strlen(encoded) / word_len;
-  }
-
-  size_t margin = estimated_words / 20; // 5% margin
-  if (margin < 10)
-    margin = 10;
-
-  return estimated_words + margin;
-}
-
-// Optimized word decoding using lookup table
-static bool decode_word_optimized(const char *word, size_t word_len,
-                                  uint8_t *output) {
-  if (word_len != 2 && word_len != 4) {
-    return false;
-  }
-
-  int x = tolower(word[0]) - 'a';
-  int y = tolower(word[word_len == 4 ? 3 : 1]) - 'a';
-
-  if (x < 0 || x >= 26 || y < 0 || y >= 26) {
-    return false;
-  }
-
-  size_t offset = y * 26 + x;
-  int16_t value = lookup_table[offset];
-  if (value == -1) {
-    return false;
-  }
-
-  if (word_len == 4) {
-    const char *byteword = bytewords + value * 4;
-    if (tolower(word[1]) != byteword[1] || tolower(word[2]) != byteword[2]) {
-      return false;
-    }
-  }
-
-  *output = (uint8_t)value;
-  return true;
-}
-
-// Split string into words of fixed length (for minimal style)
-static size_t partition_string(const char *str, size_t word_len, char ***parts,
-                               size_t max_parts) {
-  size_t str_len = strlen(str);
-  size_t word_count = str_len / word_len;
-
-  if (word_count > max_parts) {
-    word_count = max_parts;
-  }
-
-  *parts = safe_malloc(sizeof(char *) * word_count);
-  if (!*parts)
-    return 0;
-
-  for (size_t i = 0; i < word_count; i++) {
-    (*parts)[i] = safe_malloc(word_len + 1);
-    if (!(*parts)[i]) {
-      for (size_t j = 0; j < i; j++) {
-        free((*parts)[j]);
-      }
-      free(*parts);
-      return 0;
-    }
-    strncpy((*parts)[i], str + i * word_len, word_len);
-    (*parts)[i][word_len] = '\0';
-  }
-
-  return word_count;
-}
-
-bool bytewords_decode(bytewords_style_t style, const char *encoded,
-                      uint8_t **decoded, size_t *decoded_len) {
-  if (!encoded || !decoded || !decoded_len)
-    return false;
-
-  size_t word_len = (style == BYTEWORDS_STYLE_MINIMAL) ? 2 : 4;
-  char separator = (style == BYTEWORDS_STYLE_STANDARD) ? ' '
-                   : (style == BYTEWORDS_STYLE_URI)    ? '-'
-                                                       : 0;
-
-  // Split into words
-  char **words;
-  size_t num_words;
-
-  // Calculate dynamic allocation size with safety margin
-  size_t max_words =
-      calculate_word_count_with_margin(encoded, word_len, separator);
-
-  if (word_len == 4) {
-    // Use separator-based splitting
-    words = safe_malloc(sizeof(char *) * max_words);
-    if (!words)
-      return false;
-    num_words = str_split(encoded, separator, words, max_words);
-  } else {
-    // Use fixed-length partitioning for minimal style
-    num_words = partition_string(encoded, word_len, &words, max_words);
-  }
-
-  if (num_words < 5) {
-    free_string_array(words, num_words);
-    free(words);
-    return false;
-  }
-
-  uint8_t *buf = safe_malloc(num_words);
-  if (!buf) {
-    free_string_array(words, num_words);
-    free(words);
-    return false;
-  }
-
-  for (size_t i = 0; i < num_words; i++) {
-    if (!decode_word_optimized(words[i], word_len, &buf[i])) {
-      free(buf);
-      free_string_array(words, num_words);
-      free(words);
-      return false;
-    }
-  }
-
-  if (num_words < 4) {
-    free(buf);
-    free_string_array(words, num_words);
-    free(words);
-    return false;
-  }
-
-  size_t body_size = num_words - 4;
-  uint8_t *body = safe_malloc(body_size);
-  if (!body) {
-    free(buf);
-    free_string_array(words, num_words);
-    free(words);
-    return false;
-  }
-
-  memcpy(body, buf, body_size);
-
-  uint32_t expected_crc = crc32_calculate(body, body_size);
-  uint32_t received_crc = (buf[body_size] << 24) | (buf[body_size + 1] << 16) |
-                          (buf[body_size + 2] << 8) | buf[body_size + 3];
-
-  if (expected_crc != received_crc) {
-    free(body);
-    free(buf);
-    free_string_array(words, num_words);
-    free(words);
-    return false;
-  }
-
-  *decoded = body;
-  *decoded_len = body_size;
-
-  free(buf);
-  free_string_array(words, num_words);
-  free(words);
-  return true;
-}
-
 bool bytewords_encode(bytewords_style_t style, const uint8_t *data,
                       size_t data_len, char **encoded) {
   if (!data || !encoded || data_len == 0)
+    return false;
+
+  // Only MINIMAL style supported (2-char encoding)
+  if (style != BYTEWORDS_STYLE_MINIMAL)
     return false;
 
   uint32_t crc = crc32_calculate(data, data_len);
@@ -290,41 +108,20 @@ bool bytewords_encode(bytewords_style_t style, const uint8_t *data,
   buf[data_len + 2] = (crc >> 8) & 0xFF;
   buf[data_len + 3] = crc & 0xFF;
 
-  if (style == BYTEWORDS_STYLE_MINIMAL) {
-    *encoded = safe_malloc(total_len * 2 + 1);
-    if (!*encoded) {
-      free(buf);
-      return false;
-    }
-
-    char *pos = *encoded;
-    for (size_t i = 0; i < total_len; i++) {
-      const char *word = bytewords + buf[i] * 4;
-      *pos++ = toupper(word[0]);
-      *pos++ = toupper(word[3]);
-    }
-    *pos = '\0';
-  } else {
-    char separator = (style == BYTEWORDS_STYLE_STANDARD) ? ' ' : '-';
-    size_t encoded_len = total_len * 4 + (total_len - 1) + 1;
-    *encoded = safe_malloc(encoded_len);
-    if (!*encoded) {
-      free(buf);
-      return false;
-    }
-
-    char *pos = *encoded;
-    for (size_t i = 0; i < total_len; i++) {
-      const char *word = bytewords + buf[i] * 4;
-      for (int j = 0; j < 4; j++) {
-        *pos++ = toupper(word[j]);
-      }
-      if (i < total_len - 1) {
-        *pos++ = separator;
-      }
-    }
-    *pos = '\0';
+  // MINIMAL style: 2 chars per byte (first + last character of word)
+  *encoded = safe_malloc(total_len * 2 + 1);
+  if (!*encoded) {
+    free(buf);
+    return false;
   }
+
+  char *pos = *encoded;
+  for (size_t i = 0; i < total_len; i++) {
+    const char *word = bytewords + buf[i] * 4;
+    *pos++ = toupper(word[0]);
+    *pos++ = toupper(word[3]);
+  }
+  *pos = '\0';
 
   free(buf);
   return true;
@@ -341,65 +138,53 @@ bool bytewords_decode_raw(bytewords_style_t style, const char *encoded,
   if (!encoded || !decoded || !decoded_len)
     return false;
 
-  size_t word_len = (style == BYTEWORDS_STYLE_MINIMAL) ? 2 : 4;
-  char separator = (style == BYTEWORDS_STYLE_STANDARD) ? ' '
-                   : (style == BYTEWORDS_STYLE_URI)    ? '-'
-                                                       : 0;
+  // Only MINIMAL style supported (2-char encoding)
+  if (style != BYTEWORDS_STYLE_MINIMAL)
+    return false;
 
-  // Split into words
-  char **words;
-  size_t num_words;
-
-  // Calculate dynamic allocation size with safety margin
-  size_t max_words =
-      calculate_word_count_with_margin(encoded, word_len, separator);
-
-  if (word_len == 4) {
-    // Use separator-based splitting
-    words = safe_malloc(sizeof(char *) * max_words);
-    if (!words)
-      return false;
-    num_words = str_split(encoded, separator, words, max_words);
-  } else {
-    // Use fixed-length partitioning for minimal style
-    num_words = partition_string(encoded, word_len, &words, max_words);
-  }
-
-  if (num_words == 0) {
-    free_string_array(words, num_words);
-    free(words);
+  size_t encoded_len = strlen(encoded);
+  if (encoded_len % 2 != 0 || encoded_len < 8) {
     return false;
   }
 
-  uint8_t *buf = safe_malloc(num_words);
-  if (!buf) {
-    free_string_array(words, num_words);
-    free(words);
+  size_t num_bytes = encoded_len / 2;
+  uint8_t *buf = safe_malloc(num_bytes);
+  if (!buf)
     return false;
-  }
 
-  for (size_t i = 0; i < num_words; i++) {
-    if (!decode_word_optimized(words[i], word_len, &buf[i])) {
+  // Decode each 2-char pair using lookup table
+  for (size_t i = 0; i < num_bytes; i++) {
+    char first = tolower(encoded[i * 2]);
+    char last = tolower(encoded[i * 2 + 1]);
+
+    int x = first - 'a';
+    int y = last - 'a';
+
+    if (x < 0 || x >= 26 || y < 0 || y >= 26) {
       free(buf);
-      free_string_array(words, num_words);
-      free(words);
       return false;
     }
+
+    size_t offset = y * 26 + x;
+    int16_t value = lookup_table[offset];
+    if (value == -1) {
+      free(buf);
+      return false;
+    }
+
+    buf[i] = (uint8_t)value;
   }
 
-  if (num_words < 4) {
+  // Remove CRC (last 4 bytes)
+  if (num_bytes < 4) {
     free(buf);
-    free_string_array(words, num_words);
-    free(words);
     return false;
   }
 
-  size_t body_size = num_words - 4;
+  size_t body_size = num_bytes - 4;
   uint8_t *body = safe_malloc(body_size);
   if (!body) {
     free(buf);
-    free_string_array(words, num_words);
-    free(words);
     return false;
   }
 
@@ -409,47 +194,5 @@ bool bytewords_decode_raw(bytewords_style_t style, const char *encoded,
   *decoded_len = body_size;
 
   free(buf);
-  free_string_array(words, num_words);
-  free(words);
-  return true;
-}
-
-bool bytewords_encode_raw(bytewords_style_t style, const uint8_t *data,
-                          size_t data_len, char **encoded) {
-  if (!data || !encoded || data_len == 0)
-    return false;
-
-  if (style == BYTEWORDS_STYLE_MINIMAL) {
-    *encoded = safe_malloc(data_len * 2 + 1);
-    if (!*encoded)
-      return false;
-
-    char *pos = *encoded;
-    for (size_t i = 0; i < data_len; i++) {
-      const char *word = bytewords + data[i] * 4;
-      *pos++ = toupper(word[0]);
-      *pos++ = toupper(word[3]);
-    }
-    *pos = '\0';
-  } else {
-    char separator = (style == BYTEWORDS_STYLE_STANDARD) ? ' ' : '-';
-    size_t encoded_len = data_len * 4 + (data_len - 1) + 1;
-    *encoded = safe_malloc(encoded_len);
-    if (!*encoded)
-      return false;
-
-    char *pos = *encoded;
-    for (size_t i = 0; i < data_len; i++) {
-      const char *word = bytewords + data[i] * 4;
-      for (int j = 0; j < 4; j++) {
-        *pos++ = toupper(word[j]);
-      }
-      if (i < data_len - 1) {
-        *pos++ = separator;
-      }
-    }
-    *pos = '\0';
-  }
-
   return true;
 }
