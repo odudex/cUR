@@ -32,7 +32,6 @@ struct registry_item {
 uint8_t *registry_item_to_cbor(registry_item_t *item, size_t *out_len);
 registry_item_t *registry_item_from_cbor(const uint8_t *cbor_data, size_t len,
                                          from_data_item_fn from_data_item_func);
-void registry_item_free(registry_item_t *item);
 
 // Helper to get map value as specific type
 cbor_value_t *get_map_value(cbor_value_t *map, int key);

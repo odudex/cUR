@@ -54,25 +54,11 @@ ur_encoder_t *ur_encoder_new(const char *type, const uint8_t *cbor_data,
 void ur_encoder_free(ur_encoder_t *encoder);
 
 /**
- * Get current sequence number
- * @param encoder Pointer to encoder
- * @return Current sequence number
- */
-uint32_t ur_encoder_seq_num(const ur_encoder_t *encoder);
-
-/**
  * Get sequence length
  * @param encoder Pointer to encoder
  * @return Sequence length
  */
 size_t ur_encoder_seq_len(const ur_encoder_t *encoder);
-
-/**
- * Get last part indexes
- * @param encoder Pointer to encoder
- * @return Pointer to part indexes
- */
-const part_indexes_t *ur_encoder_last_part_indexes(const ur_encoder_t *encoder);
 
 /**
  * Check if encoder is complete

@@ -38,7 +38,6 @@ hd_key_data_t *hd_key_from_registry_item(registry_item_t *item);
 
 // CBOR conversion functions (read-only)
 registry_item_t *hd_key_from_data_item(cbor_value_t *data_item);
-hd_key_data_t *hd_key_from_cbor(const uint8_t *cbor_data, size_t len);
 
 // Generate BIP32 extended key with derivation paths (xpub format)
 char *hd_key_bip32_key(hd_key_data_t *hd_key, bool include_derivation_path);

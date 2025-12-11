@@ -1,7 +1,6 @@
 #ifndef URTYPES_OUTPUT_H
 #define URTYPES_OUTPUT_H
 
-#include "ec_key.h"
 #include "hd_key.h"
 #include "multi_key.h"
 #include "registry.h"
@@ -36,7 +35,7 @@ typedef struct {
 } script_expression_t;
 
 // Key type enum
-typedef enum { KEY_TYPE_EC, KEY_TYPE_HD, KEY_TYPE_MULTI } key_type_t;
+typedef enum { KEY_TYPE_HD, KEY_TYPE_MULTI } key_type_t;
 
 // Output type structure
 typedef struct {
@@ -44,7 +43,6 @@ typedef struct {
   size_t script_expression_count;
   key_type_t key_type;
   union {
-    ec_key_data_t *ec_key;
     hd_key_data_t *hd_key;
     multi_key_data_t *multi_key;
   } crypto_key;

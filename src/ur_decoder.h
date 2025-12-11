@@ -70,13 +70,6 @@ bool ur_decoder_is_complete(ur_decoder_t *decoder);
 bool ur_decoder_is_success(ur_decoder_t *decoder);
 
 /**
- * Check if decoding failed
- * @param decoder Pointer to URDecoder instance
- * @return true if failed, false otherwise
- */
-bool ur_decoder_is_failure(ur_decoder_t *decoder);
-
-/**
  * Get the decoded result
  * @param decoder Pointer to URDecoder instance
  * @return Pointer to ur_result_t or NULL if not complete/failed
@@ -110,15 +103,6 @@ double ur_decoder_estimated_percent_complete(ur_decoder_t *decoder);
  * @return Last error code
  */
 ur_decoder_error_t ur_decoder_get_last_error(ur_decoder_t *decoder);
-
-/**
- * Decode a single-part UR (static utility function)
- * @param ur_string Complete UR string
- * @param result Output result structure
- * @return Error code
- */
-ur_decoder_error_t ur_decoder_decode_single(const char *ur_string,
-                                            ur_result_t **result);
 
 void ur_result_free(ur_result_t *result);
 

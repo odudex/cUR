@@ -38,15 +38,6 @@ void bytes_free(bytes_data_t *bytes) {
   free(bytes);
 }
 
-static void bytes_item_free(registry_item_t *item) {
-  if (!item)
-    return;
-
-  bytes_data_t *bytes = (bytes_data_t *)item->data;
-  bytes_free(bytes);
-  free(item);
-}
-
 // CBOR conversion functions
 cbor_value_t *bytes_to_data_item(registry_item_t *item) {
   if (!item || !item->data)
@@ -115,7 +106,7 @@ registry_item_t *bytes_to_registry_item(bytes_data_t *bytes) {
   item->data = bytes;
   item->to_data_item = bytes_to_data_item;
   item->from_data_item = bytes_from_data_item;
-  item->free_item = bytes_item_free;
+  item->free_item = NULL;
 
   return item;
 }

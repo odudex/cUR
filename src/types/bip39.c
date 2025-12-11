@@ -1,6 +1,5 @@
 #include "bip39.h"
 #include "cbor_decoder.h"
-#include "cbor_encoder.h"
 #include "utils.h"
 #include <string.h>
 
@@ -57,73 +56,7 @@ void bip39_free(bip39_data_t *bip39) {
   free(bip39);
 }
 
-static void bip39_item_free(registry_item_t *item) {
-  if (!item)
-    return;
-
-  bip39_data_t *bip39 = (bip39_data_t *)item->data;
-  bip39_free(bip39);
-  free(item);
-}
-
 // CBOR conversion functions
-cbor_value_t *bip39_to_data_item(registry_item_t *item) {
-  if (!item || !item->data)
-    return NULL;
-
-  bip39_data_t *bip39 = (bip39_data_t *)item->data;
-
-  // Create map
-  cbor_value_t *map = cbor_value_new_map();
-  if (!map)
-    return NULL;
-
-  // Add words array (key 1)
-  cbor_value_t *words_array = cbor_value_new_array();
-  if (!words_array) {
-    cbor_value_free(map);
-    return NULL;
-  }
-
-  for (size_t i = 0; i < bip39->word_count; i++) {
-    cbor_value_t *word = cbor_value_new_string(bip39->words[i]);
-    if (!word || !cbor_array_append(words_array, word)) {
-      if (word)
-        cbor_value_free(word);
-      cbor_value_free(words_array);
-      cbor_value_free(map);
-      return NULL;
-    }
-  }
-
-  cbor_value_t *key1 = cbor_value_new_unsigned_int(1);
-  if (!key1 || !cbor_map_set(map, key1, words_array)) {
-    if (key1)
-      cbor_value_free(key1);
-    cbor_value_free(words_array);
-    cbor_value_free(map);
-    return NULL;
-  }
-
-  // Add lang (key 2) if present
-  if (bip39->lang) {
-    cbor_value_t *lang = cbor_value_new_string(bip39->lang);
-    cbor_value_t *key2 = cbor_value_new_unsigned_int(2);
-
-    if (!lang || !key2 || !cbor_map_set(map, key2, lang)) {
-      if (lang)
-        cbor_value_free(lang);
-      if (key2)
-        cbor_value_free(key2);
-      cbor_value_free(map);
-      return NULL;
-    }
-  }
-
-  // Return plain map, NO TAG (matches Python implementation)
-  return map;
-}
-
 registry_item_t *bip39_from_data_item(cbor_value_t *data_item) {
   if (!data_item)
     return NULL;
@@ -200,9 +133,9 @@ registry_item_t *bip39_to_registry_item(bip39_data_t *bip39) {
 
   item->type = &BIP39_TYPE;
   item->data = bip39;
-  item->to_data_item = bip39_to_data_item;
+  item->to_data_item = NULL; // Not needed for read-only
   item->from_data_item = bip39_from_data_item;
-  item->free_item = bip39_item_free;
+  item->free_item = NULL;
 
   return item;
 }

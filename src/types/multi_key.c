@@ -10,8 +10,6 @@ multi_key_data_t *multi_key_new(uint32_t threshold) {
     return NULL;
 
   multi_key->threshold = threshold;
-  multi_key->ec_keys = NULL;
-  multi_key->ec_key_count = 0;
   multi_key->hd_keys = NULL;
   multi_key->hd_key_count = 0;
 
@@ -22,13 +20,6 @@ void multi_key_free(multi_key_data_t *multi_key) {
   if (!multi_key)
     return;
 
-  if (multi_key->ec_keys) {
-    for (size_t i = 0; i < multi_key->ec_key_count; i++) {
-      ec_key_free(multi_key->ec_keys[i]);
-    }
-    free(multi_key->ec_keys);
-  }
-
   if (multi_key->hd_keys) {
     for (size_t i = 0; i < multi_key->hd_key_count; i++) {
       hd_key_free(multi_key->hd_keys[i]);
@@ -37,23 +28,6 @@ void multi_key_free(multi_key_data_t *multi_key) {
   }
 
   free(multi_key);
-}
-
-bool multi_key_add_ec_key(multi_key_data_t *multi_key, ec_key_data_t *ec_key) {
-  if (!multi_key || !ec_key)
-    return false;
-
-  size_t new_count = multi_key->ec_key_count + 1;
-  ec_key_data_t **new_keys =
-      safe_realloc(multi_key->ec_keys, new_count * sizeof(ec_key_data_t *));
-  if (!new_keys)
-    return false;
-
-  new_keys[multi_key->ec_key_count] = ec_key;
-  multi_key->ec_keys = new_keys;
-  multi_key->ec_key_count = new_count;
-
-  return true;
 }
 
 bool multi_key_add_hd_key(multi_key_data_t *multi_key, hd_key_data_t *hd_key) {
@@ -122,18 +96,8 @@ multi_key_data_t *multi_key_from_data_item(cbor_value_t *data_item) {
         }
         free(item);
       }
-    } else if (tag == CRYPTO_ECKEY_TAG) {
-      // ECKey - unwrap the tag to get the map content
-      registry_item_t *item = ec_key_from_data_item(key_content);
-      if (item) {
-        ec_key_data_t *ec_key = ec_key_from_registry_item(item);
-        if (ec_key) {
-          item->data = NULL; // Transfer ownership
-          multi_key_add_ec_key(multi_key, ec_key);
-        }
-        free(item);
-      }
     }
+    // Other key types (e.g., EC keys) are ignored
   }
 
   return multi_key;

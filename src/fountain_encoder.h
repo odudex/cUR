@@ -77,33 +77,11 @@ fountain_encoder_t *fountain_encoder_new(const uint8_t *message,
 void fountain_encoder_free(fountain_encoder_t *encoder);
 
 /**
- * Get current sequence number
- * @param encoder Pointer to encoder
- * @return Current sequence number
- */
-uint32_t fountain_encoder_seq_num(const fountain_encoder_t *encoder);
-
-/**
  * Get sequence length (total number of fragments)
  * @param encoder Pointer to encoder
  * @return Sequence length
  */
 size_t fountain_encoder_seq_len(const fountain_encoder_t *encoder);
-
-/**
- * Get last part indexes
- * @param encoder Pointer to encoder
- * @return Pointer to part indexes
- */
-const part_indexes_t *
-fountain_encoder_last_part_indexes(const fountain_encoder_t *encoder);
-
-/**
- * Check if encoder is complete (all base parts generated)
- * @param encoder Pointer to encoder
- * @return true if complete
- */
-bool fountain_encoder_is_complete(const fountain_encoder_t *encoder);
 
 /**
  * Check if encoder will generate only single part

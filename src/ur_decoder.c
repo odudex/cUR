@@ -455,10 +455,6 @@ bool ur_decoder_is_success(ur_decoder_t *decoder) {
   return decoder && decoder->is_complete_flag && decoder->result != NULL;
 }
 
-bool ur_decoder_is_failure(ur_decoder_t *decoder) {
-  return decoder && decoder->is_complete_flag && decoder->result == NULL;
-}
-
 ur_result_t *ur_decoder_get_result(ur_decoder_t *decoder) {
   if (!decoder || !ur_decoder_is_success(decoder)) {
     return NULL;
@@ -486,35 +482,6 @@ double ur_decoder_estimated_percent_complete(ur_decoder_t *decoder) {
 
 ur_decoder_error_t ur_decoder_get_last_error(ur_decoder_t *decoder) {
   return decoder ? decoder->last_error : UR_DECODER_ERROR_NULL_POINTER;
-}
-
-ur_decoder_error_t ur_decoder_decode_single(const char *ur_string,
-                                            ur_result_t **result) {
-  if (!ur_string || !result)
-    return UR_DECODER_ERROR_NULL_POINTER;
-
-  char *type;
-  char **components;
-  size_t component_count;
-
-  if (!parse_ur_string(ur_string, &type, &components, &component_count)) {
-    return UR_DECODER_ERROR_INVALID_SCHEME;
-  }
-
-  if (component_count != 1) {
-    free(type);
-    free_string_array(components, component_count);
-    free(components);
-    return UR_DECODER_ERROR_INVALID_PATH_LENGTH;
-  }
-
-  *result = decode_single_part(type, components[0]);
-
-  free(type);
-  free_string_array(components, component_count);
-  free(components);
-
-  return *result ? UR_DECODER_OK : UR_DECODER_ERROR_INVALID_FRAGMENT;
 }
 
 void ur_result_free(ur_result_t *result) {

@@ -34,17 +34,6 @@ registry_item_from_cbor(const uint8_t *cbor_data, size_t len,
   return item;
 }
 
-void registry_item_free(registry_item_t *item) {
-  if (!item)
-    return;
-
-  if (item->free_item) {
-    item->free_item(item);
-  } else {
-    free(item);
-  }
-}
-
 // Helper to get map value as specific type
 cbor_value_t *get_map_value(cbor_value_t *map, int key) {
   if (!map || cbor_value_get_type(map) != CBOR_TYPE_MAP)

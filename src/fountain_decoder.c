@@ -21,9 +21,9 @@
 #include <string.h>
 
 // Configuration constants
-#define QUEUE_INITIAL_CAPACITY 16
-#define SIMPLE_PARTS_INITIAL_CAPACITY 8
-#define INDEXES_INITIAL_CAPACITY 8
+#define QUEUE_INITIAL_CAPACITY 8
+#define SIMPLE_PARTS_INITIAL_CAPACITY 4
+#define INDEXES_INITIAL_CAPACITY 4
 #define HASH_MIN_CAPACITY 64
 #define HASH_CAPACITY_MULTIPLIER 1 // Reduced from 2 to save memory
 #define MAX_MIXED_PARTS 256 // Limit mixed parts to prevent memory explosion
@@ -172,27 +172,6 @@ static void mixed_hash_free(mixed_parts_hash_t *hash) {
   free(hash->buckets);
   hash->buckets = NULL;
   hash->count = 0;
-}
-
-// Check if hash contains key
-static bool mixed_hash_contains(const mixed_parts_hash_t *hash,
-                                const part_indexes_t *key) {
-  if (!hash || !hash->buckets || !key)
-    return false;
-
-  size_t key_hash = hash_indexes(key);
-  size_t bucket = key_hash % hash->capacity;
-  hash_entry_t *entry = hash->buckets[bucket];
-
-  while (entry) {
-    // Fast path: compare cached hash first
-    if (entry->key_hash == key_hash && part_indexes_equal(&entry->key, key)) {
-      return true;
-    }
-    entry = entry->next;
-  }
-
-  return false;
 }
 
 // Add or update entry in hash table
@@ -572,11 +551,7 @@ static int compare_fragment_info(const void *a, const void *b) {
     size_t len;
   } *fa = a, *fb = b;
 
-  if (fa->index < fb->index)
-    return -1;
-  if (fa->index > fb->index)
-    return 1;
-  return 0;
+  return (fa->index > fb->index) - (fa->index < fb->index);
 }
 
 static bool is_simple_part(const decoder_part_t *const part) {
@@ -1224,11 +1199,6 @@ static void process_mixed_part(fountain_decoder_t *const decoder,
   if (!decoder || !part || is_simple_part(part) || !decoder->mixed_parts_hash)
     return;
 
-  // Check if this part already exists in the hash table
-  if (mixed_hash_contains(decoder->mixed_parts_hash, &part->indexes)) {
-    return;
-  }
-
   decoder_part_t reduced_part = {0};
   reduced_part.indexes.indexes = NULL;
   reduced_part.indexes.count = 0;
@@ -1424,10 +1394,6 @@ bool fountain_decoder_is_complete(fountain_decoder_t *decoder) {
 
 bool fountain_decoder_is_success(fountain_decoder_t *decoder) {
   return decoder && decoder->result && decoder->result->is_success;
-}
-
-bool fountain_decoder_is_failure(fountain_decoder_t *decoder) {
-  return decoder && decoder->result && decoder->result->is_error;
 }
 
 size_t fountain_decoder_expected_part_count(fountain_decoder_t *decoder) {

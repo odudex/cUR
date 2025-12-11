@@ -57,14 +57,6 @@ void keypath_free(keypath_data_t *keypath) {
   free(keypath);
 }
 
-static void keypath_item_free(registry_item_t *item) {
-  if (!item)
-    return;
-  keypath_data_t *keypath = (keypath_data_t *)item->data;
-  keypath_free(keypath);
-  free(item);
-}
-
 // Parse Keypath from CBOR data item
 registry_item_t *keypath_from_data_item(cbor_value_t *data_item) {
   if (!data_item)
@@ -172,7 +164,7 @@ registry_item_t *keypath_to_registry_item(keypath_data_t *keypath) {
   item->data = keypath;
   item->to_data_item = NULL; // Not needed for read-only
   item->from_data_item = keypath_from_data_item;
-  item->free_item = keypath_item_free;
+  item->free_item = NULL;
 
   return item;
 }
@@ -181,24 +173,6 @@ keypath_data_t *keypath_from_registry_item(registry_item_t *item) {
   if (!item || item->type != &KEYPATH_TYPE)
     return NULL;
   return (keypath_data_t *)item->data;
-}
-
-keypath_data_t *keypath_from_cbor(const uint8_t *cbor_data, size_t len) {
-  if (!cbor_data || len == 0)
-    return NULL;
-
-  registry_item_t *item =
-      registry_item_from_cbor(cbor_data, len, keypath_from_data_item);
-  if (!item)
-    return NULL;
-
-  keypath_data_t *keypath = keypath_from_registry_item(item);
-
-  // Transfer ownership
-  item->data = NULL;
-  free(item);
-
-  return keypath;
 }
 
 // Generate path string like "44'/0'/0'" or "1/0/*"
