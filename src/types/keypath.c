@@ -1,6 +1,7 @@
 #include "keypath.h"
 #include "cbor_decoder.h"
 #include "utils.h"
+#include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -209,7 +210,7 @@ char *keypath_to_string(keypath_data_t *keypath) {
     if (keypath->components[i].wildcard) {
       *ptr++ = '*';
     } else {
-      int written = sprintf(ptr, "%u", keypath->components[i].index);
+      int written = sprintf(ptr, "%" PRIu32, keypath->components[i].index);
       ptr += written;
     }
 

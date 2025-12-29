@@ -1,6 +1,7 @@
 #include "output.h"
 #include "cbor_decoder.h"
 #include "utils.h"
+#include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -290,7 +291,7 @@ char *output_descriptor(output_data_t *output, bool include_checksum) {
   // Write threshold for multisig
   if (output->key_type == KEY_TYPE_MULTI) {
     char threshold_str[16];
-    sprintf(threshold_str, "%u,", output->crypto_key.multi_key->threshold);
+    sprintf(threshold_str, "%" PRIu32 ",", output->crypto_key.multi_key->threshold);
     byte_buffer_append(buf, (const uint8_t *)threshold_str,
                        strlen(threshold_str));
   }

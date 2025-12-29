@@ -24,16 +24,6 @@ static void compute_sha256(const uint8_t *input, size_t len,
   mbedtls_sha256(input, len, output, 0);  // 0 = SHA256 (not SHA224)
 }
 
-static int compare_size_t(const void *a, const void *b) {
-  size_t arg1 = *(const size_t *)a;
-  size_t arg2 = *(const size_t *)b;
-  if (arg1 < arg2)
-    return -1;
-  if (arg1 > arg2)
-    return 1;
-  return 0;
-}
-
 static uint64_t rotl(const uint64_t x, int k) {
   return (x << k) | (x >> (64 - k));
 }
@@ -292,13 +282,21 @@ bool part_indexes_is_strict_subset(const part_indexes_t *a,
   if (a->count >= b->count)
     return false;
 
-  for (size_t i = 0; i < a->count; i++) {
-    if (!part_indexes_contains(b, a->indexes[i])) {
+  // Both arrays are sorted - use merge-like O(n) algorithm
+  size_t i = 0, j = 0;
+  while (i < a->count && j < b->count) {
+    if (a->indexes[i] == b->indexes[j]) {
+      i++;
+      j++;
+    } else if (a->indexes[i] > b->indexes[j]) {
+      j++;
+    } else {
+      // a->indexes[i] < b->indexes[j] means a[i] not in b
       return false;
     }
   }
 
-  return true;
+  return i == a->count; // All elements of a found in b
 }
 
 bool part_indexes_difference(const part_indexes_t *a, const part_indexes_t *b,
@@ -308,15 +306,26 @@ bool part_indexes_difference(const part_indexes_t *a, const part_indexes_t *b,
 
   part_indexes_clear(result);
 
-  for (size_t i = 0; i < a->count; i++) {
-    if (!part_indexes_contains(b, a->indexes[i])) {
+  // Both arrays are sorted - use merge-like O(n) algorithm
+  size_t i = 0, j = 0;
+  while (i < a->count) {
+    if (j >= b->count || a->indexes[i] < b->indexes[j]) {
+      // a[i] not in b, add to result
       if (!part_indexes_add(result, a->indexes[i])) {
         return false;
       }
+      i++;
+    } else if (a->indexes[i] == b->indexes[j]) {
+      // a[i] in b, skip
+      i++;
+      j++;
+    } else {
+      // a[i] > b[j], advance j
+      j++;
     }
   }
 
-  qsort(result->indexes, result->count, sizeof(size_t), compare_size_t);
+  // Result is already sorted (part_indexes_add maintains order)
   return true;
 }
 
@@ -327,8 +336,9 @@ bool part_indexes_equal(const part_indexes_t *a, const part_indexes_t *b) {
   if (a->count != b->count)
     return false;
 
+  // Both arrays are sorted, so direct comparison is O(n)
   for (size_t i = 0; i < a->count; i++) {
-    if (!part_indexes_contains(b, a->indexes[i])) {
+    if (a->indexes[i] != b->indexes[i]) {
       return false;
     }
   }
@@ -385,12 +395,18 @@ bool join_fragments(uint8_t **fragments, size_t *fragment_lens,
 
 bool part_indexes_have_intersection(const part_indexes_t *a,
                                     const part_indexes_t *b) {
-  if (!a || !b)
+  if (!a || !b || a->count == 0 || b->count == 0)
     return false;
 
-  for (size_t i = 0; i < a->count; i++) {
-    if (part_indexes_contains(b, a->indexes[i])) {
-      return true;
+  // Both arrays are sorted - use merge-like O(n) algorithm
+  size_t i = 0, j = 0;
+  while (i < a->count && j < b->count) {
+    if (a->indexes[i] == b->indexes[j]) {
+      return true; // Found intersection
+    } else if (a->indexes[i] < b->indexes[j]) {
+      i++;
+    } else {
+      j++;
     }
   }
   return false;
@@ -404,20 +420,42 @@ bool part_indexes_symmetric_difference(const part_indexes_t *a,
 
   part_indexes_clear(result);
 
-  for (size_t i = 0; i < a->count; i++) {
-    if (!part_indexes_contains(b, a->indexes[i])) {
+  // Both arrays are sorted - use merge-like O(n) algorithm
+  size_t i = 0, j = 0;
+  while (i < a->count && j < b->count) {
+    if (a->indexes[i] < b->indexes[j]) {
+      // a[i] not in b
       if (!part_indexes_add(result, a->indexes[i])) {
         return false;
       }
+      i++;
+    } else if (a->indexes[i] > b->indexes[j]) {
+      // b[j] not in a
+      if (!part_indexes_add(result, b->indexes[j])) {
+        return false;
+      }
+      j++;
+    } else {
+      // Equal - in both, skip
+      i++;
+      j++;
     }
   }
 
-  for (size_t i = 0; i < b->count; i++) {
-    if (!part_indexes_contains(a, b->indexes[i])) {
-      if (!part_indexes_add(result, b->indexes[i])) {
-        return false;
-      }
+  // Add remaining elements from a
+  while (i < a->count) {
+    if (!part_indexes_add(result, a->indexes[i])) {
+      return false;
     }
+    i++;
+  }
+
+  // Add remaining elements from b
+  while (j < b->count) {
+    if (!part_indexes_add(result, b->indexes[j])) {
+      return false;
+    }
+    j++;
   }
 
   return true;
