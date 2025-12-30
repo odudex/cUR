@@ -22,15 +22,16 @@ static bool encode_bytes_length(byte_buffer_t *buf, size_t len) {
                         (uint8_t)len};
     return byte_buffer_append(buf, bytes, 5);
   } else {
+    uint64_t len64 = (uint64_t)len;
     uint8_t bytes[9] = {(CBOR_MAJOR_BYTES << 5) | 27,
-                        (uint8_t)(len >> 56),
-                        (uint8_t)(len >> 48),
-                        (uint8_t)(len >> 40),
-                        (uint8_t)(len >> 32),
-                        (uint8_t)(len >> 24),
-                        (uint8_t)(len >> 16),
-                        (uint8_t)(len >> 8),
-                        (uint8_t)len};
+                        (uint8_t)(len64 >> 56),
+                        (uint8_t)(len64 >> 48),
+                        (uint8_t)(len64 >> 40),
+                        (uint8_t)(len64 >> 32),
+                        (uint8_t)(len64 >> 24),
+                        (uint8_t)(len64 >> 16),
+                        (uint8_t)(len64 >> 8),
+                        (uint8_t)len64};
     return byte_buffer_append(buf, bytes, 9);
   }
 }

@@ -28,7 +28,13 @@
 #define HASH_CAPACITY_MULTIPLIER 1 // Reduced from 2 to save memory
 #define MAX_MIXED_PARTS 256 // Limit mixed parts to prevent memory explosion
 #define MAX_DUPLICATE_TRACKING 512 // Limit duplicate tracking set size
+
+// Enable cross-reduction between mixed parts (slower but may use fewer fragments)
+// #define ENABLE_CROSS_REDUCTION
+
+#ifdef ENABLE_CROSS_REDUCTION
 #define CROSS_REDUCTION_MAX_ITERATIONS 7
+#endif
 #define FNV1A_OFFSET_BASIS 2166136261u
 #define FNV1A_PRIME 16777619u
 
@@ -366,9 +372,20 @@ bool part_indexes_add(part_indexes_t *indexes, size_t index) {
   if (!indexes)
     return false;
 
-  if (part_indexes_contains(indexes, index)) {
-    return true;
+  // Binary search for insertion point (keeps array sorted)
+  size_t left = 0, right = indexes->count;
+  while (left < right) {
+    size_t mid = left + (right - left) / 2;
+    if (indexes->indexes[mid] == index) {
+      return true; // Already exists
+    }
+    if (indexes->indexes[mid] < index) {
+      left = mid + 1;
+    } else {
+      right = mid;
+    }
   }
+  // 'left' is now the insertion point
 
   if (indexes->count >= indexes->capacity) {
     size_t new_capacity = indexes->capacity == 0 ? INDEXES_INITIAL_CAPACITY
@@ -382,17 +399,30 @@ bool part_indexes_add(part_indexes_t *indexes, size_t index) {
     indexes->capacity = new_capacity;
   }
 
-  indexes->indexes[indexes->count++] = index;
+  // Shift elements to make room for new index
+  for (size_t i = indexes->count; i > left; i--) {
+    indexes->indexes[i] = indexes->indexes[i - 1];
+  }
+  indexes->indexes[left] = index;
+  indexes->count++;
   return true;
 }
 
 bool part_indexes_contains(const part_indexes_t *indexes, size_t index) {
-  if (!indexes)
+  if (!indexes || indexes->count == 0)
     return false;
 
-  for (size_t i = 0; i < indexes->count; i++) {
-    if (indexes->indexes[i] == index) {
+  // Binary search on sorted array - O(log n)
+  size_t left = 0, right = indexes->count;
+  while (left < right) {
+    size_t mid = left + (right - left) / 2;
+    if (indexes->indexes[mid] == index) {
       return true;
+    }
+    if (indexes->indexes[mid] < index) {
+      left = mid + 1;
+    } else {
+      right = mid;
     }
   }
   return false;
@@ -868,6 +898,7 @@ static void reduce_mixed_by(fountain_decoder_t *const decoder,
 #endif
 }
 
+#ifdef ENABLE_CROSS_REDUCTION
 static bool create_symmetric_diff(const decoder_part_t *const a,
                                   const decoder_part_t *const b,
                                   decoder_part_t *const result) {
@@ -1074,6 +1105,7 @@ static void gaussian_reduce_with_new_part(fountain_decoder_t *const decoder,
     }
   }
 }
+#endif // ENABLE_CROSS_REDUCTION
 
 static void process_simple_part(fountain_decoder_t *const decoder,
                                 const decoder_part_t *const part) {
@@ -1238,6 +1270,9 @@ static void process_mixed_part(fountain_decoder_t *const decoder,
   if (is_simple_part(&reduced_part)) {
     queue_enqueue(&decoder->queue, &reduced_part);
   } else {
+    // Reduce all existing mixed parts by this new one (matches C++ behavior)
+    reduce_mixed_by(decoder, &reduced_part);
+    // Then add this new mixed part
     add_mixed_part(decoder, &reduced_part, MIXED_SOURCE_FRAGMENT);
   }
 
@@ -1261,10 +1296,8 @@ static void process_queue_item(fountain_decoder_t *const decoder) {
   if (is_simple_part(&part)) {
     process_simple_part(decoder, &part);
     reduce_mixed_by(decoder, &part);
-    reduce_mixed_against_mixed(decoder);
   } else {
     process_mixed_part(decoder, &part);
-    reduce_mixed_against_mixed(decoder);
   }
 
   decoder_part_free(&part);
