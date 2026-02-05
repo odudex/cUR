@@ -37,8 +37,9 @@ void keypath_free(keypath_data_t *keypath);
 registry_item_t *keypath_to_registry_item(keypath_data_t *keypath);
 keypath_data_t *keypath_from_registry_item(registry_item_t *item);
 
-// CBOR conversion functions (read-only)
+// CBOR conversion functions
 registry_item_t *keypath_from_data_item(cbor_value_t *data_item);
+cbor_value_t *keypath_to_data_item(keypath_data_t *keypath);
 
 // Helper to generate path string (e.g., "44'/0'/0'", "1/0/*")
 char *keypath_to_string(keypath_data_t *keypath);

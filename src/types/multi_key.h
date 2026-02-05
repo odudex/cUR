@@ -17,8 +17,9 @@ typedef struct {
 multi_key_data_t *multi_key_new(uint32_t threshold);
 void multi_key_free(multi_key_data_t *multi_key);
 
-// Parse MultiKey from CBOR data item (map with keys)
+// CBOR conversion functions
 multi_key_data_t *multi_key_from_data_item(cbor_value_t *data_item);
+cbor_value_t *multi_key_to_data_item(multi_key_data_t *multi_key);
 
 // Add keys to MultiKey
 bool multi_key_add_hd_key(multi_key_data_t *multi_key, hd_key_data_t *hd_key);

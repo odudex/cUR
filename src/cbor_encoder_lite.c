@@ -10,7 +10,8 @@
 // This is an independent implementation written using
 // foundation-ur-py as a reference for testing and validation.
 //
-// Note: Decoder functionality removed - all decoding done by types/cbor_decoder.c
+// Note: Decoder functionality removed - all decoding done by
+// types/cbor_decoder.c
 //
 
 #include "cbor_encoder_lite.h"

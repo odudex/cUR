@@ -11,9 +11,9 @@
 //
 
 #include "fountain_utils.h"
-#include <mbedtls/sha256.h>
 #include "utils.h"
 #include <math.h>
+#include <mbedtls/sha256.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,7 +21,7 @@
 static void compute_sha256(const uint8_t *input, size_t len,
                            uint8_t output[32]) {
   // Use ESP32P4 hardware-accelerated SHA256 via mbedtls
-  mbedtls_sha256(input, len, output, 0);  // 0 = SHA256 (not SHA224)
+  mbedtls_sha256(input, len, output, 0); // 0 = SHA256 (not SHA224)
 }
 
 static uint64_t rotl(const uint64_t x, int k) {

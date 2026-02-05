@@ -157,6 +157,57 @@ registry_item_t *hd_key_from_data_item(cbor_value_t *data_item) {
   return hd_key_to_registry_item(hd_key);
 }
 
+cbor_value_t *hd_key_to_data_item(hd_key_data_t *hd_key) {
+  if (!hd_key)
+    return NULL;
+
+  cbor_value_t *map = cbor_value_new_map();
+  if (!map)
+    return NULL;
+
+  if (hd_key->master)
+    cbor_map_set(map, cbor_value_new_unsigned_int(1),
+                 cbor_value_new_bool(true));
+
+  if (hd_key->private_key && hd_key->private_key_len > 0)
+    cbor_map_set(map, cbor_value_new_unsigned_int(2),
+                 cbor_value_new_bytes(hd_key->private_key,
+                                     hd_key->private_key_len));
+
+  if (hd_key->key && hd_key->key_len > 0)
+    cbor_map_set(map, cbor_value_new_unsigned_int(3),
+                 cbor_value_new_bytes(hd_key->key, hd_key->key_len));
+
+  if (hd_key->chain_code)
+    cbor_map_set(map, cbor_value_new_unsigned_int(4),
+                 cbor_value_new_bytes(hd_key->chain_code, 32));
+
+  if (hd_key->origin) {
+    cbor_value_t *m = keypath_to_data_item(hd_key->origin);
+    if (m)
+      cbor_map_set(map, cbor_value_new_unsigned_int(6),
+                   cbor_value_new_tag(CRYPTO_KEYPATH_TAG, m));
+  }
+
+  if (hd_key->children) {
+    cbor_value_t *m = keypath_to_data_item(hd_key->children);
+    if (m)
+      cbor_map_set(map, cbor_value_new_unsigned_int(7),
+                   cbor_value_new_tag(CRYPTO_KEYPATH_TAG, m));
+  }
+
+  if (hd_key->parent_fingerprint) {
+    uint32_t fp = ((uint32_t)hd_key->parent_fingerprint[0] << 24) |
+                  ((uint32_t)hd_key->parent_fingerprint[1] << 16) |
+                  ((uint32_t)hd_key->parent_fingerprint[2] << 8) |
+                  ((uint32_t)hd_key->parent_fingerprint[3]);
+    cbor_map_set(map, cbor_value_new_unsigned_int(8),
+                 cbor_value_new_unsigned_int(fp));
+  }
+
+  return map;
+}
+
 // Registry item interface
 registry_item_t *hd_key_to_registry_item(hd_key_data_t *hd_key) {
   if (!hd_key)

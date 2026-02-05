@@ -1,7 +1,10 @@
 #include "output.h"
 #include "cbor_decoder.h"
+#include "cbor_encoder.h"
 #include "utils.h"
+#include <ctype.h>
 #include <inttypes.h>
+#include <mbedtls/sha256.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -200,6 +203,347 @@ output_data_t *output_from_cbor(const uint8_t *cbor_data, size_t len) {
   // Transfer ownership
   item->data = NULL;
   free(item);
+
+  return output;
+}
+
+cbor_value_t *output_to_data_item(output_data_t *output) {
+  if (!output)
+    return NULL;
+
+  cbor_value_t *content = NULL;
+  if (output->key_type == KEY_TYPE_HD) {
+    cbor_value_t *m = hd_key_to_data_item(output->crypto_key.hd_key);
+    if (!m)
+      return NULL;
+    content = cbor_value_new_tag(CRYPTO_HDKEY_TAG, m);
+  } else {
+    content = multi_key_to_data_item(output->crypto_key.multi_key);
+  }
+  if (!content)
+    return NULL;
+
+  // Wrap with script expression tags (innermost to outermost)
+  for (int i = (int)output->script_expression_count - 1; i >= 0; i--)
+    content = cbor_value_new_tag(output->script_expressions[i]->tag, content);
+
+  return content;
+}
+
+uint8_t *output_to_cbor(output_data_t *output, size_t *out_len) {
+  if (!output || !out_len)
+    return NULL;
+
+  cbor_value_t *item = output_to_data_item(output);
+  if (!item)
+    return NULL;
+
+  uint8_t *data = cbor_encode(item, out_len);
+  cbor_value_free(item);
+  return data;
+}
+
+// Base58check decode
+static const int8_t BASE58_MAP[128] = {
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 0,  1,  2,  3,  4,
+    5,  6,  7,  8,  -1, -1, -1, -1, -1, -1, -1, 9,  10, 11, 12, 13, 14, 15,
+    16, -1, 17, 18, 19, 20, 21, -1, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+    32, -1, -1, -1, -1, -1, -1, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43,
+    -1, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, -1, -1, -1,
+    -1, -1};
+
+static uint8_t *base58check_decode(const char *str, size_t *out_len) {
+  if (!str || !out_len)
+    return NULL;
+  size_t str_len = strlen(str);
+  if (str_len == 0)
+    return NULL;
+
+  size_t zeros = 0;
+  while (zeros < str_len && str[zeros] == '1')
+    zeros++;
+
+  size_t max_size = str_len * 733 / 1000 + 1;
+  uint8_t *buf = safe_malloc(max_size);
+  if (!buf)
+    return NULL;
+  memset(buf, 0, max_size);
+
+  size_t buf_len = 0;
+  for (size_t i = 0; i < str_len; i++) {
+    uint8_t ch = (uint8_t)str[i];
+    if (ch >= 128 || BASE58_MAP[ch] < 0) {
+      free(buf);
+      return NULL;
+    }
+    uint32_t carry = (uint32_t)BASE58_MAP[ch];
+    for (size_t j = 0; j < buf_len || carry; j++) {
+      if (j < buf_len)
+        carry += (uint32_t)buf[j] * 58;
+      buf[j] = carry & 0xFF;
+      carry >>= 8;
+      if (j >= buf_len)
+        buf_len = j + 1;
+    }
+  }
+
+  size_t result_len = zeros + buf_len;
+  uint8_t *result = safe_malloc(result_len);
+  if (!result) {
+    free(buf);
+    return NULL;
+  }
+  memset(result, 0, zeros);
+  for (size_t i = 0; i < buf_len; i++)
+    result[zeros + i] = buf[buf_len - 1 - i];
+  free(buf);
+
+  if (result_len < 5) {
+    free(result);
+    return NULL;
+  }
+
+  size_t payload_len = result_len - 4;
+  uint8_t hash1[32], hash2[32];
+  mbedtls_sha256(result, payload_len, hash1, 0);
+  mbedtls_sha256(hash1, 32, hash2, 0);
+  if (memcmp(hash2, result + payload_len, 4) != 0) {
+    free(result);
+    return NULL;
+  }
+
+  *out_len = payload_len;
+  return result;
+}
+
+static const script_expression_t *
+get_script_expression_by_name(const char *name, size_t len) {
+  for (size_t i = 0; SCRIPT_EXPRESSIONS[i].expression != NULL; i++)
+    if (strlen(SCRIPT_EXPRESSIONS[i].expression) == len &&
+        strncmp(SCRIPT_EXPRESSIONS[i].expression, name, len) == 0)
+      return &SCRIPT_EXPRESSIONS[i];
+  return NULL;
+}
+
+static int hex_val(char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+  return -1;
+}
+
+static bool parse_keypath_components(const char *path, size_t len,
+                                     path_component_t **out_components,
+                                     size_t *out_count) {
+  if (!path || len == 0 || !out_components || !out_count)
+    return false;
+
+  size_t max_count = 1;
+  for (size_t i = 0; i < len; i++)
+    if (path[i] == '/') max_count++;
+
+  path_component_t *comp = safe_malloc(max_count * sizeof(path_component_t));
+  if (!comp)
+    return false;
+
+  size_t idx = 0;
+  const char *p = path, *end = path + len;
+  while (p < end && idx < max_count) {
+    if (*p == '/') { p++; continue; }
+
+    path_component_t *c = &comp[idx];
+    c->hardened = false;
+    if (*p == '*') {
+      c->wildcard = true;
+      c->index = 0;
+      p++;
+    } else if (isdigit((unsigned char)*p)) {
+      c->wildcard = false;
+      c->index = 0;
+      while (p < end && isdigit((unsigned char)*p))
+        c->index = c->index * 10 + (*p++ - '0');
+    } else {
+      free(comp);
+      return false;
+    }
+    if (p < end && (*p == '\'' || *p == 'h')) { c->hardened = true; p++; }
+    idx++;
+  }
+
+  *out_components = comp;
+  *out_count = idx;
+  return true;
+}
+
+// Parse "[fingerprint/path]xpub/children" into hd_key_data_t
+static hd_key_data_t *parse_hd_key_from_string(const char *str, size_t len) {
+  if (!str || len == 0)
+    return NULL;
+
+  hd_key_data_t *hd_key = hd_key_new();
+  if (!hd_key)
+    return NULL;
+
+  const char *p = str, *end = str + len;
+
+  // Parse optional [fingerprint/path] origin
+  if (*p == '[') {
+    p++;
+    const char *bracket_end = memchr(p, ']', end - p);
+    if (!bracket_end || bracket_end - p < 8) {
+      hd_key_free(hd_key);
+      return NULL;
+    }
+
+    uint8_t fp[4];
+    for (int i = 0; i < 4; i++) {
+      int hi = hex_val(p[i * 2]), lo = hex_val(p[i * 2 + 1]);
+      if (hi < 0 || lo < 0) { hd_key_free(hd_key); return NULL; }
+      fp[i] = (uint8_t)((hi << 4) | lo);
+    }
+    p += 8;
+
+    path_component_t *origin_comp = NULL;
+    size_t origin_count = 0;
+    if (p < bracket_end && *p == '/') {
+      p++;
+      if (bracket_end - p > 0 &&
+          !parse_keypath_components(p, bracket_end - p, &origin_comp,
+                                    &origin_count)) {
+        hd_key_free(hd_key);
+        return NULL;
+      }
+    }
+    hd_key->origin =
+        keypath_new(origin_comp, origin_count, fp, (int)origin_count);
+    free(origin_comp);
+    p = bracket_end + 1;
+  }
+
+  // Find xpub end (base58 doesn't contain '/')
+  const char *xpub_start = p;
+  const char *slash = memchr(p, '/', end - p);
+  const char *xpub_end = slash ? slash : end;
+
+  // Decode xpub/tpub
+  size_t xpub_len = xpub_end - xpub_start;
+  char *xpub_str = safe_malloc(xpub_len + 1);
+  if (!xpub_str) { hd_key_free(hd_key); return NULL; }
+  memcpy(xpub_str, xpub_start, xpub_len);
+  xpub_str[xpub_len] = '\0';
+
+  size_t dec_len = 0;
+  uint8_t *dec = base58check_decode(xpub_str, &dec_len);
+  free(xpub_str);
+  if (!dec || dec_len != 78) { free(dec); hd_key_free(hd_key); return NULL; }
+
+  // BIP32: [0-3]version [4]depth [5-8]parent_fp [9-12]child_idx
+  //        [13-44]chain_code [45-77]key
+  if (dec[5] || dec[6] || dec[7] || dec[8]) {
+    hd_key->parent_fingerprint = safe_malloc(4);
+    if (hd_key->parent_fingerprint)
+      memcpy(hd_key->parent_fingerprint, dec + 5, 4);
+  }
+  hd_key->chain_code = safe_malloc(32);
+  if (hd_key->chain_code)
+    memcpy(hd_key->chain_code, dec + 13, 32);
+  hd_key->key_len = 33;
+  hd_key->key = safe_malloc(33);
+  if (hd_key->key)
+    memcpy(hd_key->key, dec + 45, 33);
+  if (hd_key->origin)
+    hd_key->origin->depth = (int)dec[4];
+  free(dec);
+
+  // Parse optional children path
+  if (xpub_end < end && *xpub_end == '/') {
+    size_t ch_len = end - (xpub_end + 1);
+    path_component_t *ch_comp = NULL;
+    size_t ch_count = 0;
+    if (ch_len > 0 &&
+        parse_keypath_components(xpub_end + 1, ch_len, &ch_comp, &ch_count)) {
+      hd_key->children = keypath_new(ch_comp, ch_count, NULL, -1);
+      free(ch_comp);
+    }
+  }
+
+  return hd_key;
+}
+
+output_data_t *output_from_descriptor_string(const char *descriptor) {
+  if (!descriptor)
+    return NULL;
+
+  // Strip checksum if present
+  size_t desc_len = strlen(descriptor);
+  const char *hash = strchr(descriptor, '#');
+  if (hash)
+    desc_len = hash - descriptor;
+
+  output_data_t *output = output_new();
+  if (!output)
+    return NULL;
+
+  const char *p = descriptor, *end = descriptor + desc_len;
+
+  // Collect script expression prefixes
+  script_expression_t **expressions = NULL;
+  size_t expr_count = 0;
+  while (p < end) {
+    const char *paren = memchr(p, '(', end - p);
+    if (!paren || paren == p)
+      break;
+    const script_expression_t *expr =
+        get_script_expression_by_name(p, paren - p);
+    if (!expr)
+      break;
+    expr_count++;
+    script_expression_t **new_exprs =
+        safe_realloc(expressions, expr_count * sizeof(script_expression_t *));
+    if (!new_exprs) { free(expressions); output_free(output); return NULL; }
+    expressions = new_exprs;
+    expressions[expr_count - 1] = (script_expression_t *)expr;
+    p = paren + 1;
+  }
+  output->script_expressions = expressions;
+  output->script_expression_count = expr_count;
+
+  // Strip trailing ')'
+  const char *content_end = end;
+  while (content_end > p && *(content_end - 1) == ')')
+    content_end--;
+
+  bool is_multi = expr_count > 0 &&
+      (strcmp(expressions[expr_count - 1]->expression, "multi") == 0 ||
+       strcmp(expressions[expr_count - 1]->expression, "sortedmulti") == 0);
+
+  if (is_multi) {
+    uint32_t threshold = 0;
+    while (p < content_end && isdigit((unsigned char)*p))
+      threshold = threshold * 10 + (*p++ - '0');
+    if (p < content_end && *p == ',')
+      p++;
+
+    multi_key_data_t *mk = multi_key_new(threshold);
+    if (!mk) { output_free(output); return NULL; }
+
+    while (p < content_end) {
+      const char *comma = memchr(p, ',', content_end - p);
+      const char *key_end = comma ? comma : content_end;
+      hd_key_data_t *hk = parse_hd_key_from_string(p, key_end - p);
+      if (hk) multi_key_add_hd_key(mk, hk);
+      p = comma ? comma + 1 : content_end;
+    }
+    output->key_type = KEY_TYPE_MULTI;
+    output->crypto_key.multi_key = mk;
+  } else {
+    hd_key_data_t *hk = parse_hd_key_from_string(p, content_end - p);
+    if (!hk) { output_free(output); return NULL; }
+    output->key_type = KEY_TYPE_HD;
+    output->crypto_key.hd_key = hk;
+  }
 
   return output;
 }

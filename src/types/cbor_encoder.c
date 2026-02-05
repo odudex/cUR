@@ -1,59 +1,100 @@
 #include "cbor_encoder.h"
 #include <string.h>
 
-// CBOR major type for bytes
-#define CBOR_MAJOR_BYTES 2
-
-// Encode length prefix for bytes
-static bool encode_bytes_length(byte_buffer_t *buf, size_t len) {
-  if (len < 24) {
-    uint8_t byte = (CBOR_MAJOR_BYTES << 5) | (uint8_t)len;
+// Encode CBOR head (major type + argument value)
+static bool encode_head(byte_buffer_t *buf, uint8_t major_type, uint64_t value) {
+  uint8_t mt = major_type << 5;
+  if (value < 24) {
+    uint8_t byte = mt | (uint8_t)value;
     return byte_buffer_append_byte(buf, byte);
-  } else if (len <= 0xFF) {
-    uint8_t bytes[2] = {(CBOR_MAJOR_BYTES << 5) | 24, (uint8_t)len};
+  } else if (value <= 0xFF) {
+    uint8_t bytes[2] = {mt | 24, (uint8_t)value};
     return byte_buffer_append(buf, bytes, 2);
-  } else if (len <= 0xFFFF) {
-    uint8_t bytes[3] = {(CBOR_MAJOR_BYTES << 5) | 25, (uint8_t)(len >> 8),
-                        (uint8_t)len};
+  } else if (value <= 0xFFFF) {
+    uint8_t bytes[3] = {mt | 25, (uint8_t)(value >> 8), (uint8_t)value};
     return byte_buffer_append(buf, bytes, 3);
-  } else if (len <= 0xFFFFFFFF) {
-    uint8_t bytes[5] = {(CBOR_MAJOR_BYTES << 5) | 26, (uint8_t)(len >> 24),
-                        (uint8_t)(len >> 16), (uint8_t)(len >> 8),
-                        (uint8_t)len};
+  } else if (value <= 0xFFFFFFFF) {
+    uint8_t bytes[5] = {mt | 26, (uint8_t)(value >> 24), (uint8_t)(value >> 16),
+                        (uint8_t)(value >> 8), (uint8_t)value};
     return byte_buffer_append(buf, bytes, 5);
   } else {
-    uint64_t len64 = (uint64_t)len;
-    uint8_t bytes[9] = {(CBOR_MAJOR_BYTES << 5) | 27,
-                        (uint8_t)(len64 >> 56),
-                        (uint8_t)(len64 >> 48),
-                        (uint8_t)(len64 >> 40),
-                        (uint8_t)(len64 >> 32),
-                        (uint8_t)(len64 >> 24),
-                        (uint8_t)(len64 >> 16),
-                        (uint8_t)(len64 >> 8),
-                        (uint8_t)len64};
+    uint8_t bytes[9] = {mt | 27,          (uint8_t)(value >> 56),
+                        (uint8_t)(value >> 48), (uint8_t)(value >> 40),
+                        (uint8_t)(value >> 32), (uint8_t)(value >> 24),
+                        (uint8_t)(value >> 16), (uint8_t)(value >> 8),
+                        (uint8_t)value};
     return byte_buffer_append(buf, bytes, 9);
   }
 }
 
-// Encode bytes value
-static bool encode_bytes(byte_buffer_t *buf, const uint8_t *data, size_t len) {
-  if (!encode_bytes_length(buf, len))
-    return false;
-  return byte_buffer_append(buf, data, len);
-}
-
-// Encode a CBOR value (only bytes type supported)
 static bool encode_value(byte_buffer_t *buf, cbor_value_t *value) {
   if (!value)
     return false;
 
-  if (value->type != CBOR_TYPE_BYTES)
-    return false;
+  switch (value->type) {
+  case CBOR_TYPE_UNSIGNED_INT:
+    return encode_head(buf, 0, value->value.uint_val);
 
-  size_t len;
-  const uint8_t *data = cbor_value_get_bytes(value, &len);
-  return encode_bytes(buf, data, len);
+  case CBOR_TYPE_BYTES: {
+    size_t len;
+    const uint8_t *data = cbor_value_get_bytes(value, &len);
+    if (!encode_head(buf, 2, len))
+      return false;
+    if (len > 0)
+      return byte_buffer_append(buf, data, len);
+    return true;
+  }
+
+  case CBOR_TYPE_STRING: {
+    const char *str = cbor_value_get_string(value);
+    if (!str)
+      return false;
+    size_t len = strlen(str);
+    if (!encode_head(buf, 3, len))
+      return false;
+    if (len > 0)
+      return byte_buffer_append(buf, (const uint8_t *)str, len);
+    return true;
+  }
+
+  case CBOR_TYPE_ARRAY: {
+    size_t count = cbor_value_get_array_size(value);
+    if (!encode_head(buf, 4, count))
+      return false;
+    for (size_t i = 0; i < count; i++) {
+      if (!encode_value(buf, cbor_value_get_array_item(value, i)))
+        return false;
+    }
+    return true;
+  }
+
+  case CBOR_TYPE_MAP: {
+    size_t count = value->value.map_val.count;
+    if (!encode_head(buf, 5, count))
+      return false;
+    for (size_t i = 0; i < count; i++) {
+      if (!encode_value(buf, value->value.map_val.keys[i]))
+        return false;
+      if (!encode_value(buf, value->value.map_val.values[i]))
+        return false;
+    }
+    return true;
+  }
+
+  case CBOR_TYPE_TAG: {
+    uint64_t tag = cbor_value_get_tag(value);
+    if (!encode_head(buf, 6, tag))
+      return false;
+    return encode_value(buf, cbor_value_get_tag_content(value));
+  }
+
+  case CBOR_TYPE_BOOL:
+    return byte_buffer_append_byte(buf,
+                                   cbor_value_get_bool(value) ? 0xF5 : 0xF4);
+
+  default:
+    return false;
+  }
 }
 
 // Create and destroy encoder
