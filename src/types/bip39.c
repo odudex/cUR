@@ -1,6 +1,6 @@
 #include "bip39.h"
 #include "cbor_decoder.h"
-#include "utils.h"
+#include "byte_buffer.h"
 #include <string.h>
 
 // BIP39 registry type (tag 301)

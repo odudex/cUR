@@ -1,6 +1,6 @@
 #include "keypath.h"
 #include "cbor_decoder.h"
-#include "utils.h"
+#include "byte_buffer.h"
 #include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
@@ -150,6 +150,47 @@ registry_item_t *keypath_from_data_item(cbor_value_t *data_item) {
     return NULL;
 
   return keypath_to_registry_item(keypath);
+}
+
+cbor_value_t *keypath_to_data_item(keypath_data_t *keypath) {
+  if (!keypath)
+    return NULL;
+
+  cbor_value_t *map = cbor_value_new_map();
+  if (!map)
+    return NULL;
+
+  if (keypath->component_count > 0) {
+    cbor_value_t *arr = cbor_value_new_array();
+    if (!arr) {
+      cbor_value_free(map);
+      return NULL;
+    }
+    for (size_t i = 0; i < keypath->component_count; i++) {
+      cbor_array_append(arr, keypath->components[i].wildcard
+                                 ? cbor_value_new_array()
+                                 : cbor_value_new_unsigned_int(
+                                       keypath->components[i].index));
+      cbor_array_append(arr,
+                        cbor_value_new_bool(keypath->components[i].hardened));
+    }
+    cbor_map_set(map, cbor_value_new_unsigned_int(1), arr);
+  }
+
+  if (keypath->source_fingerprint) {
+    uint32_t fp = ((uint32_t)keypath->source_fingerprint[0] << 24) |
+                  ((uint32_t)keypath->source_fingerprint[1] << 16) |
+                  ((uint32_t)keypath->source_fingerprint[2] << 8) |
+                  ((uint32_t)keypath->source_fingerprint[3]);
+    cbor_map_set(map, cbor_value_new_unsigned_int(2),
+                 cbor_value_new_unsigned_int(fp));
+  }
+
+  if (keypath->depth >= 0)
+    cbor_map_set(map, cbor_value_new_unsigned_int(3),
+                 cbor_value_new_unsigned_int((uint64_t)keypath->depth));
+
+  return map;
 }
 
 // Registry item interface

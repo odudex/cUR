@@ -1,4 +1,4 @@
-#include "utils.h"
+#include "byte_buffer.h"
 #include "../sha256/sha256.h"
 #include <stdlib.h>
 #include <string.h>
@@ -141,6 +141,7 @@ char *base58_encode(const uint8_t *data, size_t len) {
 char *base58check_encode(const uint8_t *data, size_t len) {
   if (!data || len == 0)
     return NULL;
+
 
   // Calculate checksum (first 4 bytes of double SHA256)
   CRYAL_SHA256_CTX ctx;

@@ -71,7 +71,7 @@ bool ur_encoder_encode_single(const char *type, const uint8_t *cbor_data,
 
   // Encode CBOR data to bytewords (minimal style, with CRC32 checksum)
   char *bytewords = NULL;
-  if (!bytewords_encode(BYTEWORDS_STYLE_MINIMAL, cbor_data, cbor_len,
+  if (!bytewords_encode(cbor_data, cbor_len,
                         &bytewords)) {
     return false;
   }
@@ -188,7 +188,7 @@ static bool encode_part(const char *type, const fountain_encoder_part_t *part,
 
   // Encode CBOR to bytewords (with CRC32 checksum)
   char *bytewords = NULL;
-  if (!bytewords_encode(BYTEWORDS_STYLE_MINIMAL, cbor, cbor_len, &bytewords)) {
+  if (!bytewords_encode(cbor, cbor_len, &bytewords)) {
     free(cbor);
     return false;
   }

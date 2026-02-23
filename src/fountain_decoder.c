@@ -20,6 +20,69 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Forward declarations
+typedef struct mixed_parts_hash mixed_parts_hash_t;
+
+// Lightweight hash set for duplicate detection (stores only hashes)
+typedef struct {
+  uint32_t *hashes;
+  size_t count;
+  size_t capacity;
+} hash_set_t;
+
+// Queue for processing parts
+typedef struct {
+  decoder_part_t *parts;
+  size_t front;
+  size_t rear;
+  size_t count;
+  size_t capacity;
+} part_queue_t;
+
+// Fountain decoder structure
+struct fountain_decoder {
+  part_indexes_t received_part_indexes;
+  part_indexes_t *last_part_indexes;
+  size_t processed_parts_count;
+  fountain_decoder_result_t *result;
+  part_indexes_t *expected_part_indexes;
+  size_t expected_fragment_len;
+  size_t expected_message_len;
+  uint32_t expected_checksum;
+
+  // Simple parts storage (key: single index, value: data)
+  struct {
+    size_t *keys;
+    decoder_part_t *values;
+    size_t *value_lens;
+    size_t count;
+    size_t capacity;
+  } simple_parts;
+
+  // Hash-based mixed parts storage
+  mixed_parts_hash_t *mixed_parts_hash;
+
+  // Lightweight duplicate detection (stores only hashes, not full parts)
+  hash_set_t received_fragments_hashes;
+
+  // Processing queue
+  part_queue_t queue;
+
+  // Duplicate detection: store last fragment sequence number
+  uint32_t last_fragment_seq_num;
+  bool has_received_fragment;
+
+#ifdef DEBUG_STATS
+  // Statistics for resource tracking
+  size_t maximum_mixed_parts;
+  size_t mixed_from_fragments; // Mixed parts directly from received fragments
+  size_t mixed_from_reduction; // Mixed parts created by reduce_mixed_by
+  size_t mixed_from_cross_reduction; // Mixed parts created by
+                                     // reduce_mixed_against_mixed
+  size_t mixed_parts_useful;         // Mixed parts that led to simple parts
+#endif
+};
+
 // Configuration constants
 #define QUEUE_INITIAL_CAPACITY 8
 #define SIMPLE_PARTS_INITIAL_CAPACITY 4
@@ -29,8 +92,8 @@
 #define MAX_MIXED_PARTS 256 // Limit mixed parts to prevent memory explosion
 #define MAX_DUPLICATE_TRACKING 512 // Limit duplicate tracking set size
 
-// Enable cross-reduction between mixed parts (slower but may use fewer fragments)
-// #define ENABLE_CROSS_REDUCTION
+// Enable cross-reduction between mixed parts (slower but may use fewer
+// fragments) #define ENABLE_CROSS_REDUCTION
 
 #ifdef ENABLE_CROSS_REDUCTION
 #define CROSS_REDUCTION_MAX_ITERATIONS 7
@@ -229,7 +292,7 @@ static bool mixed_hash_put(mixed_parts_hash_t *hash, const part_indexes_t *key,
   return true;
 }
 
-bool queue_init(part_queue_t *queue, size_t capacity) {
+static bool queue_init(part_queue_t *queue, size_t capacity) {
   if (!queue || capacity == 0)
     return false;
 
@@ -253,7 +316,7 @@ bool queue_init(part_queue_t *queue, size_t capacity) {
   return true;
 }
 
-void queue_free(part_queue_t *queue) {
+static void queue_free(part_queue_t *queue) {
   if (!queue)
     return;
 
@@ -268,7 +331,7 @@ void queue_free(part_queue_t *queue) {
   memset(queue, 0, sizeof(part_queue_t));
 }
 
-bool queue_enqueue(part_queue_t *queue, const decoder_part_t *part) {
+static bool queue_enqueue(part_queue_t *queue, const decoder_part_t *part) {
   if (!queue || !part || queue->count >= queue->capacity)
     return false;
 
@@ -282,7 +345,7 @@ bool queue_enqueue(part_queue_t *queue, const decoder_part_t *part) {
   return true;
 }
 
-bool queue_dequeue(part_queue_t *queue, decoder_part_t *part) {
+static bool queue_dequeue(part_queue_t *queue, decoder_part_t *part) {
   if (!queue || !part || queue->count == 0)
     return false;
 
@@ -297,7 +360,7 @@ bool queue_dequeue(part_queue_t *queue, decoder_part_t *part) {
   return true;
 }
 
-bool queue_is_empty(const part_queue_t *queue) {
+static bool queue_is_empty(const part_queue_t *queue) {
   return !queue || queue->count == 0;
 }
 
@@ -1461,4 +1524,10 @@ size_t fountain_decoder_result_message_len(fountain_decoder_t *decoder) {
   if (!decoder || !decoder->result)
     return 0;
   return decoder->result->data_len;
+}
+
+size_t fountain_decoder_processed_parts_count(fountain_decoder_t *decoder) {
+  if (!decoder)
+    return 0;
+  return decoder->processed_parts_count;
 }

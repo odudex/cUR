@@ -13,12 +13,179 @@
 //
 
 #include "fountain_encoder.h"
-#include "cbor_encoder_lite.h"
 #include "crc32.h"
 #include "fountain_utils.h"
 #include "utils.h"
 #include <stdlib.h>
 #include <string.h>
+
+// ---------------------------------------------------------------------------
+// Lightweight CBOR encoder
+// ---------------------------------------------------------------------------
+
+// CBOR major types
+#define CBOR_MAJOR_UNSIGNED 0
+#define CBOR_MAJOR_BYTES (2 << 5)
+#define CBOR_MAJOR_ARRAY (4 << 5)
+
+// CBOR additional info values
+#define CBOR_MINOR_LENGTH1 24
+#define CBOR_MINOR_LENGTH2 25
+#define CBOR_MINOR_LENGTH4 26
+#define CBOR_MINOR_LENGTH8 27
+
+typedef struct {
+  uint8_t *buffer;
+  size_t capacity;
+  size_t size;
+} cbor_lite_encoder_t;
+
+static size_t cbor_lite_get_byte_length(uint64_t value) {
+  if (value < 24)
+    return 0;
+  if (value <= 0xFF)
+    return 1;
+  if (value <= 0xFFFF)
+    return 2;
+  if (value <= 0xFFFFFFFF)
+    return 4;
+  return 8;
+}
+
+static bool cbor_lite_ensure_capacity(cbor_lite_encoder_t *enc,
+                                      size_t additional) {
+  if (!enc)
+    return false;
+
+  size_t required = enc->size + additional;
+  if (required <= enc->capacity)
+    return true;
+
+  size_t new_capacity = enc->capacity * 3 / 2;
+  if (new_capacity < required)
+    new_capacity = required;
+
+  uint8_t *new_buffer = (uint8_t *)realloc(enc->buffer, new_capacity);
+  if (!new_buffer)
+    return false;
+
+  enc->buffer = new_buffer;
+  enc->capacity = new_capacity;
+  return true;
+}
+
+static bool cbor_lite_append_byte(cbor_lite_encoder_t *enc, uint8_t byte) {
+  if (!cbor_lite_ensure_capacity(enc, 1))
+    return false;
+  enc->buffer[enc->size++] = byte;
+  return true;
+}
+
+static bool cbor_lite_encode_tag_and_value(cbor_lite_encoder_t *enc,
+                                           uint8_t major_type,
+                                           uint64_t value) {
+  size_t length = cbor_lite_get_byte_length(value);
+
+  if (length == 0) {
+    return cbor_lite_append_byte(enc, major_type + (uint8_t)value);
+  }
+
+  if (!cbor_lite_ensure_capacity(enc, 1 + length))
+    return false;
+
+  if (length == 1) {
+    cbor_lite_append_byte(enc, major_type + CBOR_MINOR_LENGTH1);
+    cbor_lite_append_byte(enc, value & 0xFF);
+  } else if (length == 2) {
+    cbor_lite_append_byte(enc, major_type + CBOR_MINOR_LENGTH2);
+    cbor_lite_append_byte(enc, (value >> 8) & 0xFF);
+    cbor_lite_append_byte(enc, value & 0xFF);
+  } else if (length == 4) {
+    cbor_lite_append_byte(enc, major_type + CBOR_MINOR_LENGTH4);
+    cbor_lite_append_byte(enc, (value >> 24) & 0xFF);
+    cbor_lite_append_byte(enc, (value >> 16) & 0xFF);
+    cbor_lite_append_byte(enc, (value >> 8) & 0xFF);
+    cbor_lite_append_byte(enc, value & 0xFF);
+  } else {
+    cbor_lite_append_byte(enc, major_type + CBOR_MINOR_LENGTH8);
+    cbor_lite_append_byte(enc, (value >> 56) & 0xFF);
+    cbor_lite_append_byte(enc, (value >> 48) & 0xFF);
+    cbor_lite_append_byte(enc, (value >> 40) & 0xFF);
+    cbor_lite_append_byte(enc, (value >> 32) & 0xFF);
+    cbor_lite_append_byte(enc, (value >> 24) & 0xFF);
+    cbor_lite_append_byte(enc, (value >> 16) & 0xFF);
+    cbor_lite_append_byte(enc, (value >> 8) & 0xFF);
+    cbor_lite_append_byte(enc, value & 0xFF);
+  }
+
+  return true;
+}
+
+static bool cbor_lite_encoder_init(cbor_lite_encoder_t *enc,
+                                   size_t initial_capacity) {
+  if (!enc)
+    return false;
+
+  enc->buffer = (uint8_t *)malloc(initial_capacity);
+  if (!enc->buffer)
+    return false;
+
+  enc->capacity = initial_capacity;
+  enc->size = 0;
+  return true;
+}
+
+static void cbor_lite_encoder_free(cbor_lite_encoder_t *enc) {
+  if (enc) {
+    free(enc->buffer);
+    enc->buffer = NULL;
+    enc->capacity = 0;
+    enc->size = 0;
+  }
+}
+
+static uint8_t *cbor_lite_encoder_get_buffer(cbor_lite_encoder_t *enc,
+                                             size_t *size_out) {
+  if (!enc || !size_out)
+    return NULL;
+
+  *size_out = enc->size;
+
+  uint8_t *result = (uint8_t *)malloc(enc->size);
+  if (!result)
+    return NULL;
+
+  memcpy(result, enc->buffer, enc->size);
+  return result;
+}
+
+static bool cbor_lite_encode_unsigned(cbor_lite_encoder_t *enc,
+                                      uint64_t value) {
+  return cbor_lite_encode_tag_and_value(enc, CBOR_MAJOR_UNSIGNED, value);
+}
+
+static bool cbor_lite_encode_array_start(cbor_lite_encoder_t *enc,
+                                         size_t count) {
+  return cbor_lite_encode_tag_and_value(enc, CBOR_MAJOR_ARRAY, count);
+}
+
+static bool cbor_lite_encode_bytes(cbor_lite_encoder_t *enc,
+                                   const uint8_t *data, size_t len) {
+  if (!enc || !data)
+    return false;
+
+  if (!cbor_lite_encode_tag_and_value(enc, CBOR_MAJOR_BYTES, len))
+    return false;
+
+  if (!cbor_lite_ensure_capacity(enc, len))
+    return false;
+
+  memcpy(enc->buffer + enc->size, data, len);
+  enc->size += len;
+  return true;
+}
+
+// ---------------------------------------------------------------------------
 
 // Fragment array operations
 
@@ -286,32 +453,32 @@ bool fountain_encoder_part_to_cbor(const fountain_encoder_part_t *part,
   }
 
   // Create encoder
-  cbor_encoder_t encoder;
-  if (!cbor_encoder_init(&encoder, 64 + part->data_len)) {
+  cbor_lite_encoder_t encoder;
+  if (!cbor_lite_encoder_init(&encoder, 64 + part->data_len)) {
     return false;
   }
 
   // Encode array of 5 elements
-  if (!cbor_encode_array_start(&encoder, 5)) {
-    cbor_encoder_free(&encoder);
+  if (!cbor_lite_encode_array_start(&encoder, 5)) {
+    cbor_lite_encoder_free(&encoder);
     return false;
   }
 
   // Encode fields: seq_num, seq_len, message_len, checksum, data
-  if (!cbor_encode_unsigned(&encoder, part->seq_num) ||
-      !cbor_encode_unsigned(&encoder, part->seq_len) ||
-      !cbor_encode_unsigned(&encoder, part->message_len) ||
-      !cbor_encode_unsigned(&encoder, part->checksum) ||
-      !cbor_encode_bytes(&encoder, part->data, part->data_len)) {
-    cbor_encoder_free(&encoder);
+  if (!cbor_lite_encode_unsigned(&encoder, part->seq_num) ||
+      !cbor_lite_encode_unsigned(&encoder, part->seq_len) ||
+      !cbor_lite_encode_unsigned(&encoder, part->message_len) ||
+      !cbor_lite_encode_unsigned(&encoder, part->checksum) ||
+      !cbor_lite_encode_bytes(&encoder, part->data, part->data_len)) {
+    cbor_lite_encoder_free(&encoder);
     return false;
   }
 
   // Get result buffer (makes a copy)
-  *cbor_out = cbor_encoder_get_buffer(&encoder, cbor_len);
+  *cbor_out = cbor_lite_encoder_get_buffer(&encoder, cbor_len);
 
   // Free encoder
-  cbor_encoder_free(&encoder);
+  cbor_lite_encoder_free(&encoder);
 
   return *cbor_out != NULL;
 }

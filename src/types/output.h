@@ -59,9 +59,14 @@ void output_free(output_data_t *output);
 registry_item_t *output_to_registry_item(output_data_t *output);
 output_data_t *output_from_registry_item(registry_item_t *item);
 
-// CBOR conversion functions (read-only)
+// CBOR conversion functions
 registry_item_t *output_from_data_item(cbor_value_t *data_item);
 output_data_t *output_from_cbor(const uint8_t *cbor_data, size_t len);
+cbor_value_t *output_to_data_item(output_data_t *output);
+uint8_t *output_to_cbor(output_data_t *output, size_t *out_len);
+
+// Parse descriptor string into output_data_t
+output_data_t *output_from_descriptor_string(const char *descriptor);
 
 // Generate output descriptor string
 char *output_descriptor(output_data_t *output, bool include_checksum);

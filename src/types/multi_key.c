@@ -1,6 +1,6 @@
 #include "multi_key.h"
 #include "cbor_decoder.h"
-#include "utils.h"
+#include "byte_buffer.h"
 #include <string.h>
 
 // Create and destroy MultiKey
@@ -45,6 +45,32 @@ bool multi_key_add_hd_key(multi_key_data_t *multi_key, hd_key_data_t *hd_key) {
   multi_key->hd_key_count = new_count;
 
   return true;
+}
+
+cbor_value_t *multi_key_to_data_item(multi_key_data_t *multi_key) {
+  if (!multi_key)
+    return NULL;
+
+  cbor_value_t *map = cbor_value_new_map();
+  if (!map)
+    return NULL;
+
+  cbor_map_set(map, cbor_value_new_unsigned_int(1),
+               cbor_value_new_unsigned_int(multi_key->threshold));
+
+  cbor_value_t *arr = cbor_value_new_array();
+  if (!arr) {
+    cbor_value_free(map);
+    return NULL;
+  }
+  for (size_t i = 0; i < multi_key->hd_key_count; i++) {
+    cbor_value_t *m = hd_key_to_data_item(multi_key->hd_keys[i]);
+    if (m)
+      cbor_array_append(arr, cbor_value_new_tag(CRYPTO_HDKEY_TAG, m));
+  }
+  cbor_map_set(map, cbor_value_new_unsigned_int(2), arr);
+
+  return map;
 }
 
 // Parse MultiKey from CBOR data item

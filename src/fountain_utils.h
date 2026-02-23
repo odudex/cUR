@@ -1,7 +1,7 @@
 #ifndef FOUNTAIN_UTILS_H
 #define FOUNTAIN_UTILS_H
 
-#include "fountain_decoder.h"
+#include "fountain_types.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>

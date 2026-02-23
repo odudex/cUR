@@ -1,5 +1,5 @@
 #include "cbor_decoder.h"
-#include "utils.h"
+#include "byte_buffer.h"
 #include <string.h>
 
 // CBOR major types

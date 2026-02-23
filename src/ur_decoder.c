@@ -123,7 +123,7 @@ static ur_result_t *decode_single_part(const char *type, const char *body) {
 
   uint8_t *cbor_data;
   size_t cbor_len;
-  if (!bytewords_decode_raw(BYTEWORDS_STYLE_MINIMAL, body, &cbor_data,
+  if (!bytewords_decode_raw(body, &cbor_data,
                             &cbor_len)) {
     return NULL;
   }
@@ -210,7 +210,7 @@ bool ur_decoder_receive_part(ur_decoder_t *decoder, const char *part_str) {
 
   uint8_t *cbor_data;
   size_t cbor_len;
-  if (!bytewords_decode_raw(BYTEWORDS_STYLE_MINIMAL, components[1], &cbor_data,
+  if (!bytewords_decode_raw(components[1], &cbor_data,
                             &cbor_len)) {
     decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
     free(type);
@@ -471,7 +471,7 @@ size_t ur_decoder_expected_part_count(ur_decoder_t *decoder) {
 size_t ur_decoder_processed_parts_count(ur_decoder_t *decoder) {
   if (!decoder || !decoder->fountain_decoder)
     return 0;
-  return decoder->fountain_decoder->processed_parts_count;
+  return fountain_decoder_processed_parts_count(decoder->fountain_decoder);
 }
 
 double ur_decoder_estimated_percent_complete(ur_decoder_t *decoder) {
