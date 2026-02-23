@@ -1,7 +1,7 @@
 #include "output.h"
 #include "cbor_decoder.h"
 #include "cbor_encoder.h"
-#include "utils.h"
+#include "byte_buffer.h"
 #include <ctype.h>
 #include <inttypes.h>
 #include <mbedtls/sha256.h>

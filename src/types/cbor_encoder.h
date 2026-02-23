@@ -2,7 +2,7 @@
 #define URTYPES_CBOR_ENCODER_H
 
 #include "cbor_data.h"
-#include "utils.h"
+#include "byte_buffer.h"
 #include <stddef.h>
 #include <stdint.h>
 

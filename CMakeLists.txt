@@ -7,10 +7,8 @@ idf_component_register(
         "src/fountain_decoder.c"
         "src/fountain_utils.c"
         "src/bytewords.c"
-        "src/cbor_encoder_lite.c"
         "src/crc32.c"
         "src/utils.c"
-        "src/types/bip39.c"
         "src/types/cbor_data.c"
         "src/types/bytes_type.c"
         "src/types/cbor_encoder.c"
@@ -21,7 +19,7 @@ idf_component_register(
         "src/types/psbt.c"
         "src/types/keypath.c"
         "src/types/registry.c"
-        "src/types/utils.c"
+        "src/types/byte_buffer.c"
     INCLUDE_DIRS
         "src"
     REQUIRES

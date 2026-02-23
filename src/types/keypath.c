@@ -1,6 +1,6 @@
 #include "keypath.h"
 #include "cbor_decoder.h"
-#include "utils.h"
+#include "byte_buffer.h"
 #include <inttypes.h>
 #include <stdio.h>
 #include <string.h>

@@ -1,6 +1,6 @@
 #include "multi_key.h"
 #include "cbor_decoder.h"
-#include "utils.h"
+#include "byte_buffer.h"
 #include <string.h>
 
 // Create and destroy MultiKey

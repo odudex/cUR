@@ -1,7 +1,7 @@
 #ifndef URTYPES_CBOR_DATA_H
 #define URTYPES_CBOR_DATA_H
 
-#include "utils.h"
+#include "byte_buffer.h"
 #include <stdbool.h>
 #include <stdint.h>
 

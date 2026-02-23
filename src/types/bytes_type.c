@@ -1,7 +1,7 @@
 #include "bytes_type.h"
 #include "cbor_decoder.h"
 #include "cbor_encoder.h"
-#include "utils.h"
+#include "byte_buffer.h"
 #include <string.h>
 
 // Bytes registry type (no tag)

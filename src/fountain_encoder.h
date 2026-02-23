@@ -1,7 +1,7 @@
 #ifndef FOUNTAIN_ENCODER_H
 #define FOUNTAIN_ENCODER_H
 
-#include "fountain_decoder.h" // For part_indexes_t
+#include "fountain_types.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>

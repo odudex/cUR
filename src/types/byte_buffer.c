@@ -1,4 +1,4 @@
-#include "utils.h"
+#include "byte_buffer.h"
 #include <mbedtls/sha256.h>
 #include <stdlib.h>
 #include <string.h>

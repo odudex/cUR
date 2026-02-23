@@ -1,5 +1,5 @@
-#ifndef URTYPES_UTILS_H
-#define URTYPES_UTILS_H
+#ifndef URTYPES_BYTE_BUFFER_H
+#define URTYPES_BYTE_BUFFER_H
 
 #include "../utils.h" // Use root utils for memory management (safe_malloc, safe_realloc, safe_strdup)
 #include <stdbool.h>
@@ -26,4 +26,4 @@ size_t byte_buffer_get_len(byte_buffer_t *buf);
 char *base58_encode(const uint8_t *data, size_t len);
 char *base58check_encode(const uint8_t *data, size_t len);
 
-#endif // URTYPES_UTILS_H
+#endif // URTYPES_BYTE_BUFFER_H
