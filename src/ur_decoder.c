@@ -123,8 +123,7 @@ static ur_result_t *decode_single_part(const char *type, const char *body) {
 
   uint8_t *cbor_data;
   size_t cbor_len;
-  if (!bytewords_decode_raw(body, &cbor_data,
-                            &cbor_len)) {
+  if (!bytewords_decode_raw(body, &cbor_data, &cbor_len)) {
     return NULL;
   }
 
@@ -210,8 +209,7 @@ bool ur_decoder_receive_part(ur_decoder_t *decoder, const char *part_str) {
 
   uint8_t *cbor_data;
   size_t cbor_len;
-  if (!bytewords_decode_raw(components[1], &cbor_data,
-                            &cbor_len)) {
+  if (!bytewords_decode_raw(components[1], &cbor_data, &cbor_len)) {
     decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
     free(type);
     free_string_array(components, component_count);

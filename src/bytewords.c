@@ -21,24 +21,24 @@
 #include <string.h>
 
 // Minimal bytewords table: first+last character pairs for all 256 words
-// For byte i: first_char = bytewords_minimal[i*2], last_char = bytewords_minimal[i*2+1]
-static const char bytewords_minimal[] =
-    "aeadaoaxaaahamatayasbkbdbnbtbabs"
-    "bebybgbwbbbzcmchcscfcycwcecackct"
-    "cxclcpcndkdadsdidedtdrdndwdpdmdl"
-    "dyeheyeoeeecenemetesftfrfnfsfmfh"
-    "fzfpfwfxfyfefgflfdgagegrgsgtglgw"
-    "gdgygmgughgohfhghdhkhthphhhlhyhe"
-    "hnhsidiaieihiyioisinimjejzjnjtjl"
-    "jojsjpjkjykpkoktkskkknkgkekikblb"
-    "lalylflslrlplnltloldlelulklgmnmy"
-    "mhmemomumwmdmtmsmknlnyndnsntnnne"
-    "nboyoeotoxonolospdptpkpypspmplpe"
-    "pfpaprqdqzrerprlrorhrdrkrfryrnrs"
-    "rtsesasrssskswstspsosgsbsfsntotk"
-    "titttdtetytltbtstptatnuyuoutueur"
-    "vtvyvovlvevwvavdvswlwdwmwpwewyws"
-    "wtwnwzwfwkykynylyaytzszoztzczezm";
+// For byte i: first_char = bytewords_minimal[i*2], last_char =
+// bytewords_minimal[i*2+1]
+static const char bytewords_minimal[] = "aeadaoaxaaahamatayasbkbdbnbtbabs"
+                                        "bebybgbwbbbzcmchcscfcycwcecackct"
+                                        "cxclcpcndkdadsdidedtdrdndwdpdmdl"
+                                        "dyeheyeoeeecenemetesftfrfnfsfmfh"
+                                        "fzfpfwfxfyfefgflfdgagegrgsgtglgw"
+                                        "gdgygmgughgohfhghdhkhthphhhlhyhe"
+                                        "hnhsidiaieihiyioisinimjejzjnjtjl"
+                                        "jojsjpjkjykpkoktkskkknkgkekikblb"
+                                        "lalylflslrlplnltloldlelulklgmnmy"
+                                        "mhmemomumwmdmtmsmknlnyndnsntnnne"
+                                        "nboyoeotoxonolospdptpkpypspmplpe"
+                                        "pfpaprqdqzrerprlrorhrdrkrfryrnrs"
+                                        "rtsesasrssskswstspsosgsbsfsntotk"
+                                        "titttdtetytltbtstptatnuyuoutueur"
+                                        "vtvyvovlvevwvavdvswlwdwmwpwewyws"
+                                        "wtwnwzwfwkykynylyaytzszoztzczezm";
 
 // Optimized lookup table for fast word-to-byte mapping (2-char minimal style)
 // Uses first and last character positions to create 2D hash

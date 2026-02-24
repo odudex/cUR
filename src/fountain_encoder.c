@@ -82,8 +82,7 @@ static bool cbor_lite_append_byte(cbor_lite_encoder_t *enc, uint8_t byte) {
 }
 
 static bool cbor_lite_encode_tag_and_value(cbor_lite_encoder_t *enc,
-                                           uint8_t major_type,
-                                           uint64_t value) {
+                                           uint8_t major_type, uint64_t value) {
   size_t length = cbor_lite_get_byte_length(value);
 
   if (length == 0) {
