@@ -395,6 +395,7 @@ bool join_fragments(uint8_t **fragments, size_t *fragment_lens,
   return true;
 }
 
+#ifdef ENABLE_CROSS_REDUCTION
 bool part_indexes_have_intersection(const part_indexes_t *a,
                                     const part_indexes_t *b) {
   if (!a || !b || a->count == 0 || b->count == 0)
@@ -462,3 +463,4 @@ bool part_indexes_symmetric_difference(const part_indexes_t *a,
 
   return true;
 }
+#endif // ENABLE_CROSS_REDUCTION

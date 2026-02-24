@@ -92,9 +92,6 @@ struct fountain_decoder {
 #define MAX_MIXED_PARTS 256 // Limit mixed parts to prevent memory explosion
 #define MAX_DUPLICATE_TRACKING 512 // Limit duplicate tracking set size
 
-// Enable cross-reduction between mixed parts (slower but may use fewer
-// fragments) #define ENABLE_CROSS_REDUCTION
-
 #ifdef ENABLE_CROSS_REDUCTION
 #define CROSS_REDUCTION_MAX_ITERATIONS 7
 #endif

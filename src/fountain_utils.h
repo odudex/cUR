@@ -2,6 +2,10 @@
 #define FOUNTAIN_UTILS_H
 
 #include "fountain_types.h"
+
+// Enable cross-reduction between mixed parts (slower but may use fewer
+// fragments). Uncomment to enable:
+// #define ENABLE_CROSS_REDUCTION
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -117,6 +121,7 @@ bool part_indexes_equal(const part_indexes_t *a, const part_indexes_t *b);
  */
 bool part_indexes_copy(const part_indexes_t *src, part_indexes_t *dst);
 
+#ifdef ENABLE_CROSS_REDUCTION
 /**
  * Check if two part_indexes have any intersection
  * @param a First set
@@ -136,6 +141,7 @@ bool part_indexes_have_intersection(const part_indexes_t *a,
 bool part_indexes_symmetric_difference(const part_indexes_t *a,
                                        const part_indexes_t *b,
                                        part_indexes_t *result);
+#endif // ENABLE_CROSS_REDUCTION
 
 /**
  * Join fragments into a single message, taking only message_len bytes
