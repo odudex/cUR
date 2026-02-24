@@ -123,8 +123,7 @@ static ur_result_t *decode_single_part(const char *type, const char *body) {
 
   uint8_t *cbor_data;
   size_t cbor_len;
-  if (!bytewords_decode_raw(body, &cbor_data,
-                            &cbor_len)) {
+  if (!bytewords_decode_raw(body, &cbor_data, &cbor_len)) {
     return NULL;
   }
 
