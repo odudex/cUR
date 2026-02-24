@@ -183,9 +183,15 @@ int random_sampler_next(random_sampler_t *sampler, prng_state_t *rng) {
   return (r2 < sampler->probs[i]) ? i : sampler->aliases[i];
 }
 
-static size_t choose_degree(size_t seq_len, prng_state_t *prng) {
+static size_t choose_degree(size_t seq_len, prng_state_t *prng,
+                            random_sampler_t *cached_sampler) {
   if (seq_len == 0)
     return 1;
+
+  if (cached_sampler && cached_sampler->probs) {
+    int degree_index = random_sampler_next(cached_sampler, prng);
+    return (size_t)degree_index + 1;
+  }
 
   double *degree_probs = safe_malloc(seq_len * sizeof(double));
   if (!degree_probs)
@@ -210,8 +216,10 @@ static size_t choose_degree(size_t seq_len, prng_state_t *prng) {
   return degree;
 }
 
-bool choose_fragments(uint32_t seq_num, size_t seq_len, uint32_t checksum,
-                      part_indexes_t *result) {
+static bool choose_fragments_internal(uint32_t seq_num, size_t seq_len,
+                                      uint32_t checksum,
+                                      part_indexes_t *result,
+                                      random_sampler_t *cached_sampler) {
   if (!result || seq_len == 0)
     return false;
 
@@ -234,7 +242,7 @@ bool choose_fragments(uint32_t seq_num, size_t seq_len, uint32_t checksum,
   prng_state_t rng;
   prng_init_from_bytes(&rng, seed, 8);
 
-  size_t degree = choose_degree(seq_len, &rng);
+  size_t degree = choose_degree(seq_len, &rng, cached_sampler);
 
   size_t *shuffled_indexes = safe_malloc(seq_len * sizeof(size_t));
   if (!shuffled_indexes)
@@ -274,6 +282,18 @@ bool choose_fragments(uint32_t seq_num, size_t seq_len, uint32_t checksum,
   return true;
 }
 
+bool choose_fragments(uint32_t seq_num, size_t seq_len, uint32_t checksum,
+                      part_indexes_t *result) {
+  return choose_fragments_internal(seq_num, seq_len, checksum, result, NULL);
+}
+
+bool choose_fragments_cached(uint32_t seq_num, size_t seq_len,
+                              uint32_t checksum, part_indexes_t *result,
+                              random_sampler_t *cached_sampler) {
+  return choose_fragments_internal(seq_num, seq_len, checksum, result,
+                                   cached_sampler);
+}
+
 bool part_indexes_is_strict_subset(const part_indexes_t *a,
                                    const part_indexes_t *b) {
   if (!a || !b)
@@ -282,7 +302,6 @@ bool part_indexes_is_strict_subset(const part_indexes_t *a,
   if (a->count >= b->count)
     return false;
 
-  // Both arrays are sorted - use merge-like O(n) algorithm
   size_t i = 0, j = 0;
   while (i < a->count && j < b->count) {
     if (a->indexes[i] == b->indexes[j]) {
@@ -291,12 +310,26 @@ bool part_indexes_is_strict_subset(const part_indexes_t *a,
     } else if (a->indexes[i] > b->indexes[j]) {
       j++;
     } else {
-      // a->indexes[i] < b->indexes[j] means a[i] not in b
       return false;
     }
   }
 
-  return i == a->count; // All elements of a found in b
+  return i == a->count;
+}
+
+static bool part_indexes_append_sorted(part_indexes_t *indexes, size_t value) {
+  if (indexes->count >= indexes->capacity) {
+    size_t new_capacity =
+        indexes->capacity == 0 ? 4 : indexes->capacity * 2;
+    size_t *new_idx =
+        safe_realloc(indexes->indexes, new_capacity * sizeof(size_t));
+    if (!new_idx)
+      return false;
+    indexes->indexes = new_idx;
+    indexes->capacity = new_capacity;
+  }
+  indexes->indexes[indexes->count++] = value;
+  return true;
 }
 
 bool part_indexes_difference(const part_indexes_t *a, const part_indexes_t *b,
@@ -306,26 +339,21 @@ bool part_indexes_difference(const part_indexes_t *a, const part_indexes_t *b,
 
   part_indexes_clear(result);
 
-  // Both arrays are sorted - use merge-like O(n) algorithm
   size_t i = 0, j = 0;
   while (i < a->count) {
     if (j >= b->count || a->indexes[i] < b->indexes[j]) {
-      // a[i] not in b, add to result
-      if (!part_indexes_add(result, a->indexes[i])) {
+      if (!part_indexes_append_sorted(result, a->indexes[i])) {
         return false;
       }
       i++;
     } else if (a->indexes[i] == b->indexes[j]) {
-      // a[i] in b, skip
       i++;
       j++;
     } else {
-      // a[i] > b[j], advance j
       j++;
     }
   }
 
-  // Result is already sorted (part_indexes_add maintains order)
   return true;
 }
 
@@ -336,7 +364,6 @@ bool part_indexes_equal(const part_indexes_t *a, const part_indexes_t *b) {
   if (a->count != b->count)
     return false;
 
-  // Both arrays are sorted, so direct comparison is O(n)
   for (size_t i = 0; i < a->count; i++) {
     if (a->indexes[i] != b->indexes[i]) {
       return false;
@@ -352,12 +379,19 @@ bool part_indexes_copy(const part_indexes_t *src, part_indexes_t *dst) {
 
   part_indexes_clear(dst);
 
-  for (size_t i = 0; i < src->count; i++) {
-    if (!part_indexes_add(dst, src->indexes[i])) {
+  if (src->count == 0)
+    return true;
+
+  if (dst->capacity < src->count) {
+    size_t *new_idx = safe_realloc(dst->indexes, src->count * sizeof(size_t));
+    if (!new_idx)
       return false;
-    }
+    dst->indexes = new_idx;
+    dst->capacity = src->count;
   }
 
+  memcpy(dst->indexes, src->indexes, src->count * sizeof(size_t));
+  dst->count = src->count;
   return true;
 }
 
@@ -367,29 +401,19 @@ bool join_fragments(uint8_t **fragments, size_t *fragment_lens,
   if (!fragments || !fragment_lens || !result || fragment_count == 0)
     return false;
 
-  size_t total_len = 0;
-  for (size_t i = 0; i < fragment_count; i++) {
-    if (fragments[i] && fragment_lens[i] > 0) {
-      total_len += fragment_lens[i];
-    }
-  }
-
-  uint8_t *temp_buffer = safe_malloc(total_len);
-  if (!temp_buffer)
-    return false;
-
   size_t offset = 0;
   for (size_t i = 0; i < fragment_count; i++) {
     if (fragments[i] && fragment_lens[i] > 0) {
-      memcpy(temp_buffer + offset, fragments[i], fragment_lens[i]);
-      offset += fragment_lens[i];
+      size_t copy_len = fragment_lens[i];
+      if (offset + copy_len > message_len)
+        copy_len = message_len - offset;
+      memcpy(result + offset, fragments[i], copy_len);
+      offset += copy_len;
+      if (offset >= message_len)
+        break;
     }
   }
 
-  size_t copy_len = (total_len < message_len) ? total_len : message_len;
-  memcpy(result, temp_buffer, copy_len);
-
-  free(temp_buffer);
   return true;
 }
 
@@ -399,11 +423,10 @@ bool part_indexes_have_intersection(const part_indexes_t *a,
   if (!a || !b || a->count == 0 || b->count == 0)
     return false;
 
-  // Both arrays are sorted - use merge-like O(n) algorithm
   size_t i = 0, j = 0;
   while (i < a->count && j < b->count) {
     if (a->indexes[i] == b->indexes[j]) {
-      return true; // Found intersection
+      return true;
     } else if (a->indexes[i] < b->indexes[j]) {
       i++;
     } else {
@@ -421,41 +444,31 @@ bool part_indexes_symmetric_difference(const part_indexes_t *a,
 
   part_indexes_clear(result);
 
-  // Both arrays are sorted - use merge-like O(n) algorithm
   size_t i = 0, j = 0;
   while (i < a->count && j < b->count) {
     if (a->indexes[i] < b->indexes[j]) {
-      // a[i] not in b
-      if (!part_indexes_add(result, a->indexes[i])) {
+      if (!part_indexes_append_sorted(result, a->indexes[i]))
         return false;
-      }
       i++;
     } else if (a->indexes[i] > b->indexes[j]) {
-      // b[j] not in a
-      if (!part_indexes_add(result, b->indexes[j])) {
+      if (!part_indexes_append_sorted(result, b->indexes[j]))
         return false;
-      }
       j++;
     } else {
-      // Equal - in both, skip
       i++;
       j++;
     }
   }
 
-  // Add remaining elements from a
   while (i < a->count) {
-    if (!part_indexes_add(result, a->indexes[i])) {
+    if (!part_indexes_append_sorted(result, a->indexes[i]))
       return false;
-    }
     i++;
   }
 
-  // Add remaining elements from b
   while (j < b->count) {
-    if (!part_indexes_add(result, b->indexes[j])) {
+    if (!part_indexes_append_sorted(result, b->indexes[j]))
       return false;
-    }
     j++;
   }
 

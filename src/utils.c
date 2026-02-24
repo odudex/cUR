@@ -88,42 +88,50 @@ bool parse_ur_string(const char *ur_str, char **type, char ***components,
   if (!lowered)
     return false;
 
-  strcpy(lowered, ur_str);
+  memcpy(lowered, ur_str, len + 1);
   str_to_lower(lowered);
 
-  if (!str_has_prefix(lowered, "ur:")) {
+  if (len < 3 || lowered[0] != 'u' || lowered[1] != 'r' || lowered[2] != ':') {
     free(lowered);
     return false;
   }
 
   char *path = lowered + 3;
-  if (strlen(path) == 0) {
+  if (*path == '\0') {
     free(lowered);
     return false;
   }
 
-  char **parts = safe_malloc(sizeof(char *) * 10);
-  if (!parts) {
-    free(lowered);
-    return false;
+  // Split in-place by replacing '/' with '\0' and collecting pointers
+  // Max 10 parts (same as before)
+  char *part_ptrs[10];
+  size_t part_count = 0;
+  char *start = path;
+
+  for (char *p = path;; p++) {
+    if (*p == '/' || *p == '\0') {
+      bool is_end = (*p == '\0');
+      if (p > start && part_count < 10) {
+        *p = '\0';
+        part_ptrs[part_count++] = start;
+      }
+      if (is_end)
+        break;
+      start = p + 1;
+    }
   }
 
-  size_t part_count = str_split(path, '/', parts, 10);
   if (part_count < 2) {
-    free_string_array(parts, part_count);
-    free(parts);
     free(lowered);
     return false;
   }
 
-  if (!is_ur_type(parts[0])) {
-    free_string_array(parts, part_count);
-    free(parts);
+  if (!is_ur_type(part_ptrs[0])) {
     free(lowered);
     return false;
   }
 
-  *type = safe_strdup(parts[0]);
+  *type = safe_strdup(part_ptrs[0]);
   *component_count = part_count - 1;
   *components = safe_malloc(sizeof(char *) * (*component_count));
 
@@ -132,26 +140,21 @@ bool parse_ur_string(const char *ur_str, char **type, char ***components,
       free(*type);
     if (*components)
       free(*components);
-    free_string_array(parts, part_count);
-    free(parts);
     free(lowered);
     return false;
   }
 
   for (size_t i = 0; i < *component_count; i++) {
-    (*components)[i] = safe_strdup(parts[i + 1]);
+    (*components)[i] = safe_strdup(part_ptrs[i + 1]);
     if (!(*components)[i]) {
       free(*type);
       free_string_array(*components, i);
       free(*components);
-      free_string_array(parts, part_count);
       free(lowered);
       return false;
     }
   }
 
-  free_string_array(parts, part_count);
-  free(parts);
   free(lowered);
   return true;
 }
@@ -212,6 +215,12 @@ void *safe_malloc(size_t size) {
     memset(ptr, 0, size);
   }
   return ptr;
+}
+
+void *safe_malloc_uninit(size_t size) {
+  if (size == 0)
+    return NULL;
+  return malloc(size);
 }
 
 void *safe_realloc(void *ptr, size_t size) { return realloc(ptr, size); }

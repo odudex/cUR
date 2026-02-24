@@ -77,6 +77,14 @@ void free_string_array(char **strings, size_t count);
 void *safe_malloc(size_t size);
 
 /**
+ * Safe malloc without zero initialization (for data buffers that will be
+ * immediately overwritten)
+ * @param size Size to allocate
+ * @return Allocated memory or NULL on error
+ */
+void *safe_malloc_uninit(size_t size);
+
+/**
  * Safe realloc
  * @param ptr Pointer to reallocate
  * @param size New size

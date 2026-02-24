@@ -87,6 +87,20 @@ bool choose_fragments(uint32_t seq_num, size_t seq_len, uint32_t checksum,
                       part_indexes_t *result);
 
 /**
+ * Choose fragments with a pre-initialized degree sampler (avoids repeated
+ * sampler allocation)
+ * @param seq_num Sequence number
+ * @param seq_len Total sequence length
+ * @param checksum Message checksum
+ * @param result Output part indexes
+ * @param cached_sampler Pre-initialized sampler (or NULL to create one)
+ * @return true on success
+ */
+bool choose_fragments_cached(uint32_t seq_num, size_t seq_len,
+                              uint32_t checksum, part_indexes_t *result,
+                              random_sampler_t *cached_sampler);
+
+/**
  * Check if part_indexes_a is strict subset of part_indexes_b
  * @param a First set
  * @param b Second set

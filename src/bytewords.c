@@ -168,24 +168,28 @@ bool bytewords_decode_raw(const char *encoded, uint8_t **decoded,
     buf[i] = (uint8_t)value;
   }
 
-  // Remove CRC (last 4 bytes)
-  if (num_bytes < 4) {
+  // Verify and remove CRC (last 4 bytes)
+  if (num_bytes < 5) {
     free(buf);
     return false;
   }
 
   size_t body_size = num_bytes - 4;
-  uint8_t *body = safe_malloc(body_size);
-  if (!body) {
+
+  // Verify CRC32 checksum in-place
+  uint32_t expected_crc = ((uint32_t)buf[body_size] << 24) |
+                          ((uint32_t)buf[body_size + 1] << 16) |
+                          ((uint32_t)buf[body_size + 2] << 8) |
+                          (uint32_t)buf[body_size + 3];
+  uint32_t actual_crc = crc32_calculate(buf, body_size);
+  if (expected_crc != actual_crc) {
     free(buf);
     return false;
   }
 
-  memcpy(body, buf, body_size);
-
-  *decoded = body;
+  // Shrink buf in-place instead of allocating a new body buffer
+  uint8_t *body = safe_realloc(buf, body_size);
+  *decoded = body ? body : buf; // realloc may fail; buf is still valid
   *decoded_len = body_size;
-
-  free(buf);
   return true;
 }
