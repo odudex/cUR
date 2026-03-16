@@ -148,7 +148,7 @@ char *base58check_encode(const uint8_t *data, size_t len) {
   uint8_t hash2[32];
 
   // First SHA256
-  mbedtls_sha256(data, len, hash1, 0);  // 0 = SHA256 (not SHA224)
+  mbedtls_sha256(data, len, hash1, 0); // 0 = SHA256 (not SHA224)
 
   // Second SHA256
   mbedtls_sha256(hash1, 32, hash2, 0);

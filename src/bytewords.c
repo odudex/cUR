@@ -177,10 +177,9 @@ bool bytewords_decode_raw(const char *encoded, uint8_t **decoded,
   size_t body_size = num_bytes - 4;
 
   // Verify CRC32 checksum in-place
-  uint32_t expected_crc = ((uint32_t)buf[body_size] << 24) |
-                          ((uint32_t)buf[body_size + 1] << 16) |
-                          ((uint32_t)buf[body_size + 2] << 8) |
-                          (uint32_t)buf[body_size + 3];
+  uint32_t expected_crc =
+      ((uint32_t)buf[body_size] << 24) | ((uint32_t)buf[body_size + 1] << 16) |
+      ((uint32_t)buf[body_size + 2] << 8) | (uint32_t)buf[body_size + 3];
   uint32_t actual_crc = crc32_calculate(buf, body_size);
   if (expected_crc != actual_crc) {
     free(buf);

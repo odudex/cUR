@@ -1,7 +1,7 @@
 #include "output.h"
+#include "byte_buffer.h"
 #include "cbor_decoder.h"
 #include "cbor_encoder.h"
-#include "byte_buffer.h"
 #include <ctype.h>
 #include <inttypes.h>
 #include <mbedtls/sha256.h>
@@ -245,14 +245,13 @@ uint8_t *output_to_cbor(output_data_t *output, size_t *out_len) {
 
 // Base58check decode
 static const int8_t BASE58_MAP[128] = {
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 0,  1,  2,  3,  4,
-    5,  6,  7,  8,  -1, -1, -1, -1, -1, -1, -1, 9,  10, 11, 12, 13, 14, 15,
-    16, -1, 17, 18, 19, 20, 21, -1, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
-    32, -1, -1, -1, -1, -1, -1, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43,
-    -1, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, -1, -1, -1,
-    -1, -1};
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 0,  1,  2,  3,  4,  5,  6,  7,
+    8,  -1, -1, -1, -1, -1, -1, -1, 9,  10, 11, 12, 13, 14, 15, 16, -1, 17, 18,
+    19, 20, 21, -1, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, -1, -1, -1, -1,
+    -1, -1, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, -1, 44, 45, 46, 47, 48,
+    49, 50, 51, 52, 53, 54, 55, 56, 57, -1, -1, -1, -1, -1};
 
 static uint8_t *base58check_decode(const char *str, size_t *out_len) {
   if (!str || !out_len)
@@ -328,9 +327,12 @@ get_script_expression_by_name(const char *name, size_t len) {
 }
 
 static int hex_val(char c) {
-  if (c >= '0' && c <= '9') return c - '0';
-  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+  if (c >= '0' && c <= '9')
+    return c - '0';
+  if (c >= 'a' && c <= 'f')
+    return c - 'a' + 10;
+  if (c >= 'A' && c <= 'F')
+    return c - 'A' + 10;
   return -1;
 }
 
@@ -342,7 +344,8 @@ static bool parse_keypath_components(const char *path, size_t len,
 
   size_t max_count = 1;
   for (size_t i = 0; i < len; i++)
-    if (path[i] == '/') max_count++;
+    if (path[i] == '/')
+      max_count++;
 
   path_component_t *comp = safe_malloc(max_count * sizeof(path_component_t));
   if (!comp)
@@ -351,7 +354,10 @@ static bool parse_keypath_components(const char *path, size_t len,
   size_t idx = 0;
   const char *p = path, *end = path + len;
   while (p < end && idx < max_count) {
-    if (*p == '/') { p++; continue; }
+    if (*p == '/') {
+      p++;
+      continue;
+    }
 
     path_component_t *c = &comp[idx];
     c->hardened = false;
@@ -368,7 +374,10 @@ static bool parse_keypath_components(const char *path, size_t len,
       free(comp);
       return false;
     }
-    if (p < end && (*p == '\'' || *p == 'h')) { c->hardened = true; p++; }
+    if (p < end && (*p == '\'' || *p == 'h')) {
+      c->hardened = true;
+      p++;
+    }
     idx++;
   }
 
@@ -400,7 +409,10 @@ static hd_key_data_t *parse_hd_key_from_string(const char *str, size_t len) {
     uint8_t fp[4];
     for (int i = 0; i < 4; i++) {
       int hi = hex_val(p[i * 2]), lo = hex_val(p[i * 2 + 1]);
-      if (hi < 0 || lo < 0) { hd_key_free(hd_key); return NULL; }
+      if (hi < 0 || lo < 0) {
+        hd_key_free(hd_key);
+        return NULL;
+      }
       fp[i] = (uint8_t)((hi << 4) | lo);
     }
     p += 8;
@@ -430,14 +442,21 @@ static hd_key_data_t *parse_hd_key_from_string(const char *str, size_t len) {
   // Decode xpub/tpub
   size_t xpub_len = xpub_end - xpub_start;
   char *xpub_str = safe_malloc(xpub_len + 1);
-  if (!xpub_str) { hd_key_free(hd_key); return NULL; }
+  if (!xpub_str) {
+    hd_key_free(hd_key);
+    return NULL;
+  }
   memcpy(xpub_str, xpub_start, xpub_len);
   xpub_str[xpub_len] = '\0';
 
   size_t dec_len = 0;
   uint8_t *dec = base58check_decode(xpub_str, &dec_len);
   free(xpub_str);
-  if (!dec || dec_len != 78) { free(dec); hd_key_free(hd_key); return NULL; }
+  if (!dec || dec_len != 78) {
+    free(dec);
+    hd_key_free(hd_key);
+    return NULL;
+  }
 
   // BIP32: [0-3]version [4]depth [5-8]parent_fp [9-12]child_idx
   //        [13-44]chain_code [45-77]key
@@ -502,7 +521,11 @@ output_data_t *output_from_descriptor_string(const char *descriptor) {
     expr_count++;
     script_expression_t **new_exprs =
         safe_realloc(expressions, expr_count * sizeof(script_expression_t *));
-    if (!new_exprs) { free(expressions); output_free(output); return NULL; }
+    if (!new_exprs) {
+      free(expressions);
+      output_free(output);
+      return NULL;
+    }
     expressions = new_exprs;
     expressions[expr_count - 1] = (script_expression_t *)expr;
     p = paren + 1;
@@ -515,7 +538,8 @@ output_data_t *output_from_descriptor_string(const char *descriptor) {
   while (content_end > p && *(content_end - 1) == ')')
     content_end--;
 
-  bool is_multi = expr_count > 0 &&
+  bool is_multi =
+      expr_count > 0 &&
       (strcmp(expressions[expr_count - 1]->expression, "multi") == 0 ||
        strcmp(expressions[expr_count - 1]->expression, "sortedmulti") == 0);
 
@@ -527,20 +551,27 @@ output_data_t *output_from_descriptor_string(const char *descriptor) {
       p++;
 
     multi_key_data_t *mk = multi_key_new(threshold);
-    if (!mk) { output_free(output); return NULL; }
+    if (!mk) {
+      output_free(output);
+      return NULL;
+    }
 
     while (p < content_end) {
       const char *comma = memchr(p, ',', content_end - p);
       const char *key_end = comma ? comma : content_end;
       hd_key_data_t *hk = parse_hd_key_from_string(p, key_end - p);
-      if (hk) multi_key_add_hd_key(mk, hk);
+      if (hk)
+        multi_key_add_hd_key(mk, hk);
       p = comma ? comma + 1 : content_end;
     }
     output->key_type = KEY_TYPE_MULTI;
     output->crypto_key.multi_key = mk;
   } else {
     hd_key_data_t *hk = parse_hd_key_from_string(p, content_end - p);
-    if (!hk) { output_free(output); return NULL; }
+    if (!hk) {
+      output_free(output);
+      return NULL;
+    }
     output->key_type = KEY_TYPE_HD;
     output->crypto_key.hd_key = hk;
   }
@@ -635,7 +666,8 @@ char *output_descriptor(output_data_t *output, bool include_checksum) {
   // Write threshold for multisig
   if (output->key_type == KEY_TYPE_MULTI) {
     char threshold_str[16];
-    sprintf(threshold_str, "%" PRIu32 ",", output->crypto_key.multi_key->threshold);
+    sprintf(threshold_str, "%" PRIu32 ",",
+            output->crypto_key.multi_key->threshold);
     byte_buffer_append(buf, (const uint8_t *)threshold_str,
                        strlen(threshold_str));
   }

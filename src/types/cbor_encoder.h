@@ -1,8 +1,8 @@
 #ifndef URTYPES_CBOR_ENCODER_H
 #define URTYPES_CBOR_ENCODER_H
 
-#include "cbor_data.h"
 #include "byte_buffer.h"
+#include "cbor_data.h"
 #include <stddef.h>
 #include <stdint.h>
 

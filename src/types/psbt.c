@@ -1,7 +1,7 @@
 #include "psbt.h"
+#include "byte_buffer.h"
 #include "cbor_decoder.h"
 #include "cbor_encoder.h"
-#include "byte_buffer.h"
 #include <string.h>
 
 // PSBT registry type (tag 310)

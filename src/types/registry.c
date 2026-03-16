@@ -1,7 +1,7 @@
 #include "registry.h"
+#include "byte_buffer.h"
 #include "cbor_decoder.h"
 #include "cbor_encoder.h"
-#include "byte_buffer.h"
 
 // Registry item helper functions
 uint8_t *registry_item_to_cbor(registry_item_t *item, size_t *out_len) {
