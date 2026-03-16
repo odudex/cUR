@@ -261,7 +261,7 @@ static void mixed_hash_free(mixed_parts_hash_t *hash) {
 // Add or update entry in hash table
 static bool mixed_hash_put(mixed_parts_hash_t *hash, const part_indexes_t *key,
                            const decoder_part_t *value) {
-  if (!hash || !hash->buckets || !key || !value)
+  if (!hash || !hash->buckets || !key || !value || hash->capacity == 0)
     return false;
 
   size_t key_hash = hash_indexes(key);
@@ -403,7 +403,10 @@ bool decoder_part_copy(const decoder_part_t *src, decoder_part_t *dst) {
   if (src->data && src->data_len > 0) {
     dst->data = safe_malloc_uninit(src->data_len);
     if (!dst->data) {
-      part_indexes_free(&dst->indexes);
+      free(dst->indexes.indexes);
+      dst->indexes.indexes = NULL;
+      dst->indexes.count = 0;
+      dst->indexes.capacity = 0;
       return false;
     }
     memcpy(dst->data, src->data, src->data_len);

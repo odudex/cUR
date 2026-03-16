@@ -115,8 +115,8 @@ bool bytewords_encode(const uint8_t *data, size_t data_len, char **encoded) {
 
   char *pos = *encoded;
   for (size_t i = 0; i < total_len; i++) {
-    *pos++ = toupper(bytewords_minimal[buf[i] * 2]);
-    *pos++ = toupper(bytewords_minimal[buf[i] * 2 + 1]);
+    *pos++ = toupper((unsigned char)bytewords_minimal[buf[i] * 2]);
+    *pos++ = toupper((unsigned char)bytewords_minimal[buf[i] * 2 + 1]);
   }
   *pos = '\0';
 
@@ -147,8 +147,8 @@ bool bytewords_decode_raw(const char *encoded, uint8_t **decoded,
 
   // Decode each 2-char pair using lookup table
   for (size_t i = 0; i < num_bytes; i++) {
-    char first = tolower(encoded[i * 2]);
-    char last = tolower(encoded[i * 2 + 1]);
+    char first = tolower((unsigned char)encoded[i * 2]);
+    char last = tolower((unsigned char)encoded[i * 2 + 1]);
 
     int x = first - 'a';
     int y = last - 'a';

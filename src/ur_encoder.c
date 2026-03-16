@@ -41,13 +41,13 @@ static char *encode_uri(const char *scheme, const char **path_components,
   // Build the URI with uppercase conversion for alphanumeric QR encoding
   char *pos = result;
   for (const char *p = scheme; *p; p++) {
-    *pos++ = toupper(*p);
+    *pos++ = toupper((unsigned char)*p);
   }
   *pos++ = ':';
 
   for (size_t i = 0; i < component_count; i++) {
     for (const char *p = path_components[i]; *p; p++) {
-      *pos++ = toupper(*p);
+      *pos++ = toupper((unsigned char)*p);
     }
     if (i < component_count - 1) {
       *pos++ = '/';
