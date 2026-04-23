@@ -48,20 +48,8 @@ registry_item_t *psbt_from_data_item(cbor_value_t *data_item) {
 
 // Registry item interface for PSBT
 registry_item_t *psbt_to_registry_item(psbt_data_t *psbt) {
-  if (!psbt)
-    return NULL;
-
-  registry_item_t *item = safe_malloc(sizeof(registry_item_t));
-  if (!item)
-    return NULL;
-
-  item->type = &PSBT_TYPE;
-  item->data = psbt;
-  item->to_data_item = psbt_to_data_item;
-  item->from_data_item = psbt_from_data_item;
-  item->free_item = NULL;
-
-  return item;
+  return registry_item_new(&PSBT_TYPE, psbt, psbt_to_data_item,
+                           psbt_from_data_item);
 }
 
 psbt_data_t *psbt_from_registry_item(registry_item_t *item) {
@@ -74,35 +62,17 @@ psbt_data_t *psbt_from_registry_item(registry_item_t *item) {
 uint8_t *psbt_to_cbor(psbt_data_t *psbt, size_t *out_len) {
   if (!psbt || !out_len)
     return NULL;
-
-  registry_item_t *item = psbt_to_registry_item(psbt);
-  if (!item)
-    return NULL;
-
-  uint8_t *cbor_data = registry_item_to_cbor(item, out_len);
-
-  // Free the registry item but not the psbt data (it's still owned by caller)
-  free(item);
-
-  return cbor_data;
+  registry_item_t item = {.type = &PSBT_TYPE,
+                          .data = psbt,
+                          .to_data_item = psbt_to_data_item,
+                          .from_data_item = NULL,
+                          .free_item = NULL};
+  return registry_item_to_cbor(&item, out_len);
 }
 
 psbt_data_t *psbt_from_cbor(const uint8_t *cbor_data, size_t len) {
-  if (!cbor_data || len == 0)
-    return NULL;
-
-  registry_item_t *item =
-      registry_item_from_cbor(cbor_data, len, psbt_from_data_item);
-  if (!item)
-    return NULL;
-
-  psbt_data_t *psbt = psbt_from_registry_item(item);
-
-  // Transfer ownership of psbt to caller and free the registry item wrapper
-  item->data = NULL; // Don't free the psbt data
-  free(item);
-
-  return psbt;
+  return (psbt_data_t *)registry_item_unwrap_from_cbor(cbor_data, len,
+                                                       psbt_from_data_item);
 }
 
 // Accessors

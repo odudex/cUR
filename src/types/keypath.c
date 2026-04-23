@@ -195,20 +195,8 @@ cbor_value_t *keypath_to_data_item(keypath_data_t *keypath) {
 
 // Registry item interface
 registry_item_t *keypath_to_registry_item(keypath_data_t *keypath) {
-  if (!keypath)
-    return NULL;
-
-  registry_item_t *item = safe_malloc(sizeof(registry_item_t));
-  if (!item)
-    return NULL;
-
-  item->type = &KEYPATH_TYPE;
-  item->data = keypath;
-  item->to_data_item = NULL; // Not needed for read-only
-  item->from_data_item = keypath_from_data_item;
-  item->free_item = NULL;
-
-  return item;
+  return registry_item_new(&KEYPATH_TYPE, keypath, NULL,
+                           keypath_from_data_item);
 }
 
 keypath_data_t *keypath_from_registry_item(registry_item_t *item) {

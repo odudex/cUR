@@ -33,6 +33,23 @@ uint8_t *registry_item_to_cbor(registry_item_t *item, size_t *out_len);
 registry_item_t *registry_item_from_cbor(const uint8_t *cbor_data, size_t len,
                                          from_data_item_fn from_data_item_func);
 
+/**
+ * Allocate a registry_item_t wrapper. free_item is fixed to NULL — no
+ * UR type currently uses that hook, and the wrapper is almost always
+ * disposed of with plain free().
+ */
+registry_item_t *registry_item_new(registry_type_t *type, void *data,
+                                   to_data_item_fn to_fn,
+                                   from_data_item_fn from_fn);
+
+/**
+ * Decode CBOR into a type-specific data pointer, transferring ownership
+ * of the inner data to the caller and freeing the transient wrapper.
+ * Returns NULL on any decode failure.
+ */
+void *registry_item_unwrap_from_cbor(const uint8_t *cbor_data, size_t len,
+                                     from_data_item_fn from_fn);
+
 // Helper to get map value as specific type
 cbor_value_t *get_map_value(cbor_value_t *map, int key);
 

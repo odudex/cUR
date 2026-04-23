@@ -107,37 +107,27 @@ registry_item_t *bip39_from_data_item(cbor_value_t *data_item) {
     lang = safe_strdup(lang_str);
   }
 
-  bip39_data_t *bip39 = bip39_new(words, word_count, lang);
-
-  // Free temporary arrays
-  for (size_t i = 0; i < word_count; i++) {
-    free(words[i]);
-  }
-  free(words);
-  free(lang);
-
-  if (!bip39)
+  // Build the bip39 directly instead of going through bip39_new, which
+  // would strdup every word a second time.
+  bip39_data_t *bip39 = safe_malloc(sizeof(bip39_data_t));
+  if (!bip39) {
+    for (size_t i = 0; i < word_count; i++)
+      free(words[i]);
+    free(words);
+    free(lang);
     return NULL;
+  }
+  bip39->words = words;
+  bip39->word_count = word_count;
+  bip39->lang = lang;
 
   return bip39_to_registry_item(bip39);
 }
 
 // Registry item interface for BIP39
 registry_item_t *bip39_to_registry_item(bip39_data_t *bip39) {
-  if (!bip39)
-    return NULL;
-
-  registry_item_t *item = safe_malloc(sizeof(registry_item_t));
-  if (!item)
-    return NULL;
-
-  item->type = &BIP39_TYPE;
-  item->data = bip39;
-  item->to_data_item = NULL; // Not needed for read-only
-  item->from_data_item = bip39_from_data_item;
-  item->free_item = NULL;
-
-  return item;
+  // to_data_item is NULL — BIP39 is decode-only.
+  return registry_item_new(&BIP39_TYPE, bip39, NULL, bip39_from_data_item);
 }
 
 bip39_data_t *bip39_from_registry_item(registry_item_t *item) {
@@ -148,21 +138,8 @@ bip39_data_t *bip39_from_registry_item(registry_item_t *item) {
 
 // Convenience functions
 bip39_data_t *bip39_from_cbor(const uint8_t *cbor_data, size_t len) {
-  if (!cbor_data || len == 0)
-    return NULL;
-
-  registry_item_t *item =
-      registry_item_from_cbor(cbor_data, len, bip39_from_data_item);
-  if (!item)
-    return NULL;
-
-  bip39_data_t *bip39 = bip39_from_registry_item(item);
-
-  // Transfer ownership of bip39 to caller and free the registry item wrapper
-  item->data = NULL; // Don't free the bip39 data
-  free(item);
-
-  return bip39;
+  return (bip39_data_t *)registry_item_unwrap_from_cbor(cbor_data, len,
+                                                        bip39_from_data_item);
 }
 
 // Accessors

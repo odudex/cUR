@@ -95,20 +95,8 @@ registry_item_t *bytes_from_data_item(cbor_value_t *data_item) {
 
 // Registry item interface for Bytes
 registry_item_t *bytes_to_registry_item(bytes_data_t *bytes) {
-  if (!bytes)
-    return NULL;
-
-  registry_item_t *item = safe_malloc(sizeof(registry_item_t));
-  if (!item)
-    return NULL;
-
-  item->type = &BYTES_TYPE;
-  item->data = bytes;
-  item->to_data_item = bytes_to_data_item;
-  item->from_data_item = bytes_from_data_item;
-  item->free_item = NULL;
-
-  return item;
+  return registry_item_new(&BYTES_TYPE, bytes, bytes_to_data_item,
+                           bytes_from_data_item);
 }
 
 bytes_data_t *bytes_from_registry_item(registry_item_t *item) {
@@ -121,35 +109,19 @@ bytes_data_t *bytes_from_registry_item(registry_item_t *item) {
 uint8_t *bytes_to_cbor(bytes_data_t *bytes, size_t *out_len) {
   if (!bytes || !out_len)
     return NULL;
-
-  registry_item_t *item = bytes_to_registry_item(bytes);
-  if (!item)
-    return NULL;
-
-  uint8_t *cbor_data = registry_item_to_cbor(item, out_len);
-
-  // Free the registry item but not the bytes data (it's still owned by caller)
-  free(item);
-
-  return cbor_data;
+  // Stack-allocated wrapper — registry_item_to_cbor only reads the item
+  // through the vtable, never retains it.
+  registry_item_t item = {.type = &BYTES_TYPE,
+                          .data = bytes,
+                          .to_data_item = bytes_to_data_item,
+                          .from_data_item = NULL,
+                          .free_item = NULL};
+  return registry_item_to_cbor(&item, out_len);
 }
 
 bytes_data_t *bytes_from_cbor(const uint8_t *cbor_data, size_t len) {
-  if (!cbor_data || len == 0)
-    return NULL;
-
-  registry_item_t *item =
-      registry_item_from_cbor(cbor_data, len, bytes_from_data_item);
-  if (!item)
-    return NULL;
-
-  bytes_data_t *bytes = bytes_from_registry_item(item);
-
-  // Transfer ownership of bytes to caller and free the registry item wrapper
-  item->data = NULL; // Don't free the bytes data
-  free(item);
-
-  return bytes;
+  return (bytes_data_t *)registry_item_unwrap_from_cbor(cbor_data, len,
+                                                        bytes_from_data_item);
 }
 
 // Accessors

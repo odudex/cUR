@@ -210,20 +210,7 @@ cbor_value_t *hd_key_to_data_item(hd_key_data_t *hd_key) {
 
 // Registry item interface
 registry_item_t *hd_key_to_registry_item(hd_key_data_t *hd_key) {
-  if (!hd_key)
-    return NULL;
-
-  registry_item_t *item = safe_malloc(sizeof(registry_item_t));
-  if (!item)
-    return NULL;
-
-  item->type = &HDKEY_TYPE;
-  item->data = hd_key;
-  item->to_data_item = NULL; // Not needed for read-only
-  item->from_data_item = hd_key_from_data_item;
-  item->free_item = NULL;
-
-  return item;
+  return registry_item_new(&HDKEY_TYPE, hd_key, NULL, hd_key_from_data_item);
 }
 
 hd_key_data_t *hd_key_from_registry_item(registry_item_t *item) {

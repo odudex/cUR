@@ -167,20 +167,10 @@ registry_item_t *output_from_data_item(cbor_value_t *data_item) {
 
 // Registry item interface
 registry_item_t *output_to_registry_item(output_data_t *output) {
-  if (!output)
-    return NULL;
-
-  registry_item_t *item = safe_malloc(sizeof(registry_item_t));
-  if (!item)
-    return NULL;
-
-  item->type = &OUTPUT_TYPE;
-  item->data = output;
-  item->to_data_item = NULL; // Not needed for read-only
-  item->from_data_item = output_from_data_item;
-  item->free_item = NULL;
-
-  return item;
+  // to_data_item is NULL — output takes a different path for encode
+  // (output_to_cbor calls output_to_data_item directly, not through
+  // the registry vtable).
+  return registry_item_new(&OUTPUT_TYPE, output, NULL, output_from_data_item);
 }
 
 output_data_t *output_from_registry_item(registry_item_t *item) {
@@ -190,21 +180,8 @@ output_data_t *output_from_registry_item(registry_item_t *item) {
 }
 
 output_data_t *output_from_cbor(const uint8_t *cbor_data, size_t len) {
-  if (!cbor_data || len == 0)
-    return NULL;
-
-  registry_item_t *item =
-      registry_item_from_cbor(cbor_data, len, output_from_data_item);
-  if (!item)
-    return NULL;
-
-  output_data_t *output = output_from_registry_item(item);
-
-  // Transfer ownership
-  item->data = NULL;
-  free(item);
-
-  return output;
+  return (output_data_t *)registry_item_unwrap_from_cbor(cbor_data, len,
+                                                         output_from_data_item);
 }
 
 cbor_value_t *output_to_data_item(output_data_t *output) {
