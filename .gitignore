@@ -2,6 +2,7 @@ coverage_html/
 src/obj
 src/obj_cov
 tests/test_ur_*
+!tests/test_ur_*.c
 *.o
 *.a
 *.info

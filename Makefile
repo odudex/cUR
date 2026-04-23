@@ -37,7 +37,8 @@ TEST_SUPPORT_OBJECTS = $(TEST_UTILS_OBJECT) $(TEST_HARNESS_OBJECT)
 # The user-facing target name is `test-<stem-with-dashes>` (e.g. test-bytes-decoder).
 TEST_STEMS = bytes_decoder bytes_encoder output_decoder output_encoder \
              PSBT_decoder PSBT_encoder bip39_decoder \
-             account_descriptor_decoder output_descriptor_roundtrip
+             account_descriptor_decoder output_descriptor_roundtrip \
+             negative
 
 TEST_BINS = $(TEST_STEMS:%=tests/test_ur_%)
 TEST_TARGETS = $(foreach s,$(TEST_STEMS),test-$(subst _,-,$(s)))
