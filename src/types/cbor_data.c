@@ -135,23 +135,23 @@ bool cbor_map_set(cbor_value_t *map, cbor_value_t *key, cbor_value_t *value) {
     }
   }
 
-  // Add new key-value pair
+  // Add new key-value pair. Commit each realloc to the struct immediately
+  // so a later failure never leaves the struct pointing at a freed block.
   size_t new_count = map->value.map_val.count + 1;
   cbor_value_t **new_keys =
       safe_realloc(map->value.map_val.keys, new_count * sizeof(cbor_value_t *));
+  if (!new_keys)
+    return false;
+  map->value.map_val.keys = new_keys;
+
   cbor_value_t **new_values = safe_realloc(map->value.map_val.values,
                                            new_count * sizeof(cbor_value_t *));
-
-  if (!new_keys || !new_values) {
-    free(new_keys);
-    free(new_values);
+  if (!new_values)
     return false;
-  }
+  map->value.map_val.values = new_values;
 
   new_keys[map->value.map_val.count] = key;
   new_values[map->value.map_val.count] = value;
-  map->value.map_val.keys = new_keys;
-  map->value.map_val.values = new_values;
   map->value.map_val.count = new_count;
   return true;
 }

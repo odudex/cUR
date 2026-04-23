@@ -58,14 +58,17 @@ static mp_obj_t ur_make_new(const mp_obj_type_t *type, size_t n_args,
   mp_buffer_info_t cbor_buf;
   mp_get_buffer_raise(args[1], &cbor_buf, MP_BUFFER_READ);
 
-  mp_obj_ur_t *self = m_new_obj(mp_obj_ur_t);
-  self->base.type = type;
-
-  // Create internal UR object
-  self->ur = ur_new(ur_type, cbor_buf.buf, cbor_buf.len);
-  if (!self->ur) {
+  // Create internal UR object first so a failure doesn't leak the wrapper
+  // through the exception long-jump in mp_raise_msg.
+  ur_t *ur = ur_new(ur_type, cbor_buf.buf, cbor_buf.len);
+  if (!ur) {
     mp_raise_msg(&mp_type_MemoryError, "Failed to create UR object");
   }
+
+  // with_finaliser so __del__ (ur_del) runs on GC and frees ur_t.
+  mp_obj_ur_t *self = m_new_obj_with_finaliser(mp_obj_ur_t);
+  self->base.type = type;
+  self->ur = ur;
 
   return MP_OBJ_FROM_PTR(self);
 }
@@ -131,13 +134,17 @@ static mp_obj_t ur_decoder_make_new(const mp_obj_type_t *type, size_t n_args,
                                     size_t n_kw, const mp_obj_t *args) {
   mp_arg_check_num(n_args, n_kw, 0, 0, false);
 
-  mp_obj_ur_decoder_t *self = m_new_obj(mp_obj_ur_decoder_t);
-  self->base.type = type;
-  self->decoder = ur_decoder_new();
-
-  if (!self->decoder) {
+  // Allocate the C decoder before the wrapper so a failure doesn't leak the
+  // wrapper through mp_raise_msg's long-jump.
+  ur_decoder_t *decoder = ur_decoder_new();
+  if (!decoder) {
     mp_raise_msg(&mp_type_MemoryError, "Failed to create URDecoder");
   }
+
+  // with_finaliser so __del__ (ur_decoder_del) runs on GC and frees decoder.
+  mp_obj_ur_decoder_t *self = m_new_obj_with_finaliser(mp_obj_ur_decoder_t);
+  self->base.type = type;
+  self->decoder = decoder;
 
   return MP_OBJ_FROM_PTR(self);
 }
@@ -367,13 +374,16 @@ static void ur_decoder_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
             mp_obj_new_int(ur_decoder_processed_parts_count(self->decoder));
       }
     } else {
-      // For other attributes (methods), check locals_dict explicitly
+      // Method lookup from locals_dict. Use the method-load protocol
+      // (dest[0]=method, dest[1]=self) instead of allocating a bound
+      // method — this path is hit by the GC finaliser looking up __del__,
+      // and allocating during a sweep can trigger nlr_jump_fail.
       mp_obj_dict_t *locals_dict = (mp_obj_dict_t *)&ur_decoder_locals_dict;
       mp_map_elem_t *elem = mp_map_lookup(&locals_dict->map,
                                           MP_OBJ_NEW_QSTR(attr), MP_MAP_LOOKUP);
       if (elem != NULL) {
-        // Create a bound method
-        dest[0] = mp_obj_new_bound_meth(elem->value, self_in);
+        dest[0] = elem->value;
+        dest[1] = self_in;
       }
     }
   }
@@ -422,36 +432,46 @@ static mp_obj_t ur_encoder_make_new(const mp_obj_type_t *type, size_t n_args,
   mp_arg_parse_all_kw_array(n_args, n_kw, args, MP_ARRAY_SIZE(allowed_args),
                             allowed_args, parsed_args);
 
-  // Extract UR object
-  mp_obj_ur_t *ur_obj = MP_OBJ_TO_PTR(parsed_args[ARG_ur].u_obj);
+  // Type-check BEFORE MP_OBJ_TO_PTR — otherwise passing a non-UR object
+  // dereferences garbage as ur_t*.
   if (!mp_obj_is_type(parsed_args[ARG_ur].u_obj, &mp_type_ur)) {
     mp_raise_TypeError("First argument must be a UR object");
   }
+  mp_obj_ur_t *ur_obj = MP_OBJ_TO_PTR(parsed_args[ARG_ur].u_obj);
 
   if (!ur_obj->ur) {
     mp_raise_msg(&mp_type_ValueError, "Invalid UR object");
   }
 
-  // Extract parameters
-  size_t max_fragment_len = parsed_args[ARG_max_fragment_len].u_int;
+  // Clamp fragment-length params coming from Python. 10..2048 covers any
+  // real QR payload; values outside drive unbounded fountain allocations.
+  mp_int_t raw_max = parsed_args[ARG_max_fragment_len].u_int;
+  mp_int_t raw_min = parsed_args[ARG_min_fragment_len].u_int;
+  if (raw_max < 10 || raw_max > 2048 || raw_min < 1 || raw_min > raw_max) {
+    mp_raise_msg(&mp_type_ValueError,
+                 "fragment_len out of range (min 1..max, max 10..2048)");
+  }
+  size_t max_fragment_len = (size_t)raw_max;
+  size_t min_fragment_len = (size_t)raw_min;
   uint32_t first_seq_num = parsed_args[ARG_first_seq_num].u_int;
-  size_t min_fragment_len = parsed_args[ARG_min_fragment_len].u_int;
 
-  // Create encoder
-  mp_obj_ur_encoder_t *self = m_new_obj(mp_obj_ur_encoder_t);
-  self->base.type = type;
-  self->fountain_encoder_cached = MP_OBJ_NULL; // Initialize cache to NULL
-
-  // Create internal encoder
-  const char *ur_type = ur_get_type(ur_obj->ur);
+  // Allocate the C encoder before the wrapper so a failure doesn't leak the
+  // wrapper through mp_raise_msg's long-jump.
+  const char *ur_type_str = ur_get_type(ur_obj->ur);
   const uint8_t *cbor_data = ur_get_cbor(ur_obj->ur);
   size_t cbor_len = ur_get_cbor_len(ur_obj->ur);
-
-  self->encoder = ur_encoder_new(ur_type, cbor_data, cbor_len, max_fragment_len,
-                                 first_seq_num, min_fragment_len);
-  if (!self->encoder) {
+  ur_encoder_t *encoder =
+      ur_encoder_new(ur_type_str, cbor_data, cbor_len, max_fragment_len,
+                     first_seq_num, min_fragment_len);
+  if (!encoder) {
     mp_raise_msg(&mp_type_MemoryError, "Failed to create UREncoder");
   }
+
+  // with_finaliser so __del__ (ur_encoder_del) runs on GC.
+  mp_obj_ur_encoder_t *self = m_new_obj_with_finaliser(mp_obj_ur_encoder_t);
+  self->base.type = type;
+  self->encoder = encoder;
+  self->fountain_encoder_cached = MP_OBJ_NULL;
 
   return MP_OBJ_FROM_PTR(self);
 }
@@ -534,20 +554,36 @@ static const mp_rom_map_elem_t ur_encoder_locals_dict_table[] = {
 static MP_DEFINE_CONST_DICT(ur_encoder_locals_dict,
                             ur_encoder_locals_dict_table);
 
-// FountainEncoder wrapper type for accessing seq_len()
+// FountainEncoder wrapper type for accessing seq_len(). Holds a strong
+// reference to the parent UREncoder Python object so GC cannot finalise
+// the parent (and free ->encoder) while this wrapper is still reachable.
+// The encoder pointer is always re-read from parent->encoder at call time
+// so that an explicit parent.__del__() cleanly turns all wrapper reads
+// into no-ops instead of dangling dereferences.
 typedef struct {
   mp_obj_base_t base;
-  ur_encoder_t *encoder;
+  mp_obj_t parent; // UREncoder Python object; MP_OBJ_NULL if detached
 } mp_obj_fountain_encoder_wrapper_t;
+
+// Reach through the parent back-ref to the live ur_encoder_t, or NULL if
+// the parent was explicitly closed (ur_encoder_del set parent->encoder to
+// NULL) or never attached.
+static ur_encoder_t *
+fountain_encoder_wrapper_encoder(mp_obj_fountain_encoder_wrapper_t *self) {
+  if (self->parent == MP_OBJ_NULL)
+    return NULL;
+  mp_obj_ur_encoder_t *parent = MP_OBJ_TO_PTR(self->parent);
+  return parent->encoder;
+}
 
 static void fountain_encoder_wrapper_print(const mp_print_t *print,
                                            mp_obj_t self_in,
                                            mp_print_kind_t kind) {
   (void)kind;
   mp_obj_fountain_encoder_wrapper_t *self = MP_OBJ_TO_PTR(self_in);
-  if (self->encoder && self->encoder->fountain_encoder) {
-    mp_printf(print, "FountainEncoder(seq_len=%u)",
-              ur_encoder_seq_len(self->encoder));
+  ur_encoder_t *enc = fountain_encoder_wrapper_encoder(self);
+  if (enc && enc->fountain_encoder) {
+    mp_printf(print, "FountainEncoder(seq_len=%u)", ur_encoder_seq_len(enc));
   } else {
     mp_printf(print, "FountainEncoder(invalid)");
   }
@@ -555,10 +591,11 @@ static void fountain_encoder_wrapper_print(const mp_print_t *print,
 
 static mp_obj_t fountain_encoder_seq_len_py(mp_obj_t self_in) {
   mp_obj_fountain_encoder_wrapper_t *self = MP_OBJ_TO_PTR(self_in);
-  if (!self->encoder || !self->encoder->fountain_encoder) {
+  ur_encoder_t *enc = fountain_encoder_wrapper_encoder(self);
+  if (!enc || !enc->fountain_encoder) {
     return mp_obj_new_int(0);
   }
-  return mp_obj_new_int(ur_encoder_seq_len(self->encoder));
+  return mp_obj_new_int(ur_encoder_seq_len(enc));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(fountain_encoder_seq_len_obj,
                                  fountain_encoder_seq_len_py);
@@ -589,24 +626,30 @@ static void ur_encoder_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
         return;
       }
 
-      // If not cached yet, create and cache the wrapper
+      // If not cached yet, create and cache the wrapper. The wrapper keeps
+      // a strong ref to self so GC can't free self->encoder out from under it,
+      // and reads encoder through self->parent->encoder each call so explicit
+      // __del__ on the parent neuters the wrapper instead of dangling.
       if (self->fountain_encoder_cached == MP_OBJ_NULL) {
         mp_obj_fountain_encoder_wrapper_t *fe_wrapper =
             m_new_obj(mp_obj_fountain_encoder_wrapper_t);
         fe_wrapper->base.type = &mp_type_fountain_encoder_wrapper;
-        fe_wrapper->encoder = self->encoder;
+        fe_wrapper->parent = self_in;
         self->fountain_encoder_cached = MP_OBJ_FROM_PTR(fe_wrapper);
       }
 
       dest[0] = self->fountain_encoder_cached;
     } else {
-      // For other attributes (methods), check locals_dict explicitly
+      // Method lookup from locals_dict. Use the method-load protocol
+      // (dest[0]=method, dest[1]=self) instead of allocating a bound
+      // method — this path is hit by the GC finaliser looking up __del__,
+      // and allocating during a sweep can trigger nlr_jump_fail.
       mp_obj_dict_t *locals_dict = (mp_obj_dict_t *)&ur_encoder_locals_dict;
       mp_map_elem_t *elem = mp_map_lookup(&locals_dict->map,
                                           MP_OBJ_NEW_QSTR(attr), MP_MAP_LOOKUP);
       if (elem != NULL) {
-        // Create a bound method
-        dest[0] = mp_obj_new_bound_meth(elem->value, self_in);
+        dest[0] = elem->value;
+        dest[1] = self_in;
       }
     }
   }

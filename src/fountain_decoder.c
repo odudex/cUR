@@ -626,16 +626,27 @@ static bool add_simple_part(fountain_decoder_t *const decoder,
                               ? SIMPLE_PARTS_INITIAL_CAPACITY
                               : decoder->simple_parts.capacity * 2;
 
+    // Realloc one field at a time, committing each to the struct before the
+    // next attempt. safe_realloc frees the old block on success, so if a
+    // later realloc fails we must never leave the struct pointing at a
+    // freed block.
     size_t *new_keys =
         safe_realloc(decoder->simple_parts.keys, sizeof(size_t) * new_capacity);
+    if (!new_keys)
+      return false;
+    decoder->simple_parts.keys = new_keys;
+
     decoder_part_t *new_values = safe_realloc(
         decoder->simple_parts.values, sizeof(decoder_part_t) * new_capacity);
+    if (!new_values)
+      return false;
+    decoder->simple_parts.values = new_values;
+
     size_t *new_lens = safe_realloc(decoder->simple_parts.value_lens,
                                     sizeof(size_t) * new_capacity);
-
-    if (!new_keys || !new_values || !new_lens) {
+    if (!new_lens)
       return false;
-    }
+    decoder->simple_parts.value_lens = new_lens;
 
     for (size_t i = decoder->simple_parts.capacity; i < new_capacity; i++) {
       new_values[i].indexes.indexes = NULL;
@@ -645,9 +656,6 @@ static bool add_simple_part(fountain_decoder_t *const decoder,
       new_values[i].data_len = 0;
     }
 
-    decoder->simple_parts.keys = new_keys;
-    decoder->simple_parts.values = new_values;
-    decoder->simple_parts.value_lens = new_lens;
     decoder->simple_parts.capacity = new_capacity;
   }
 
