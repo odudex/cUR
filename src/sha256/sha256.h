@@ -27,8 +27,12 @@ typedef struct {
 } CRYAL_SHA256_CTX;
 
 /*********************** FUNCTION DECLARATIONS **********************/
-void sha256_init(CRYAL_SHA256_CTX *ctx);
-void sha256_update(CRYAL_SHA256_CTX *ctx, const BYTE data[], size_t len);
-void sha256_final(CRYAL_SHA256_CTX *ctx, BYTE hash[]);
+// Namespaced to avoid link-time collisions with platform SDKs that
+// export unprefixed sha256_init / sha256_update / sha256_final symbols
+// with different signatures (e.g. Kendryte K210 SDK, mbedTLS).
+void ur_bundled_sha256_init(CRYAL_SHA256_CTX *ctx);
+void ur_bundled_sha256_update(CRYAL_SHA256_CTX *ctx, const BYTE data[],
+                              size_t len);
+void ur_bundled_sha256_final(CRYAL_SHA256_CTX *ctx, BYTE hash[]);
 
 #endif // SHA256_H

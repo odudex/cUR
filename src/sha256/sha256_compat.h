@@ -33,9 +33,9 @@ static inline void ur_sha256(const uint8_t *input, size_t len,
 static inline void ur_sha256(const uint8_t *input, size_t len,
                              uint8_t output[32]) {
   CRYAL_SHA256_CTX ctx;
-  sha256_init(&ctx);
-  sha256_update(&ctx, input, len);
-  sha256_final(&ctx, output);
+  ur_bundled_sha256_init(&ctx);
+  ur_bundled_sha256_update(&ctx, input, len);
+  ur_bundled_sha256_final(&ctx, output);
 }
 
 #endif
