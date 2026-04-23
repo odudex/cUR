@@ -16,7 +16,6 @@
 #include "crc32.h"
 #include "fountain_utils.h"
 #include "utils.h"
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -792,11 +791,6 @@ static void reduce_mixed_by(fountain_decoder_t *const decoder,
         }
 
         // XOR the data in-place
-        if (entry->value.data_len != part->data_len) {
-          fprintf(stderr,
-                  "fountain_decoder: fragment length mismatch (%zu vs %zu)\n",
-                  entry->value.data_len, part->data_len);
-        }
         for (size_t j = 0; j < entry->value.data_len && j < part->data_len;
              j++) {
           entry->value.data[j] ^= part->data[j];
