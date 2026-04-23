@@ -339,6 +339,16 @@ bool ur_decoder_receive_part(ur_decoder_t *decoder, const char *part_str) {
     goto cleanup;
   }
 
+  // Reject empty fragments. An attacker-crafted UR part with a zero-
+  // length CBOR byte string (head 0x40) would otherwise reach
+  // safe_realloc(cbor_data, 0) below, which on glibc/musl frees the
+  // buffer and returns NULL — leaving fragment_data dangling for a
+  // double-free on the create_fountain_part_from_cbor failure path.
+  if (fragment_len == 0) {
+    decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
+    goto cleanup;
+  }
+
   // Reuse the bytewords-decoded cbor_data allocation for the fragment
   // instead of mallocing a fresh buffer and copying. The fragment is a
   // suffix of cbor_data; shift it to the front and shrink the block.

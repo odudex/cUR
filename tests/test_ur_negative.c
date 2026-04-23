@@ -8,6 +8,7 @@
  * rejection path via ASan/UBSan.
  */
 
+#include "../src/bytewords.h"
 #include "../src/types/bytes_type.h"
 #include "../src/ur.h"
 #include "../src/ur_decoder.h"
@@ -124,6 +125,36 @@ static void test_truncated_fragment(void) {
   free(truncated);
 }
 
+// Regression for the empty-fragment double-free: a multi-part UR whose
+// CBOR body carries a zero-length byte string (head 0x40). The old
+// zero-copy path called safe_realloc(cbor_data, 0) which on glibc/musl
+// frees the buffer and returns NULL, leaving fragment_data dangling and
+// causing a double-free on the create_fountain_part_from_cbor fail
+// branch. Must reject cleanly.
+static void test_empty_fragment_payload(void) {
+  printf("\n=== empty_fragment_payload ===\n");
+  // CBOR: [seq_num=1, seq_len=1, message_len=1, checksum=0, h''].
+  uint8_t cbor[] = {0x85, 0x01, 0x01, 0x01, 0x00, 0x40};
+  char *bytewords = NULL;
+  ASSERT(bytewords_encode(cbor, sizeof(cbor), &bytewords),
+         "bytewords_encode crafted fragment");
+
+  size_t n = strlen("ur:bytes/1-1/") + strlen(bytewords) + 1;
+  char *ur = malloc(n);
+  ASSERT(ur != NULL, "alloc ur string");
+  snprintf(ur, n, "ur:bytes/1-1/%s", bytewords);
+
+  ur_decoder_t *d = ur_decoder_new();
+  ASSERT(!ur_decoder_receive_part(d, ur),
+         "rejects empty-byte-string fragment payload");
+  ASSERT(ur_decoder_get_last_error(d) == UR_DECODER_ERROR_INVALID_FRAGMENT,
+         "  -> sets INVALID_FRAGMENT error code");
+
+  ur_decoder_free(d);
+  free(bytewords);
+  free(ur);
+}
+
 static void test_malformed_cbor(void) {
   printf("\n=== malformed_cbor ===\n");
 
@@ -149,6 +180,7 @@ int main(void) {
   test_malformed_ur();
   test_bad_crc();
   test_truncated_fragment();
+  test_empty_fragment_payload();
   test_malformed_cbor();
 
   printf("\n=== Summary ===\n");
