@@ -22,13 +22,6 @@ TEST_UTILS_SOURCES = tests/test_utils.c
 TEST_UTILS_OBJECT = tests/test_utils.o
 
 # Test programs
-# Cross-implementation testing
-TEST_PRINT_FRAGMENTS_TARGET = tests/cross_implementation_tests/test_print_fragments
-TEST_PRINT_FRAGMENTS_SOURCES = tests/cross_implementation_tests/test_print_fragments.c
-
-TEST_PRINT_PSBT_FRAGMENTS_TARGET = tests/cross_implementation_tests/test_print_psbt_fragments
-TEST_PRINT_PSBT_FRAGMENTS_SOURCES = tests/cross_implementation_tests/test_print_psbt_fragments.c
-
 TEST_BYTES_DECODER_TARGET = tests/test_ur_bytes_decoder
 TEST_BYTES_DECODER_SOURCES = tests/test_ur_bytes_decoder.c
 
@@ -56,7 +49,7 @@ TEST_ACCOUNT_DESCRIPTOR_DECODER_SOURCES = tests/test_ur_account_descriptor_decod
 TEST_OUTPUT_DESCRIPTOR_ROUNDTRIP_TARGET = tests/test_ur_output_descriptor_roundtrip
 TEST_OUTPUT_DESCRIPTOR_ROUNDTRIP_SOURCES = tests/test_ur_output_descriptor_roundtrip.c
 
-.PHONY: all clean test-print-fragments test-print-psbt-fragments test-bytes-decoder test-bytes-encoder test-output-decoder test-output-encoder test-PSBT-decoder test-PSBT-encoder test-bip39-decoder test-account-descriptor-decoder test-output-descriptor-roundtrip
+.PHONY: all clean test-bytes-decoder test-bytes-encoder test-output-decoder test-output-encoder test-PSBT-decoder test-PSBT-encoder test-bip39-decoder test-account-descriptor-decoder test-output-descriptor-roundtrip
 
 all: $(TARGET)
 
@@ -70,18 +63,6 @@ $(OBJDIR)/%.o: $(SRCDIR)/%.c
 # Test utilities
 $(TEST_UTILS_OBJECT): $(TEST_UTILS_SOURCES) tests/test_utils.h
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
-
-# Build fragment printer for cross-implementation testing
-test-print-fragments: $(TARGET) $(TEST_PRINT_FRAGMENTS_TARGET)
-
-$(TEST_PRINT_FRAGMENTS_TARGET): $(TEST_PRINT_FRAGMENTS_SOURCES) $(TARGET)
-	$(CC) $(CFLAGS) $(INCLUDES) $< -L$(SRCDIR) -lur -lm -o $@
-
-# Build PSBT fragment printer for cross-implementation testing
-test-print-psbt-fragments: $(TARGET) $(TEST_UTILS_OBJECT) $(TEST_PRINT_PSBT_FRAGMENTS_TARGET)
-
-$(TEST_PRINT_PSBT_FRAGMENTS_TARGET): $(TEST_PRINT_PSBT_FRAGMENTS_SOURCES) $(TEST_UTILS_OBJECT) $(TARGET)
-	$(CC) $(CFLAGS) $(INCLUDES) $< $(TEST_UTILS_OBJECT) -L$(SRCDIR) -lur -lm -o $@
 
 # Build and run Bytes decoder test
 test-bytes-decoder: $(TARGET) $(TEST_UTILS_OBJECT) $(TEST_BYTES_DECODER_TARGET)
@@ -147,7 +128,7 @@ $(TEST_OUTPUT_DESCRIPTOR_ROUNDTRIP_TARGET): $(TEST_OUTPUT_DESCRIPTOR_ROUNDTRIP_S
 	$(CC) $(CFLAGS) $(INCLUDES) $< $(TEST_UTILS_OBJECT) -L$(SRCDIR) -lur -lm -o $@
 
 clean:
-	rm -rf $(OBJDIR) $(TARGET) $(TEST_UTILS_OBJECT) $(TEST_PRINT_FRAGMENTS_TARGET) $(TEST_PRINT_PSBT_FRAGMENTS_TARGET) $(TEST_BYTES_DECODER_TARGET) $(TEST_BYTES_ENCODER_TARGET) $(TEST_OUTPUT_DECODER_TARGET) $(TEST_OUTPUT_ENCODER_TARGET) $(TEST_PSBT_DECODER_TARGET) $(TEST_PSBT_ENCODER_TARGET) $(TEST_BIP39_DECODER_TARGET) $(TEST_ACCOUNT_DESCRIPTOR_DECODER_TARGET) $(TEST_OUTPUT_DESCRIPTOR_ROUNDTRIP_TARGET) tests/cross_implementation_tests/test_cross_output
+	rm -rf $(OBJDIR) $(TARGET) $(TEST_UTILS_OBJECT) $(TEST_BYTES_DECODER_TARGET) $(TEST_BYTES_ENCODER_TARGET) $(TEST_OUTPUT_DECODER_TARGET) $(TEST_OUTPUT_ENCODER_TARGET) $(TEST_PSBT_DECODER_TARGET) $(TEST_PSBT_ENCODER_TARGET) $(TEST_BIP39_DECODER_TARGET) $(TEST_ACCOUNT_DESCRIPTOR_DECODER_TARGET) $(TEST_OUTPUT_DESCRIPTOR_ROUNDTRIP_TARGET)
 
 # Dependencies
 $(OBJDIR)/utils.o: $(SRCDIR)/utils.c $(SRCDIR)/utils.h
