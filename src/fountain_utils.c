@@ -160,10 +160,8 @@ bool random_sampler_init(random_sampler_t *sampler, double *probs,
 void random_sampler_free(random_sampler_t *sampler) {
   if (!sampler)
     return;
-  free(sampler->probs);
-  free(sampler->aliases);
-  sampler->probs = NULL;
-  sampler->aliases = NULL;
+  safe_free(sampler->probs);
+  safe_free(sampler->aliases);
   sampler->count = 0;
 }
 

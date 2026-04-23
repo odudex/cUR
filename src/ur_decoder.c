@@ -325,8 +325,7 @@ bool ur_decoder_receive_part(ur_decoder_t *decoder, const char *part_str) {
     goto cleanup;
   }
   memcpy(fragment_data, fragment_ptr, fragment_len);
-  free(cbor_data);
-  cbor_data = NULL;
+  safe_free(cbor_data);
 
   fountain_encoder_part_t *part = create_fountain_part_from_cbor(
       fragment_data, fragment_len, seq_num, seq_len, true);

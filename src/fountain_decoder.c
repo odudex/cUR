@@ -148,10 +148,7 @@ static void hash_set_free(hash_set_t *set) {
   if (!set)
     return;
 
-  if (set->hashes) {
-    free(set->hashes);
-    set->hashes = NULL;
-  }
+  safe_free(set->hashes);
   set->count = 0;
   set->capacity = 0;
 }
@@ -252,8 +249,7 @@ static void mixed_hash_free(mixed_parts_hash_t *hash) {
     }
   }
 
-  free(hash->buckets);
-  hash->buckets = NULL;
+  safe_free(hash->buckets);
   hash->count = 0;
 }
 
@@ -371,17 +367,11 @@ void decoder_part_free(decoder_part_t *part) {
   if (!part)
     return;
 
-  if (part->indexes.indexes) {
-    free(part->indexes.indexes);
-    part->indexes.indexes = NULL;
-  }
+  safe_free(part->indexes.indexes);
   part->indexes.count = 0;
   part->indexes.capacity = 0;
 
-  if (part->data) {
-    free(part->data);
-    part->data = NULL;
-  }
+  safe_free(part->data);
   part->data_len = 0;
 }
 
@@ -402,8 +392,7 @@ bool decoder_part_copy(const decoder_part_t *src, decoder_part_t *dst) {
   if (src->data && src->data_len > 0) {
     dst->data = safe_malloc_uninit(src->data_len);
     if (!dst->data) {
-      free(dst->indexes.indexes);
-      dst->indexes.indexes = NULL;
+      safe_free(dst->indexes.indexes);
       dst->indexes.count = 0;
       dst->indexes.capacity = 0;
       return false;
@@ -553,8 +542,7 @@ void fountain_decoder_free(fountain_decoder_t *decoder) {
   // Free hash table for mixed parts
   if (decoder->mixed_parts_hash) {
     mixed_hash_free(decoder->mixed_parts_hash);
-    free(decoder->mixed_parts_hash);
-    decoder->mixed_parts_hash = NULL;
+    safe_free(decoder->mixed_parts_hash);
   }
 
   // Free hash set for duplicate detection
@@ -925,19 +913,13 @@ static bool create_symmetric_diff(const decoder_part_t *const a,
   }
 
   if (result->indexes.count == 0) {
-    if (result->indexes.indexes) {
-      free(result->indexes.indexes);
-      result->indexes.indexes = NULL;
-    }
+    safe_free(result->indexes.indexes);
     return false;
   }
 
   result->data = safe_malloc_uninit(a->data_len);
   if (!result->data) {
-    if (result->indexes.indexes) {
-      free(result->indexes.indexes);
-      result->indexes.indexes = NULL;
-    }
+    safe_free(result->indexes.indexes);
     result->indexes.count = 0;
     result->indexes.capacity = 0;
     return false;
@@ -1330,15 +1312,13 @@ bool fountain_decoder_receive_part(fountain_decoder_t *decoder,
       return false;
 
     if (!mixed_hash_init(decoder->mixed_parts_hash, hash_capacity)) {
-      free(decoder->mixed_parts_hash);
-      decoder->mixed_parts_hash = NULL;
+      safe_free(decoder->mixed_parts_hash);
       return false;
     }
 
     if (!hash_set_init(&decoder->received_fragments_hashes, hash_capacity)) {
       mixed_hash_free(decoder->mixed_parts_hash);
-      free(decoder->mixed_parts_hash);
-      decoder->mixed_parts_hash = NULL;
+      safe_free(decoder->mixed_parts_hash);
       return false;
     }
 

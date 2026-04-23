@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 // String manipulation utilities
 
@@ -98,5 +99,16 @@ void *safe_realloc(void *ptr, size_t size);
  * @return Duplicated string or NULL on error
  */
 char *safe_strdup(const char *str);
+
+/**
+ * Free a pointer and null it out. Expands the argument once; pass a
+ * pointer lvalue, not an expression with side effects. free(NULL) is a
+ * no-op per the C standard, so a NULL guard is not needed.
+ */
+#define safe_free(p)                                                           \
+  do {                                                                         \
+    free(p);                                                                   \
+    (p) = NULL;                                                                \
+  } while (0)
 
 #endif // UR_UTILS_H

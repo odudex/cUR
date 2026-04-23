@@ -143,8 +143,7 @@ static bool cbor_lite_encoder_init(cbor_lite_encoder_t *enc,
 
 static void cbor_lite_encoder_free(cbor_lite_encoder_t *enc) {
   if (enc) {
-    free(enc->buffer);
-    enc->buffer = NULL;
+    safe_free(enc->buffer);
     enc->capacity = 0;
     enc->size = 0;
   }
@@ -220,12 +219,10 @@ void fragment_array_free(fragment_array_t *arr) {
     for (size_t i = 0; i < arr->count; i++) {
       free(arr->fragments[i]);
     }
-    free(arr->fragments);
+    safe_free(arr->fragments);
   }
 
-  free(arr->fragment_lens);
-  arr->fragments = NULL;
-  arr->fragment_lens = NULL;
+  safe_free(arr->fragment_lens);
   arr->count = 0;
   arr->capacity = 0;
 }
@@ -433,8 +430,7 @@ bool fountain_encoder_next_part(fountain_encoder_t *encoder,
   }
 
   // Update last_part_indexes (free old indexes array only, not the struct)
-  free(encoder->last_part_indexes.indexes);
-  encoder->last_part_indexes.indexes = NULL;
+  safe_free(encoder->last_part_indexes.indexes);
   encoder->last_part_indexes.count = 0;
   encoder->last_part_indexes.capacity = 0;
 
@@ -493,7 +489,6 @@ void fountain_encoder_part_free(fountain_encoder_part_t *part) {
   if (!part) {
     return;
   }
-  free(part->data);
-  part->data = NULL;
+  safe_free(part->data);
   part->data_len = 0;
 }
