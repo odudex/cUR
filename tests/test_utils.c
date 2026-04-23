@@ -216,6 +216,29 @@ uint8_t *read_binary_file(const char *filepath, size_t *out_len) {
   return bytes;
 }
 
+bool assert_bytes_equal(const uint8_t *expected, size_t expected_len,
+                        const uint8_t *actual, size_t actual_len,
+                        const char *label) {
+  const char *tag = label ? label : "bytes";
+  if (expected_len != actual_len) {
+    fprintf(stderr, "FAIL: %s length mismatch (expected %zu, got %zu)\n", tag,
+            expected_len, actual_len);
+    return false;
+  }
+  if (memcmp(expected, actual, expected_len) != 0) {
+    for (size_t i = 0; i < expected_len; i++) {
+      if (expected[i] != actual[i]) {
+        fprintf(stderr,
+                "FAIL: %s first diff @byte %zu: expected 0x%02x, got 0x%02x\n",
+                tag, i, expected[i], actual[i]);
+        break;
+      }
+    }
+    return false;
+  }
+  return true;
+}
+
 // Function to read first line from text file
 char *read_text_file_first_line(const char *filepath) {
   FILE *file = fopen(filepath, "r");

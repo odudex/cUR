@@ -1,10 +1,21 @@
 # Root Makefile for UR C implementation testing
 
 CC = gcc
-CFLAGS = -Wall -Wextra -std=c99 -g -O2
+CFLAGS = -Wall -Wextra -std=c99 -g
+LDFLAGS =
 INCLUDES = -Isrc
 SRCDIR = src
 OBJDIR = src/obj
+
+# DEBUG=1 switches to -O0 with AddressSanitizer + UndefinedBehaviorSanitizer.
+# Requires a full rebuild when toggling (sanitized and non-sanitized objects
+# cannot link together): `make clean && make DEBUG=1 test`.
+ifeq ($(DEBUG),1)
+  CFLAGS  += -O0 -fno-omit-frame-pointer -fsanitize=address,undefined
+  LDFLAGS += -fsanitize=address,undefined
+else
+  CFLAGS  += -O2
+endif
 
 # Source files (exclude test files)
 SOURCES = utils.c bytewords.c fountain_decoder.c fountain_encoder.c fountain_utils.c crc32.c ur_decoder.c ur_encoder.c ur.c sha256/sha256.c \
@@ -17,41 +28,29 @@ OBJECTS = $(SOURCES:%.c=$(OBJDIR)/%.o)
 # Target library
 TARGET = $(SRCDIR)/libur.a
 
-# Test utilities
-TEST_UTILS_SOURCES = tests/test_utils.c
+# Test utilities + harness — linked into every test binary.
 TEST_UTILS_OBJECT = tests/test_utils.o
+TEST_HARNESS_OBJECT = tests/test_harness.o
+TEST_SUPPORT_OBJECTS = $(TEST_UTILS_OBJECT) $(TEST_HARNESS_OBJECT)
 
-# Test programs
-TEST_BYTES_DECODER_TARGET = tests/test_ur_bytes_decoder
-TEST_BYTES_DECODER_SOURCES = tests/test_ur_bytes_decoder.c
+# Test program stems — each matches a tests/test_ur_<stem>.c source.
+# The user-facing target name is `test-<stem-with-dashes>` (e.g. test-bytes-decoder).
+TEST_STEMS = bytes_decoder bytes_encoder output_decoder output_encoder \
+             PSBT_decoder PSBT_encoder bip39_decoder \
+             account_descriptor_decoder output_descriptor_roundtrip
 
-TEST_BYTES_ENCODER_TARGET = tests/test_ur_bytes_encoder
-TEST_BYTES_ENCODER_SOURCES = tests/test_ur_bytes_encoder.c
+TEST_BINS = $(TEST_STEMS:%=tests/test_ur_%)
+TEST_TARGETS = $(foreach s,$(TEST_STEMS),test-$(subst _,-,$(s)))
 
-TEST_OUTPUT_DECODER_TARGET = tests/test_ur_output_decoder
-TEST_OUTPUT_DECODER_SOURCES = tests/test_ur_output_decoder.c
-
-TEST_OUTPUT_ENCODER_TARGET = tests/test_ur_output_encoder
-TEST_OUTPUT_ENCODER_SOURCES = tests/test_ur_output_encoder.c
-
-TEST_PSBT_DECODER_TARGET = tests/test_ur_PSBT_decoder
-TEST_PSBT_DECODER_SOURCES = tests/test_ur_PSBT_decoder.c
-
-TEST_PSBT_ENCODER_TARGET = tests/test_ur_PSBT_encoder
-TEST_PSBT_ENCODER_SOURCES = tests/test_ur_PSBT_encoder.c
-
-TEST_BIP39_DECODER_TARGET = tests/test_ur_bip39_decoder
-TEST_BIP39_DECODER_SOURCES = tests/test_ur_bip39_decoder.c
-
-TEST_ACCOUNT_DESCRIPTOR_DECODER_TARGET = tests/test_ur_account_descriptor_decoder
-TEST_ACCOUNT_DESCRIPTOR_DECODER_SOURCES = tests/test_ur_account_descriptor_decoder.c
-
-TEST_OUTPUT_DESCRIPTOR_ROUNDTRIP_TARGET = tests/test_ur_output_descriptor_roundtrip
-TEST_OUTPUT_DESCRIPTOR_ROUNDTRIP_SOURCES = tests/test_ur_output_descriptor_roundtrip.c
-
-.PHONY: all clean test-bytes-decoder test-bytes-encoder test-output-decoder test-output-encoder test-PSBT-decoder test-PSBT-encoder test-bip39-decoder test-account-descriptor-decoder test-output-descriptor-roundtrip
+.PHONY: all clean test check $(TEST_TARGETS)
 
 all: $(TARGET)
+
+# Run all tests. `check` is a GNU-convention alias.
+test: $(TEST_TARGETS)
+	@echo "All tests passed."
+
+check: test
 
 $(TARGET): $(OBJECTS)
 	ar rcs $@ $^
@@ -60,75 +59,25 @@ $(OBJDIR)/%.o: $(SRCDIR)/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
-# Test utilities
-$(TEST_UTILS_OBJECT): $(TEST_UTILS_SOURCES) tests/test_utils.h
+$(TEST_UTILS_OBJECT): tests/test_utils.c tests/test_utils.h
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
-# Build and run Bytes decoder test
-test-bytes-decoder: $(TARGET) $(TEST_UTILS_OBJECT) $(TEST_BYTES_DECODER_TARGET)
-	./$(TEST_BYTES_DECODER_TARGET)
+$(TEST_HARNESS_OBJECT): tests/test_harness.c tests/test_harness.h
+	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
-$(TEST_BYTES_DECODER_TARGET): $(TEST_BYTES_DECODER_SOURCES) $(TEST_UTILS_OBJECT) $(TARGET)
-	$(CC) $(CFLAGS) $(INCLUDES) $< $(TEST_UTILS_OBJECT) -L$(SRCDIR) -lur -lm -o $@
+# Pattern rule: build each test binary.
+tests/test_ur_%: tests/test_ur_%.c $(TEST_SUPPORT_OBJECTS) $(TARGET)
+	$(CC) $(CFLAGS) $(INCLUDES) $< $(TEST_SUPPORT_OBJECTS) -L$(SRCDIR) -lur -lm $(LDFLAGS) -o $@
 
-# Build and run Bytes encoder test
-test-bytes-encoder: $(TARGET) $(TEST_UTILS_OBJECT) $(TEST_BYTES_ENCODER_TARGET)
-	./$(TEST_BYTES_ENCODER_TARGET)
-
-$(TEST_BYTES_ENCODER_TARGET): $(TEST_BYTES_ENCODER_SOURCES) $(TEST_UTILS_OBJECT) $(TARGET)
-	$(CC) $(CFLAGS) $(INCLUDES) $< $(TEST_UTILS_OBJECT) -L$(SRCDIR) -lur -lm -o $@
-
-# Build and run Output decoder test
-test-output-decoder: $(TARGET) $(TEST_UTILS_OBJECT) $(TEST_OUTPUT_DECODER_TARGET)
-	./$(TEST_OUTPUT_DECODER_TARGET)
-
-$(TEST_OUTPUT_DECODER_TARGET): $(TEST_OUTPUT_DECODER_SOURCES) $(TEST_UTILS_OBJECT) $(TARGET)
-	$(CC) $(CFLAGS) $(INCLUDES) $< $(TEST_UTILS_OBJECT) -L$(SRCDIR) -lur -lm -o $@
-
-# Build and run Output encoder test
-test-output-encoder: $(TARGET) $(TEST_UTILS_OBJECT) $(TEST_OUTPUT_ENCODER_TARGET)
-	./$(TEST_OUTPUT_ENCODER_TARGET)
-
-$(TEST_OUTPUT_ENCODER_TARGET): $(TEST_OUTPUT_ENCODER_SOURCES) $(TEST_UTILS_OBJECT) $(TARGET)
-	$(CC) $(CFLAGS) $(INCLUDES) $< $(TEST_UTILS_OBJECT) -L$(SRCDIR) -lur -lm -o $@
-
-# Build and run PSBT decoder test
-test-PSBT-decoder: $(TARGET) $(TEST_UTILS_OBJECT) $(TEST_PSBT_DECODER_TARGET)
-	./$(TEST_PSBT_DECODER_TARGET)
-
-$(TEST_PSBT_DECODER_TARGET): $(TEST_PSBT_DECODER_SOURCES) $(TEST_UTILS_OBJECT) $(TARGET)
-	$(CC) $(CFLAGS) $(INCLUDES) $< $(TEST_UTILS_OBJECT) -L$(SRCDIR) -lur -lm -o $@
-
-# Build and run PSBT encoder test
-test-PSBT-encoder: $(TARGET) $(TEST_UTILS_OBJECT) $(TEST_PSBT_ENCODER_TARGET)
-	./$(TEST_PSBT_ENCODER_TARGET)
-
-$(TEST_PSBT_ENCODER_TARGET): $(TEST_PSBT_ENCODER_SOURCES) $(TEST_UTILS_OBJECT) $(TARGET)
-	$(CC) $(CFLAGS) $(INCLUDES) $< $(TEST_UTILS_OBJECT) -L$(SRCDIR) -lur -lm -o $@
-
-# Build and run BIP39 decoder test
-test-bip39-decoder: $(TARGET) $(TEST_BIP39_DECODER_TARGET)
-	./$(TEST_BIP39_DECODER_TARGET)
-
-$(TEST_BIP39_DECODER_TARGET): $(TEST_BIP39_DECODER_SOURCES) $(TARGET)
-	$(CC) $(CFLAGS) $(INCLUDES) $< -L$(SRCDIR) -lur -lm -o $@
-
-# Build and run Account Descriptor decoder test
-test-account-descriptor-decoder: $(TARGET) $(TEST_UTILS_OBJECT) $(TEST_ACCOUNT_DESCRIPTOR_DECODER_TARGET)
-	./$(TEST_ACCOUNT_DESCRIPTOR_DECODER_TARGET)
-
-$(TEST_ACCOUNT_DESCRIPTOR_DECODER_TARGET): $(TEST_ACCOUNT_DESCRIPTOR_DECODER_SOURCES) $(TEST_UTILS_OBJECT) $(TARGET)
-	$(CC) $(CFLAGS) $(INCLUDES) $< $(TEST_UTILS_OBJECT) -L$(SRCDIR) -lur -lm -o $@
-
-# Build and run Output descriptor roundtrip test
-test-output-descriptor-roundtrip: $(TARGET) $(TEST_UTILS_OBJECT) $(TEST_OUTPUT_DESCRIPTOR_ROUNDTRIP_TARGET)
-	./$(TEST_OUTPUT_DESCRIPTOR_ROUNDTRIP_TARGET)
-
-$(TEST_OUTPUT_DESCRIPTOR_ROUNDTRIP_TARGET): $(TEST_OUTPUT_DESCRIPTOR_ROUNDTRIP_SOURCES) $(TEST_UTILS_OBJECT) $(TARGET)
-	$(CC) $(CFLAGS) $(INCLUDES) $< $(TEST_UTILS_OBJECT) -L$(SRCDIR) -lur -lm -o $@
+# Generate a `test-<name>` phony target per stem that runs the corresponding binary.
+define TEST_RUN_RULE
+test-$(subst _,-,$(1)): tests/test_ur_$(1)
+	./tests/test_ur_$(1)
+endef
+$(foreach s,$(TEST_STEMS),$(eval $(call TEST_RUN_RULE,$(s))))
 
 clean:
-	rm -rf $(OBJDIR) $(TARGET) $(TEST_UTILS_OBJECT) $(TEST_BYTES_DECODER_TARGET) $(TEST_BYTES_ENCODER_TARGET) $(TEST_OUTPUT_DECODER_TARGET) $(TEST_OUTPUT_ENCODER_TARGET) $(TEST_PSBT_DECODER_TARGET) $(TEST_PSBT_ENCODER_TARGET) $(TEST_BIP39_DECODER_TARGET) $(TEST_ACCOUNT_DESCRIPTOR_DECODER_TARGET) $(TEST_OUTPUT_DESCRIPTOR_ROUNDTRIP_TARGET)
+	rm -rf $(OBJDIR) $(TARGET) $(TEST_SUPPORT_OBJECTS) $(TEST_BINS)
 
 # Dependencies
 $(OBJDIR)/utils.o: $(SRCDIR)/utils.c $(SRCDIR)/utils.h

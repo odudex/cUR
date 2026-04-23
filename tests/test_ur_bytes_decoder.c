@@ -6,22 +6,19 @@
  * then verifies against expected data in .decoded.txt.
  */
 
-#define _POSIX_C_SOURCE 200809L
+#include "../src/types/bytes_type.h"
 #include "../src/ur.h"
 #include "../src/ur_decoder.h"
-#include "../src/types/bytes_type.h"
 #include "../src/utils.h"
+#include "test_harness.h"
 #include "test_utils.h"
-#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
 
 #define TEST_CASES_DIR "tests/test_cases/bytes"
 
-// Function to test a single file
-int test_file(const char *filepath) {
+static bool test_file(const char *filepath) {
   printf("\n=== Testing file: %s ===\n", filepath);
 
   int fragment_count = 0;
@@ -29,7 +26,7 @@ int test_file(const char *filepath) {
 
   if (!fragments || fragment_count == 0) {
     fprintf(stderr, "❌ No fragments found in file: %s\n", filepath);
-    return 1;
+    return false;
   }
 
   printf("Found %d fragments\n", fragment_count);
@@ -43,7 +40,7 @@ int test_file(const char *filepath) {
   if (!ext) {
     free_fragments(fragments, fragment_count);
     fprintf(stderr, "❌ Invalid filename format\n");
-    return 1;
+    return false;
   }
 
   // Read expected data - prioritize .bin for bytes type
@@ -61,9 +58,10 @@ int test_file(const char *filepath) {
   }
 
   if (!expected_data) {
-    fprintf(stderr, "❌ Failed to read expected data (tried .bin and .decoded.txt)\n");
+    fprintf(stderr,
+            "❌ Failed to read expected data (tried .bin and .decoded.txt)\n");
     free_fragments(fragments, fragment_count);
-    return 1;
+    return false;
   }
   printf("Expected data file: %s\n", expected_path);
   printf("Expected data length: %zu bytes\n", expected_len);
@@ -74,10 +72,10 @@ int test_file(const char *filepath) {
     fprintf(stderr, "❌ Failed to create UR decoder\n");
     free_fragments(fragments, fragment_count);
     free(expected_data);
-    return 1;
+    return false;
   }
 
-  int success = 0;
+  bool success = false;
   int parts_used = 0;
 
   // Feed all fragments
@@ -118,26 +116,10 @@ int test_file(const char *filepath) {
           printf("Actual data length: %zu bytes\n", bytes_len);
 
           if (bytes_data && bytes_len > 0) {
-            // Compare with expected data
-            if (bytes_len == expected_len && memcmp(bytes_data, expected_data, bytes_len) == 0) {
+            if (assert_bytes_equal(expected_data, expected_len, bytes_data,
+                                   bytes_len, "bytes data")) {
               printf("✅ PASS - Bytes data matches expected\n");
-              success = 1;
-            } else {
-              printf("❌ FAIL - Bytes data mismatch\n");
-              printf("Expected length: %zu, Actual length: %zu\n", expected_len, bytes_len);
-
-              // Show first bytes that differ
-              if (bytes_len != expected_len) {
-                printf("Length mismatch!\n");
-              } else {
-                for (size_t i = 0; i < bytes_len; i++) {
-                  if (bytes_data[i] != expected_data[i]) {
-                    printf("First mismatch at byte %zu: expected 0x%02x, got 0x%02x\n",
-                           i, expected_data[i], bytes_data[i]);
-                    break;
-                  }
-                }
-              }
+              success = true;
             }
           } else {
             fprintf(stderr, "❌ Failed to get bytes data\n");
@@ -161,72 +143,10 @@ int test_file(const char *filepath) {
   free_fragments(fragments, fragment_count);
   free(expected_data);
 
-  return success ? 0 : 1;
+  return success;
 }
 
 int main(int argc, char *argv[]) {
-  printf("=== UR Decoder Test (bytes) ===\n");
-
-  // Check if a specific test vector file was provided
-  if (argc > 1) {
-    const char *test_vector = argv[1];
-    char filepath[512];
-
-    // Check if the path already includes the directory
-    if (strstr(test_vector, TEST_CASES_DIR) == test_vector) {
-      snprintf(filepath, sizeof(filepath), "%s", test_vector);
-    } else {
-      snprintf(filepath, sizeof(filepath), "%s/%s", TEST_CASES_DIR,
-               test_vector);
-    }
-
-    printf("Running single test: %s\n", filepath);
-    int result = test_file(filepath);
-
-    printf("\n=== Summary ===\n");
-    printf("Test %s\n", result == 0 ? "PASSED" : "FAILED");
-
-    return result;
-  }
-
-  // Run all tests
-  DIR *dir = opendir(TEST_CASES_DIR);
-  if (!dir) {
-    fprintf(stderr, "Failed to open directory: %s\n", TEST_CASES_DIR);
-    return 1;
-  }
-
-  struct dirent *entry;
-  int total_tests = 0;
-  int passed_tests = 0;
-
-  // First pass: count files
-  char **test_files = (char **)malloc(100 * sizeof(char *));
-  int file_count = 0;
-
-  while ((entry = readdir(dir)) != NULL) {
-    if (strstr(entry->d_name, ".UR_fragments.txt")) {
-      char filepath[512];
-      snprintf(filepath, sizeof(filepath), "%s/%s", TEST_CASES_DIR,
-               entry->d_name);
-      test_files[file_count] = strdup(filepath);
-      file_count++;
-    }
-  }
-  closedir(dir);
-
-  // Process each file
-  for (int i = 0; i < file_count; i++) {
-    total_tests++;
-    if (test_file(test_files[i]) == 0) {
-      passed_tests++;
-    }
-    free(test_files[i]);
-  }
-  free(test_files);
-
-  printf("\n=== Summary ===\n");
-  printf("Tests passed: %d/%d\n", passed_tests, total_tests);
-
-  return (passed_tests == total_tests) ? 0 : 1;
+  return run_test_suite(argc, argv, "UR Decoder Test (bytes)", TEST_CASES_DIR,
+                        ".UR_fragments.txt", test_file);
 }

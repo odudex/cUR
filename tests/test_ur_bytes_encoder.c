@@ -6,20 +6,20 @@
  * then encodes back to UR and verifies roundtrip.
  */
 
-#define _POSIX_C_SOURCE 200809L
+#include "../src/types/bytes_type.h"
 #include "../src/ur_decoder.h"
 #include "../src/ur_encoder.h"
-#include "../src/types/bytes_type.h"
+#include "test_harness.h"
 #include "test_utils.h"
 #include <ctype.h>
-#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define TEST_CASES_DIR "tests/test_cases/bytes"
 
-// Test one file: decode UR fragments, encode back, decode again, verify roundtrip
+// Test one file: decode UR fragments, encode back, decode again, verify
+// roundtrip
 static bool test_file(const char *filepath) {
   printf("\n=== Testing: %s ===\n", filepath);
 
@@ -61,7 +61,8 @@ static bool test_file(const char *filepath) {
   }
 
   if (!expected_data) {
-    fprintf(stderr, "❌ Failed to read expected data (tried .bin and .decoded.txt)\n");
+    fprintf(stderr,
+            "❌ Failed to read expected data (tried .bin and .decoded.txt)\n");
     free_fragments(fragments, fragment_count);
     return false;
   }
@@ -109,7 +110,8 @@ static bool test_file(const char *filepath) {
   printf("Original CBOR size: %zu bytes\n", original_cbor_len);
 
   // Decode bytes from original CBOR
-  bytes_data_t *original_bytes = bytes_from_cbor(original_cbor, original_cbor_len);
+  bytes_data_t *original_bytes =
+      bytes_from_cbor(original_cbor, original_cbor_len);
   if (!original_bytes) {
     printf("❌ Failed to decode original bytes from CBOR\n");
     ur_decoder_free(decoder1);
@@ -120,7 +122,8 @@ static bool test_file(const char *filepath) {
 
   // Get original bytes data
   size_t original_bytes_len;
-  const uint8_t *original_bytes_data = bytes_get_data(original_bytes, &original_bytes_len);
+  const uint8_t *original_bytes_data =
+      bytes_get_data(original_bytes, &original_bytes_len);
   if (!original_bytes_data) {
     printf("❌ Failed to get original bytes data\n");
     bytes_free(original_bytes);
@@ -132,9 +135,11 @@ static bool test_file(const char *filepath) {
   printf("Original bytes length: %zu bytes\n", original_bytes_len);
 
   // Verify original bytes match expected
-  if (original_bytes_len != expected_len || memcmp(original_bytes_data, expected_data, expected_len) != 0) {
+  if (original_bytes_len != expected_len ||
+      memcmp(original_bytes_data, expected_data, expected_len) != 0) {
     printf("❌ Original bytes don't match expected data\n");
-    printf("Expected length: %zu, Original length: %zu\n", expected_len, original_bytes_len);
+    printf("Expected length: %zu, Original length: %zu\n", expected_len,
+           original_bytes_len);
     bytes_free(original_bytes);
     ur_decoder_free(decoder1);
     free_fragments(fragments, fragment_count);
@@ -157,8 +162,8 @@ static bool test_file(const char *filepath) {
 
   // Create UREncoder using the encoded CBOR data
   size_t max_fragment_len = 200; // Reasonable fragment size
-  ur_encoder_t *encoder =
-      ur_encoder_new("bytes", encoded_cbor, encoded_cbor_len, max_fragment_len, 0, 10);
+  ur_encoder_t *encoder = ur_encoder_new(
+      "bytes", encoded_cbor, encoded_cbor_len, max_fragment_len, 0, 10);
 
   if (!encoder) {
     printf("❌ Failed to create encoder\n");
@@ -237,19 +242,22 @@ static bool test_file(const char *filepath) {
       size_t decoded_cbor_len = result2->cbor_len;
 
       // Decode bytes from roundtrip CBOR
-      bytes_data_t *decoded_bytes = bytes_from_cbor(decoded_cbor, decoded_cbor_len);
+      bytes_data_t *decoded_bytes =
+          bytes_from_cbor(decoded_cbor, decoded_cbor_len);
 
       if (decoded_bytes) {
         // Get bytes data from roundtrip
         size_t decoded_bytes_len;
-        const uint8_t *decoded_bytes_data = bytes_get_data(decoded_bytes, &decoded_bytes_len);
+        const uint8_t *decoded_bytes_data =
+            bytes_get_data(decoded_bytes, &decoded_bytes_len);
 
         if (decoded_bytes_data) {
           printf("Decoded bytes length: %zu bytes\n", decoded_bytes_len);
 
           // Compare bytes data
           if (decoded_bytes_len == original_bytes_len &&
-              memcmp(decoded_bytes_data, original_bytes_data, decoded_bytes_len) == 0) {
+              memcmp(decoded_bytes_data, original_bytes_data,
+                     decoded_bytes_len) == 0) {
             printf("✅ PASS - Roundtrip successful, bytes data matches\n");
             success = true;
           } else {
@@ -263,7 +271,8 @@ static bool test_file(const char *filepath) {
             } else {
               for (size_t i = 0; i < decoded_bytes_len; i++) {
                 if (decoded_bytes_data[i] != original_bytes_data[i]) {
-                  printf("First mismatch at byte %zu: expected 0x%02x, got 0x%02x\n",
+                  printf("First mismatch at byte %zu: expected 0x%02x, got "
+                         "0x%02x\n",
                          i, original_bytes_data[i], decoded_bytes_data[i]);
                   break;
                 }
@@ -295,68 +304,6 @@ static bool test_file(const char *filepath) {
 }
 
 int main(int argc, char *argv[]) {
-  printf("=== UR Encoder Test (bytes) ===\n");
-
-  const char *test_cases_dir = TEST_CASES_DIR;
-
-  // Check if a specific test file was provided
-  if (argc > 1) {
-    char filepath[512];
-    const char *test_filename = argv[1];
-
-    if (strstr(test_filename, test_cases_dir) == test_filename) {
-      snprintf(filepath, sizeof(filepath), "%s", test_filename);
-    } else {
-      snprintf(filepath, sizeof(filepath), "%s/%s", test_cases_dir, test_filename);
-    }
-
-    printf("Running single test: %s\n", filepath);
-    bool result = test_file(filepath);
-
-    printf("\n=== Summary ===\n");
-    printf("Test %s\n", result ? "PASSED" : "FAILED");
-
-    return result ? 0 : 1;
-  }
-
-  // Run all tests
-  DIR *dir = opendir(test_cases_dir);
-  if (!dir) {
-    fprintf(stderr, "Failed to open directory: %s\n", test_cases_dir);
-    return 1;
-  }
-
-  struct dirent *entry;
-  int total = 0;
-  int passed = 0;
-
-  // Collect test files
-  char **test_files = (char **)malloc(100 * sizeof(char *));
-  int file_count = 0;
-
-  while ((entry = readdir(dir)) != NULL) {
-    if (strstr(entry->d_name, ".UR_fragments.txt")) {
-      char filepath[512];
-      snprintf(filepath, sizeof(filepath), "%s/%s", test_cases_dir,
-               entry->d_name);
-      test_files[file_count] = strdup(filepath);
-      file_count++;
-    }
-  }
-  closedir(dir);
-
-  // Process each file
-  for (int i = 0; i < file_count; i++) {
-    total++;
-    if (test_file(test_files[i])) {
-      passed++;
-    }
-    free(test_files[i]);
-  }
-  free(test_files);
-
-  printf("\n=== Summary ===\n");
-  printf("Tests passed: %d/%d\n", passed, total);
-
-  return (passed == total) ? 0 : 1;
+  return run_test_suite(argc, argv, "UR Encoder Test (bytes)", TEST_CASES_DIR,
+                        ".UR_fragments.txt", test_file);
 }

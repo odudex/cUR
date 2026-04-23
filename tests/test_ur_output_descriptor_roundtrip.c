@@ -12,12 +12,11 @@
  *     → compare with original
  */
 
-#define _POSIX_C_SOURCE 200809L
+#include "../src/types/output.h"
 #include "../src/ur_decoder.h"
 #include "../src/ur_encoder.h"
-#include "../src/types/output.h"
+#include "test_harness.h"
 #include "test_utils.h"
-#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -57,8 +56,8 @@ static bool test_file(const char *filepath) {
 
   // Step 3: Create UR encoder
   size_t max_fragment_len = 200;
-  ur_encoder_t *encoder =
-      ur_encoder_new("crypto-output", cbor_data, cbor_len, max_fragment_len, 0, 10);
+  ur_encoder_t *encoder = ur_encoder_new("crypto-output", cbor_data, cbor_len,
+                                         max_fragment_len, 0, 10);
   if (!encoder) {
     fprintf(stderr, "Failed to create UR encoder\n");
     free(cbor_data);
@@ -123,7 +122,8 @@ static bool test_file(const char *filepath) {
     return false;
   }
 
-  output_data_t *decoded_output = output_from_cbor(result->cbor_data, result->cbor_len);
+  output_data_t *decoded_output =
+      output_from_cbor(result->cbor_data, result->cbor_len);
   if (!decoded_output) {
     fprintf(stderr, "Failed to decode output from roundtrip CBOR\n");
     ur_decoder_free(decoder);
@@ -170,67 +170,6 @@ static bool test_file(const char *filepath) {
 }
 
 int main(int argc, char *argv[]) {
-  printf("=== UR Output Descriptor Roundtrip Test ===\n");
-
-  const char *test_cases_dir = TEST_CASES_DIR;
-
-  // Single file mode
-  if (argc > 1) {
-    char filepath[512];
-    const char *arg = argv[1];
-
-    if (strstr(arg, test_cases_dir) == arg) {
-      snprintf(filepath, sizeof(filepath), "%s", arg);
-    } else {
-      snprintf(filepath, sizeof(filepath), "%s/%s", test_cases_dir, arg);
-    }
-
-    printf("Running single test: %s\n", filepath);
-    bool result = test_file(filepath);
-    printf("\n=== Summary ===\n");
-    printf("Test %s\n", result ? "PASSED" : "FAILED");
-    return result ? 0 : 1;
-  }
-
-  // Auto-discover *.descriptor.txt files
-  DIR *dir = opendir(test_cases_dir);
-  if (!dir) {
-    fprintf(stderr, "Failed to open directory: %s\n", test_cases_dir);
-    return 1;
-  }
-
-  struct dirent *entry;
-  char **test_files = malloc(100 * sizeof(char *));
-  int file_count = 0;
-
-  while ((entry = readdir(dir)) != NULL) {
-    if (strstr(entry->d_name, ".descriptor.txt")) {
-      char filepath[512];
-      snprintf(filepath, sizeof(filepath), "%s/%s", test_cases_dir, entry->d_name);
-      test_files[file_count] = strdup(filepath);
-      file_count++;
-    }
-  }
-  closedir(dir);
-
-  if (file_count == 0) {
-    printf("No .descriptor.txt files found in %s\n", test_cases_dir);
-    free(test_files);
-    return 1;
-  }
-
-  int total = 0, passed = 0;
-  for (int i = 0; i < file_count; i++) {
-    total++;
-    if (test_file(test_files[i])) {
-      passed++;
-    }
-    free(test_files[i]);
-  }
-  free(test_files);
-
-  printf("\n=== Summary ===\n");
-  printf("Tests passed: %d/%d\n", passed, total);
-
-  return (passed == total) ? 0 : 1;
+  return run_test_suite(argc, argv, "UR Output Descriptor Roundtrip Test",
+                        TEST_CASES_DIR, ".descriptor.txt", test_file);
 }

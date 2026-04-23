@@ -6,13 +6,12 @@
  * then decodes back to verify roundtrip.
  */
 
-#define _POSIX_C_SOURCE 200809L
+#include "../src/types/psbt.h"
 #include "../src/ur_decoder.h"
 #include "../src/ur_encoder.h"
-#include "../src/types/psbt.h"
+#include "test_harness.h"
 #include "test_utils.h"
 #include <ctype.h>
-#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -32,7 +31,8 @@ static bool test_file(const char *filename) {
 
   printf("PSBT size: %zu bytes\n", original_psbt_len);
 
-  // Create PSBT object (psbt_new makes a copy, so we'll keep original for comparison)
+  // Create PSBT object (psbt_new makes a copy, so we'll keep original for
+  // comparison)
   psbt_data_t *psbt = psbt_new(original_psbt_bytes, original_psbt_len);
 
   if (!psbt) {
@@ -56,8 +56,8 @@ static bool test_file(const char *filename) {
 
   // Create UREncoder
   size_t max_fragment_len = 200; // Reasonable fragment size
-  ur_encoder_t *encoder =
-      ur_encoder_new("crypto-psbt", cbor_data, cbor_len, max_fragment_len, 0, 10);
+  ur_encoder_t *encoder = ur_encoder_new("crypto-psbt", cbor_data, cbor_len,
+                                         max_fragment_len, 0, 10);
 
   if (!encoder) {
     printf("❌ Failed to create encoder\n");
@@ -130,7 +130,8 @@ static bool test_file(const char *filename) {
       size_t decoded_cbor_len = result->cbor_len;
 
       // Decode PSBT from CBOR
-      psbt_data_t *decoded_psbt = psbt_from_cbor(decoded_cbor, decoded_cbor_len);
+      psbt_data_t *decoded_psbt =
+          psbt_from_cbor(decoded_cbor, decoded_cbor_len);
 
       if (decoded_psbt) {
         // Get PSBT data
@@ -140,7 +141,8 @@ static bool test_file(const char *filename) {
 
         // Compare with original bytes
         if (decoded_psbt_len == original_psbt_len &&
-            memcmp(decoded_psbt_data, original_psbt_bytes, decoded_psbt_len) == 0) {
+            memcmp(decoded_psbt_data, original_psbt_bytes, decoded_psbt_len) ==
+                0) {
           printf("✅ PASS - Roundtrip successful, PSBT bytes match\n");
           success = true;
         } else {
@@ -154,8 +156,9 @@ static bool test_file(const char *filename) {
           } else {
             for (size_t i = 0; i < decoded_psbt_len; i++) {
               if (decoded_psbt_data[i] != original_psbt_bytes[i]) {
-                printf("First mismatch at byte %zu: expected 0x%02x, got 0x%02x\n",
-                       i, original_psbt_bytes[i], decoded_psbt_data[i]);
+                printf(
+                    "First mismatch at byte %zu: expected 0x%02x, got 0x%02x\n",
+                    i, original_psbt_bytes[i], decoded_psbt_data[i]);
                 break;
               }
             }
@@ -181,68 +184,6 @@ static bool test_file(const char *filename) {
 }
 
 int main(int argc, char *argv[]) {
-  printf("=== UR Encoder Test (PSBT) ===\n");
-
-  const char *test_cases_dir = "tests/test_cases/PSBTs";
-
-  // Check if a specific test file was provided
-  if (argc > 1) {
-    char filepath[512];
-    const char *test_filename = argv[1];
-
-    if (strstr(test_filename, test_cases_dir) == test_filename) {
-      snprintf(filepath, sizeof(filepath), "%s", test_filename);
-    } else {
-      snprintf(filepath, sizeof(filepath), "%s/%s", test_cases_dir, test_filename);
-    }
-
-    printf("Running single test: %s\n", filepath);
-    bool result = test_file(filepath);
-
-    printf("\n=== Summary ===\n");
-    printf("Test %s\n", result ? "PASSED" : "FAILED");
-
-    return result ? 0 : 1;
-  }
-
-  // Run all tests
-  DIR *dir = opendir(test_cases_dir);
-  if (!dir) {
-    fprintf(stderr, "Failed to open directory: %s\n", test_cases_dir);
-    return 1;
-  }
-
-  struct dirent *entry;
-  int total = 0;
-  int passed = 0;
-
-  // Collect test files
-  char **test_files = (char **)malloc(100 * sizeof(char *));
-  int file_count = 0;
-
-  while ((entry = readdir(dir)) != NULL) {
-    if (strstr(entry->d_name, ".psbt.bin")) {
-      char filepath[512];
-      snprintf(filepath, sizeof(filepath), "%s/%s", test_cases_dir,
-               entry->d_name);
-      test_files[file_count] = strdup(filepath);
-      file_count++;
-    }
-  }
-  closedir(dir);
-
-  // Process each file
-  for (int i = 0; i < file_count; i++) {
-    total++;
-    if (test_file(test_files[i])) {
-      passed++;
-    }
-    free(test_files[i]);
-  }
-  free(test_files);
-
-  printf("\n=== Summary ===\n");
-  printf("Tests passed: %d/%d\n", passed, total);
-
-  return (passed == total) ? 0 : 1;
+  return run_test_suite(argc, argv, "UR Encoder Test (PSBT)",
+                        "tests/test_cases/PSBTs", ".psbt.bin", test_file);
 }

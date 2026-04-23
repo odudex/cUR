@@ -1,19 +1,16 @@
-#define _POSIX_C_SOURCE 200809L
+#include "../src/types/psbt.h"
 #include "../src/ur.h"
 #include "../src/ur_decoder.h"
-#include "../src/types/psbt.h"
 #include "../src/utils.h"
+#include "test_harness.h"
 #include "test_utils.h"
-#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
 
 #define TEST_CASES_DIR "tests/test_cases/PSBTs"
 
-// Function to test a single file
-int test_file(const char *filepath) {
+static bool test_file(const char *filepath) {
   printf("\n=== Testing file: %s ===\n", filepath);
 
   int fragment_count = 0;
@@ -21,7 +18,7 @@ int test_file(const char *filepath) {
 
   if (!fragments || fragment_count == 0) {
     fprintf(stderr, "❌ No fragments found in file: %s\n", filepath);
-    return 1;
+    return false;
   }
 
   printf("Found %d fragments\n", fragment_count);
@@ -37,16 +34,17 @@ int test_file(const char *filepath) {
   } else {
     free_fragments(fragments, fragment_count);
     fprintf(stderr, "❌ Invalid filename format\n");
-    return 1;
+    return false;
   }
 
   // Read expected PSBT bytes
   size_t expected_len = 0;
   uint8_t *expected_bytes = read_binary_file(expected_path, &expected_len);
   if (!expected_bytes) {
-    fprintf(stderr, "❌ Failed to read expected PSBT bytes: %s\n", expected_path);
+    fprintf(stderr, "❌ Failed to read expected PSBT bytes: %s\n",
+            expected_path);
     free_fragments(fragments, fragment_count);
-    return 1;
+    return false;
   }
   printf("Expected PSBT length: %zu bytes\n", expected_len);
 
@@ -56,10 +54,10 @@ int test_file(const char *filepath) {
     fprintf(stderr, "❌ Failed to create UR decoder\n");
     free_fragments(fragments, fragment_count);
     free(expected_bytes);
-    return 1;
+    return false;
   }
 
-  int success = 0;
+  bool success = false;
   int parts_used = 0;
   int progress_reported = 0;
 
@@ -117,26 +115,10 @@ int test_file(const char *filepath) {
           printf("Actual PSBT length: %zu bytes\n", psbt_len);
 
           if (psbt_data && psbt_len > 0) {
-            // Compare with expected bytes
-            if (psbt_len == expected_len && memcmp(psbt_data, expected_bytes, psbt_len) == 0) {
+            if (assert_bytes_equal(expected_bytes, expected_len, psbt_data,
+                                   psbt_len, "PSBT bytes")) {
               printf("✅ PASS - PSBT bytes match expected\n");
-              success = 1;
-            } else {
-              printf("❌ FAIL - PSBT bytes mismatch\n");
-              printf("Expected length: %zu, Actual length: %zu\n", expected_len, psbt_len);
-
-              // Show first bytes that differ
-              if (psbt_len != expected_len) {
-                printf("Length mismatch!\n");
-              } else {
-                for (size_t i = 0; i < psbt_len; i++) {
-                  if (psbt_data[i] != expected_bytes[i]) {
-                    printf("First mismatch at byte %zu: expected 0x%02x, got 0x%02x\n",
-                           i, expected_bytes[i], psbt_data[i]);
-                    break;
-                  }
-                }
-              }
+              success = true;
             }
           } else {
             fprintf(stderr, "❌ Failed to get PSBT data\n");
@@ -160,72 +142,10 @@ int test_file(const char *filepath) {
   free_fragments(fragments, fragment_count);
   free(expected_bytes);
 
-  return success ? 0 : 1;
+  return success;
 }
 
 int main(int argc, char *argv[]) {
-  printf("=== UR Decoder Test (PSBT) ===\n");
-
-  // Check if a specific test vector file was provided
-  if (argc > 1) {
-    const char *test_vector = argv[1];
-    char filepath[512];
-
-    // Check if the path already includes the directory
-    if (strstr(test_vector, TEST_CASES_DIR) == test_vector) {
-      snprintf(filepath, sizeof(filepath), "%s", test_vector);
-    } else {
-      snprintf(filepath, sizeof(filepath), "%s/%s", TEST_CASES_DIR,
-               test_vector);
-    }
-
-    printf("Running single test: %s\n", filepath);
-    int result = test_file(filepath);
-
-    printf("\n=== Summary ===\n");
-    printf("Test %s\n", result == 0 ? "PASSED" : "FAILED");
-
-    return result;
-  }
-
-  // Run all tests
-  DIR *dir = opendir(TEST_CASES_DIR);
-  if (!dir) {
-    fprintf(stderr, "Failed to open directory: %s\n", TEST_CASES_DIR);
-    return 1;
-  }
-
-  struct dirent *entry;
-  int total_tests = 0;
-  int passed_tests = 0;
-
-  // First pass: count files
-  char **test_files = (char **)malloc(100 * sizeof(char *));
-  int file_count = 0;
-
-  while ((entry = readdir(dir)) != NULL) {
-    if (strstr(entry->d_name, ".UR_fragments.txt")) {
-      char filepath[512];
-      snprintf(filepath, sizeof(filepath), "%s/%s", TEST_CASES_DIR,
-               entry->d_name);
-      test_files[file_count] = strdup(filepath);
-      file_count++;
-    }
-  }
-  closedir(dir);
-
-  // Process each file
-  for (int i = 0; i < file_count; i++) {
-    total_tests++;
-    if (test_file(test_files[i]) == 0) {
-      passed_tests++;
-    }
-    free(test_files[i]);
-  }
-  free(test_files);
-
-  printf("\n=== Summary ===\n");
-  printf("Tests passed: %d/%d\n", passed_tests, total_tests);
-
-  return (passed_tests == total_tests) ? 0 : 1;
+  return run_test_suite(argc, argv, "UR Decoder Test (PSBT)", TEST_CASES_DIR,
+                        ".UR_fragments.txt", test_file);
 }

@@ -6,20 +6,20 @@
  * then encodes back to UR and verifies roundtrip.
  */
 
-#define _POSIX_C_SOURCE 200809L
+#include "../src/types/output.h"
 #include "../src/ur_decoder.h"
 #include "../src/ur_encoder.h"
-#include "../src/types/output.h"
+#include "test_harness.h"
 #include "test_utils.h"
 #include <ctype.h>
-#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define TEST_CASES_DIR "tests/test_cases/output"
 
-// Test one file: decode UR fragments, encode back, decode again, verify roundtrip
+// Test one file: decode UR fragments, encode back, decode again, verify
+// roundtrip
 static bool test_file(const char *filepath) {
   printf("\n=== Testing: %s ===\n", filepath);
 
@@ -51,7 +51,8 @@ static bool test_file(const char *filepath) {
   // Read expected descriptor
   char *expected_descriptor = read_text_file_first_line(expected_path);
   if (!expected_descriptor) {
-    fprintf(stderr, "❌ Failed to read expected descriptor: %s\n", expected_path);
+    fprintf(stderr, "❌ Failed to read expected descriptor: %s\n",
+            expected_path);
     free_fragments(fragments, fragment_count);
     return false;
   }
@@ -98,7 +99,8 @@ static bool test_file(const char *filepath) {
   printf("Original CBOR size: %zu bytes\n", original_cbor_len);
 
   // Decode output from original CBOR
-  output_data_t *original_output = output_from_cbor(original_cbor, original_cbor_len);
+  output_data_t *original_output =
+      output_from_cbor(original_cbor, original_cbor_len);
   if (!original_output) {
     printf("❌ Failed to decode original output from CBOR\n");
     ur_decoder_free(decoder1);
@@ -133,10 +135,12 @@ static bool test_file(const char *filepath) {
   }
 
   // Create UREncoder using the original CBOR data
-  // (Note: output type is read-only, so we use the original CBOR for roundtrip test)
+  // (Note: output type is read-only, so we use the original CBOR for roundtrip
+  // test)
   size_t max_fragment_len = 200; // Reasonable fragment size
   ur_encoder_t *encoder =
-      ur_encoder_new("crypto-output", original_cbor, original_cbor_len, max_fragment_len, 0, 10);
+      ur_encoder_new("crypto-output", original_cbor, original_cbor_len,
+                     max_fragment_len, 0, 10);
 
   if (!encoder) {
     printf("❌ Failed to create encoder\n");
@@ -215,7 +219,8 @@ static bool test_file(const char *filepath) {
       size_t decoded_cbor_len = result2->cbor_len;
 
       // Decode output from roundtrip CBOR
-      output_data_t *decoded_output = output_from_cbor(decoded_cbor, decoded_cbor_len);
+      output_data_t *decoded_output =
+          output_from_cbor(decoded_cbor, decoded_cbor_len);
 
       if (decoded_output) {
         // Generate descriptor from roundtrip output
@@ -260,68 +265,6 @@ static bool test_file(const char *filepath) {
 }
 
 int main(int argc, char *argv[]) {
-  printf("=== UR Encoder Test (crypto-output) ===\n");
-
-  const char *test_cases_dir = TEST_CASES_DIR;
-
-  // Check if a specific test file was provided
-  if (argc > 1) {
-    char filepath[512];
-    const char *test_filename = argv[1];
-
-    if (strstr(test_filename, test_cases_dir) == test_filename) {
-      snprintf(filepath, sizeof(filepath), "%s", test_filename);
-    } else {
-      snprintf(filepath, sizeof(filepath), "%s/%s", test_cases_dir, test_filename);
-    }
-
-    printf("Running single test: %s\n", filepath);
-    bool result = test_file(filepath);
-
-    printf("\n=== Summary ===\n");
-    printf("Test %s\n", result ? "PASSED" : "FAILED");
-
-    return result ? 0 : 1;
-  }
-
-  // Run all tests
-  DIR *dir = opendir(test_cases_dir);
-  if (!dir) {
-    fprintf(stderr, "Failed to open directory: %s\n", test_cases_dir);
-    return 1;
-  }
-
-  struct dirent *entry;
-  int total = 0;
-  int passed = 0;
-
-  // Collect test files
-  char **test_files = (char **)malloc(100 * sizeof(char *));
-  int file_count = 0;
-
-  while ((entry = readdir(dir)) != NULL) {
-    if (strstr(entry->d_name, ".UR_fragments.txt")) {
-      char filepath[512];
-      snprintf(filepath, sizeof(filepath), "%s/%s", test_cases_dir,
-               entry->d_name);
-      test_files[file_count] = strdup(filepath);
-      file_count++;
-    }
-  }
-  closedir(dir);
-
-  // Process each file
-  for (int i = 0; i < file_count; i++) {
-    total++;
-    if (test_file(test_files[i])) {
-      passed++;
-    }
-    free(test_files[i]);
-  }
-  free(test_files);
-
-  printf("\n=== Summary ===\n");
-  printf("Tests passed: %d/%d\n", passed, total);
-
-  return (passed == total) ? 0 : 1;
+  return run_test_suite(argc, argv, "UR Encoder Test (crypto-output)",
+                        TEST_CASES_DIR, ".UR_fragments.txt", test_file);
 }
