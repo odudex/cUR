@@ -12,6 +12,7 @@ multi_key_data_t *multi_key_new(uint32_t threshold) {
   multi_key->threshold = threshold;
   multi_key->hd_keys = NULL;
   multi_key->hd_key_count = 0;
+  multi_key->hd_key_capacity = 0;
 
   return multi_key;
 }
@@ -34,16 +35,20 @@ bool multi_key_add_hd_key(multi_key_data_t *multi_key, hd_key_data_t *hd_key) {
   if (!multi_key || !hd_key)
     return false;
 
-  size_t new_count = multi_key->hd_key_count + 1;
-  hd_key_data_t **new_keys =
-      safe_realloc(multi_key->hd_keys, new_count * sizeof(hd_key_data_t *));
-  if (!new_keys)
-    return false;
+  // Grow capacity in doubling steps (4, 8, 16, ...) so N-of-N multisigs
+  // don't trigger N reallocations in a row.
+  if (multi_key->hd_key_count >= multi_key->hd_key_capacity) {
+    size_t new_capacity =
+        multi_key->hd_key_capacity == 0 ? 4 : multi_key->hd_key_capacity * 2;
+    hd_key_data_t **new_keys = safe_realloc(
+        multi_key->hd_keys, new_capacity * sizeof(hd_key_data_t *));
+    if (!new_keys)
+      return false;
+    multi_key->hd_keys = new_keys;
+    multi_key->hd_key_capacity = new_capacity;
+  }
 
-  new_keys[multi_key->hd_key_count] = hd_key;
-  multi_key->hd_keys = new_keys;
-  multi_key->hd_key_count = new_count;
-
+  multi_key->hd_keys[multi_key->hd_key_count++] = hd_key;
   return true;
 }
 

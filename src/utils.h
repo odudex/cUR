@@ -86,10 +86,23 @@ void *safe_malloc(size_t size);
 void *safe_malloc_uninit(size_t size);
 
 /**
- * Safe realloc
- * @param ptr Pointer to reallocate
- * @param size New size
- * @return Reallocated memory or NULL on error
+ * Wrapped realloc — a hook point for platform allocators, not a safer
+ * realloc. Semantics match standard realloc(3):
+ *   - On success: returns a new pointer; the old block has been freed.
+ *   - On failure: returns NULL; the OLD pointer is still valid and must
+ *     be freed by the caller if no longer needed.
+ *
+ * Callers that reassign a struct field from the old pointer (e.g.
+ * `obj->arr = safe_realloc(obj->arr, ...)`) MUST NULL-check the return
+ * before assigning, or the struct field will dangle on failure. When
+ * reallocating multiple fields in a row, commit each successful result
+ * to the struct before attempting the next — otherwise a later failure
+ * leaves the struct pointing at a block the earlier successful realloc
+ * has already freed.
+ *
+ * @param ptr Pointer to reallocate (may be NULL — equivalent to malloc)
+ * @param size New size (must be > 0; passing 0 is implementation-defined)
+ * @return New pointer on success, NULL on failure (old pointer unchanged)
  */
 void *safe_realloc(void *ptr, size_t size);
 
