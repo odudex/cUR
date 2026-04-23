@@ -11,18 +11,16 @@
 //
 
 #include "fountain_utils.h"
-#include "sha256/sha256.h"
+#include "sha256/sha256_compat.h"
 #include "utils.h"
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 static void compute_sha256(const uint8_t *input, size_t len,
                            uint8_t output[32]) {
-  CRYAL_SHA256_CTX ctx;
-  sha256_init(&ctx);
-  sha256_update(&ctx, input, len);
-  sha256_final(&ctx, output);
+  ur_sha256(input, len, output);
 }
 
 static uint64_t rotl(const uint64_t x, int k) {
@@ -218,8 +216,7 @@ static size_t choose_degree(size_t seq_len, prng_state_t *prng,
 }
 
 static bool choose_fragments_internal(uint32_t seq_num, size_t seq_len,
-                                      uint32_t checksum,
-                                      part_indexes_t *result,
+                                      uint32_t checksum, part_indexes_t *result,
                                       random_sampler_t *cached_sampler) {
   if (!result || seq_len == 0)
     return false;
@@ -289,8 +286,8 @@ bool choose_fragments(uint32_t seq_num, size_t seq_len, uint32_t checksum,
 }
 
 bool choose_fragments_cached(uint32_t seq_num, size_t seq_len,
-                              uint32_t checksum, part_indexes_t *result,
-                              random_sampler_t *cached_sampler) {
+                             uint32_t checksum, part_indexes_t *result,
+                             random_sampler_t *cached_sampler) {
   return choose_fragments_internal(seq_num, seq_len, checksum, result,
                                    cached_sampler);
 }
@@ -320,8 +317,7 @@ bool part_indexes_is_strict_subset(const part_indexes_t *a,
 
 static bool part_indexes_append_sorted(part_indexes_t *indexes, size_t value) {
   if (indexes->count >= indexes->capacity) {
-    size_t new_capacity =
-        indexes->capacity == 0 ? 4 : indexes->capacity * 2;
+    size_t new_capacity = indexes->capacity == 0 ? 4 : indexes->capacity * 2;
     size_t *new_idx =
         safe_realloc(indexes->indexes, new_capacity * sizeof(size_t));
     if (!new_idx)

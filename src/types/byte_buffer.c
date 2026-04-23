@@ -1,5 +1,5 @@
 #include "byte_buffer.h"
-#include "../sha256/sha256.h"
+#include "../sha256/sha256_compat.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -142,19 +142,12 @@ char *base58check_encode(const uint8_t *data, size_t len) {
   if (!data || len == 0)
     return NULL;
 
-
   // Calculate checksum (first 4 bytes of double SHA256)
-  CRYAL_SHA256_CTX ctx;
   uint8_t hash1[32];
   uint8_t hash2[32];
 
-  sha256_init(&ctx);
-  sha256_update(&ctx, data, len);
-  sha256_final(&ctx, hash1);
-
-  sha256_init(&ctx);
-  sha256_update(&ctx, hash1, 32);
-  sha256_final(&ctx, hash2);
+  ur_sha256(data, len, hash1);
+  ur_sha256(hash1, 32, hash2);
 
   // Append checksum to data
   uint8_t *data_with_checksum = safe_malloc(len + 4);

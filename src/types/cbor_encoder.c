@@ -2,7 +2,8 @@
 #include <string.h>
 
 // Encode CBOR head (major type + argument value)
-static bool encode_head(byte_buffer_t *buf, uint8_t major_type, uint64_t value) {
+static bool encode_head(byte_buffer_t *buf, uint8_t major_type,
+                        uint64_t value) {
   uint8_t mt = major_type << 5;
   if (value < 24) {
     uint8_t byte = mt | (uint8_t)value;
@@ -18,10 +19,14 @@ static bool encode_head(byte_buffer_t *buf, uint8_t major_type, uint64_t value) 
                         (uint8_t)(value >> 8), (uint8_t)value};
     return byte_buffer_append(buf, bytes, 5);
   } else {
-    uint8_t bytes[9] = {mt | 27,          (uint8_t)(value >> 56),
-                        (uint8_t)(value >> 48), (uint8_t)(value >> 40),
-                        (uint8_t)(value >> 32), (uint8_t)(value >> 24),
-                        (uint8_t)(value >> 16), (uint8_t)(value >> 8),
+    uint8_t bytes[9] = {mt | 27,
+                        (uint8_t)(value >> 56),
+                        (uint8_t)(value >> 48),
+                        (uint8_t)(value >> 40),
+                        (uint8_t)(value >> 32),
+                        (uint8_t)(value >> 24),
+                        (uint8_t)(value >> 16),
+                        (uint8_t)(value >> 8),
                         (uint8_t)value};
     return byte_buffer_append(buf, bytes, 9);
   }

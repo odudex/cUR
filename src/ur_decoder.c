@@ -152,7 +152,7 @@ static ur_result_t *decode_single_part(const char *type, const char *body) {
 
 // CBOR unsigned integer parser (major type 0)
 static bool cbor_read_uint32(const uint8_t **ptr, size_t *remaining,
-                              uint32_t *value) {
+                             uint32_t *value) {
   if (*remaining < 1)
     return false;
 
@@ -188,7 +188,7 @@ static bool cbor_read_uint32(const uint8_t **ptr, size_t *remaining,
 
 // CBOR byte string parser (major type 2)
 static bool cbor_read_bytes(const uint8_t **ptr, size_t *remaining,
-                             const uint8_t **data, size_t *data_len) {
+                            const uint8_t **data, size_t *data_len) {
   if (*remaining < 1)
     return false;
 
@@ -319,7 +319,7 @@ bool ur_decoder_receive_part(ur_decoder_t *decoder, const char *part_str) {
   }
 
   // Allocate fragment data that the encoder part will take ownership of
-  uint8_t *fragment_data = malloc(fragment_len);
+  uint8_t *fragment_data = safe_malloc(fragment_len);
   if (!fragment_data) {
     decoder->last_error = UR_DECODER_ERROR_MEMORY;
     goto cleanup;

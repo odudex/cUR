@@ -52,6 +52,8 @@ static size_t cbor_lite_get_byte_length(uint64_t value) {
   return 8;
 }
 
+#define CBOR_ENCODER_MAX_CAPACITY (1024 * 1024) /* 1MB ceiling */
+
 static bool cbor_lite_ensure_capacity(cbor_lite_encoder_t *enc,
                                       size_t additional) {
   if (!enc)
@@ -61,9 +63,14 @@ static bool cbor_lite_ensure_capacity(cbor_lite_encoder_t *enc,
   if (required <= enc->capacity)
     return true;
 
+  if (required > CBOR_ENCODER_MAX_CAPACITY)
+    return false;
+
   size_t new_capacity = enc->capacity * 3 / 2;
   if (new_capacity < required)
     new_capacity = required;
+  if (new_capacity > CBOR_ENCODER_MAX_CAPACITY)
+    new_capacity = CBOR_ENCODER_MAX_CAPACITY;
 
   uint8_t *new_buffer = (uint8_t *)realloc(enc->buffer, new_capacity);
   if (!new_buffer)

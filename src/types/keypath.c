@@ -1,6 +1,6 @@
 #include "keypath.h"
-#include "cbor_decoder.h"
 #include "byte_buffer.h"
+#include "cbor_decoder.h"
 #include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
@@ -167,10 +167,10 @@ cbor_value_t *keypath_to_data_item(keypath_data_t *keypath) {
       return NULL;
     }
     for (size_t i = 0; i < keypath->component_count; i++) {
-      cbor_array_append(arr, keypath->components[i].wildcard
-                                 ? cbor_value_new_array()
-                                 : cbor_value_new_unsigned_int(
-                                       keypath->components[i].index));
+      cbor_array_append(
+          arr, keypath->components[i].wildcard
+                   ? cbor_value_new_array()
+                   : cbor_value_new_unsigned_int(keypath->components[i].index));
       cbor_array_append(arr,
                         cbor_value_new_bool(keypath->components[i].hardened));
     }

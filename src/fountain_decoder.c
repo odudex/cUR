@@ -261,7 +261,7 @@ static void mixed_hash_free(mixed_parts_hash_t *hash) {
 // Add or update entry in hash table
 static bool mixed_hash_put(mixed_parts_hash_t *hash, const part_indexes_t *key,
                            const decoder_part_t *value) {
-  if (!hash || !hash->buckets || !key || !value)
+  if (!hash || !hash->buckets || !key || !value || hash->capacity == 0)
     return false;
 
   size_t key_hash = hash_indexes(key);
@@ -403,7 +403,10 @@ bool decoder_part_copy(const decoder_part_t *src, decoder_part_t *dst) {
   if (src->data && src->data_len > 0) {
     dst->data = safe_malloc_uninit(src->data_len);
     if (!dst->data) {
-      part_indexes_free(&dst->indexes);
+      free(dst->indexes.indexes);
+      dst->indexes.indexes = NULL;
+      dst->indexes.count = 0;
+      dst->indexes.capacity = 0;
       return false;
     }
     memcpy(dst->data, src->data, src->data_len);
@@ -568,8 +571,7 @@ void fountain_decoder_free(fountain_decoder_t *decoder) {
 
 static bool create_decoder_part_from_encoder_part(
     fountain_encoder_part_t *const encoder_part,
-    decoder_part_t *const decoder_part,
-    random_sampler_t *cached_sampler) {
+    decoder_part_t *const decoder_part, random_sampler_t *cached_sampler) {
   if (!encoder_part || !decoder_part) {
     return false;
   }
@@ -577,8 +579,8 @@ static bool create_decoder_part_from_encoder_part(
   *decoder_part = (decoder_part_t){0};
 
   if (!choose_fragments_cached(encoder_part->seq_num, encoder_part->seq_len,
-                                encoder_part->checksum, &decoder_part->indexes,
-                                cached_sampler)) {
+                               encoder_part->checksum, &decoder_part->indexes,
+                               cached_sampler)) {
     return false;
   }
 
@@ -758,7 +760,8 @@ static void reduce_mixed_by(fountain_decoder_t *const decoder,
   mixed_parts_hash_t *hash = decoder->mixed_parts_hash;
 
   size_t max_entries = hash->count;
-  size_t alloc_size = max_entries * (sizeof(hash_entry_t *) * 2 + sizeof(size_t));
+  size_t alloc_size =
+      max_entries * (sizeof(hash_entry_t *) * 2 + sizeof(size_t));
   uint8_t *buf = safe_malloc(alloc_size);
   if (!buf)
     return;
@@ -789,6 +792,11 @@ static void reduce_mixed_by(fountain_decoder_t *const decoder,
         }
 
         // XOR the data in-place
+        if (entry->value.data_len != part->data_len) {
+          fprintf(stderr,
+                  "fountain_decoder: fragment length mismatch (%zu vs %zu)\n",
+                  entry->value.data_len, part->data_len);
+        }
         for (size_t j = 0; j < entry->value.data_len && j < part->data_len;
              j++) {
           entry->value.data[j] ^= part->data[j];
@@ -1355,7 +1363,7 @@ bool fountain_decoder_receive_part(fountain_decoder_t *decoder,
 
   decoder_part_t decoder_part;
   if (!create_decoder_part_from_encoder_part(part, &decoder_part,
-                                              &decoder->degree_sampler)) {
+                                             &decoder->degree_sampler)) {
     return false;
   }
 

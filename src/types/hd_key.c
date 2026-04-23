@@ -1,6 +1,6 @@
 #include "hd_key.h"
-#include "cbor_decoder.h"
 #include "byte_buffer.h"
+#include "cbor_decoder.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -170,9 +170,9 @@ cbor_value_t *hd_key_to_data_item(hd_key_data_t *hd_key) {
                  cbor_value_new_bool(true));
 
   if (hd_key->private_key && hd_key->private_key_len > 0)
-    cbor_map_set(map, cbor_value_new_unsigned_int(2),
-                 cbor_value_new_bytes(hd_key->private_key,
-                                     hd_key->private_key_len));
+    cbor_map_set(
+        map, cbor_value_new_unsigned_int(2),
+        cbor_value_new_bytes(hd_key->private_key, hd_key->private_key_len));
 
   if (hd_key->key && hd_key->key_len > 0)
     cbor_map_set(map, cbor_value_new_unsigned_int(3),

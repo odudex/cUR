@@ -97,8 +97,8 @@ bool choose_fragments(uint32_t seq_num, size_t seq_len, uint32_t checksum,
  * @return true on success
  */
 bool choose_fragments_cached(uint32_t seq_num, size_t seq_len,
-                              uint32_t checksum, part_indexes_t *result,
-                              random_sampler_t *cached_sampler);
+                             uint32_t checksum, part_indexes_t *result,
+                             random_sampler_t *cached_sampler);
 
 /**
  * Check if part_indexes_a is strict subset of part_indexes_b
