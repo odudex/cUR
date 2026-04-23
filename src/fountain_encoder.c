@@ -96,34 +96,42 @@ static bool cbor_lite_encode_tag_and_value(cbor_lite_encoder_t *enc,
     return cbor_lite_append_byte(enc, major_type + (uint8_t)value);
   }
 
+  // One capacity check covers the whole head; write bytes directly
+  // instead of routing each through cbor_lite_append_byte().
   if (!cbor_lite_ensure_capacity(enc, 1 + length))
     return false;
 
-  if (length == 1) {
-    cbor_lite_append_byte(enc, major_type + CBOR_MINOR_LENGTH1);
-    cbor_lite_append_byte(enc, value & 0xFF);
-  } else if (length == 2) {
-    cbor_lite_append_byte(enc, major_type + CBOR_MINOR_LENGTH2);
-    cbor_lite_append_byte(enc, (value >> 8) & 0xFF);
-    cbor_lite_append_byte(enc, value & 0xFF);
-  } else if (length == 4) {
-    cbor_lite_append_byte(enc, major_type + CBOR_MINOR_LENGTH4);
-    cbor_lite_append_byte(enc, (value >> 24) & 0xFF);
-    cbor_lite_append_byte(enc, (value >> 16) & 0xFF);
-    cbor_lite_append_byte(enc, (value >> 8) & 0xFF);
-    cbor_lite_append_byte(enc, value & 0xFF);
-  } else {
-    cbor_lite_append_byte(enc, major_type + CBOR_MINOR_LENGTH8);
-    cbor_lite_append_byte(enc, (value >> 56) & 0xFF);
-    cbor_lite_append_byte(enc, (value >> 48) & 0xFF);
-    cbor_lite_append_byte(enc, (value >> 40) & 0xFF);
-    cbor_lite_append_byte(enc, (value >> 32) & 0xFF);
-    cbor_lite_append_byte(enc, (value >> 24) & 0xFF);
-    cbor_lite_append_byte(enc, (value >> 16) & 0xFF);
-    cbor_lite_append_byte(enc, (value >> 8) & 0xFF);
-    cbor_lite_append_byte(enc, value & 0xFF);
+  uint8_t *p = enc->buffer + enc->size;
+  switch (length) {
+  case 1:
+    p[0] = major_type + CBOR_MINOR_LENGTH1;
+    p[1] = (uint8_t)value;
+    break;
+  case 2:
+    p[0] = major_type + CBOR_MINOR_LENGTH2;
+    p[1] = (uint8_t)(value >> 8);
+    p[2] = (uint8_t)value;
+    break;
+  case 4:
+    p[0] = major_type + CBOR_MINOR_LENGTH4;
+    p[1] = (uint8_t)(value >> 24);
+    p[2] = (uint8_t)(value >> 16);
+    p[3] = (uint8_t)(value >> 8);
+    p[4] = (uint8_t)value;
+    break;
+  default: // 8
+    p[0] = major_type + CBOR_MINOR_LENGTH8;
+    p[1] = (uint8_t)(value >> 56);
+    p[2] = (uint8_t)(value >> 48);
+    p[3] = (uint8_t)(value >> 40);
+    p[4] = (uint8_t)(value >> 32);
+    p[5] = (uint8_t)(value >> 24);
+    p[6] = (uint8_t)(value >> 16);
+    p[7] = (uint8_t)(value >> 8);
+    p[8] = (uint8_t)value;
+    break;
   }
-
+  enc->size += 1 + length;
   return true;
 }
 
@@ -149,18 +157,25 @@ static void cbor_lite_encoder_free(cbor_lite_encoder_t *enc) {
   }
 }
 
+// Takes ownership of the encoder's buffer. After this call the encoder is
+// drained and only needs cbor_lite_encoder_free for consistency.
 static uint8_t *cbor_lite_encoder_get_buffer(cbor_lite_encoder_t *enc,
                                              size_t *size_out) {
-  if (!enc || !size_out)
+  if (!enc || !size_out || enc->size == 0)
     return NULL;
 
   *size_out = enc->size;
+  uint8_t *result = enc->buffer;
 
-  uint8_t *result = (uint8_t *)malloc(enc->size);
-  if (!result)
-    return NULL;
+  if (enc->size < enc->capacity) {
+    uint8_t *shrunk = (uint8_t *)realloc(result, enc->size);
+    if (shrunk)
+      result = shrunk;
+  }
 
-  memcpy(result, enc->buffer, enc->size);
+  enc->buffer = NULL;
+  enc->size = 0;
+  enc->capacity = 0;
   return result;
 }
 
@@ -280,29 +295,29 @@ bool fountain_encoder_partition_message(const uint8_t *message,
     return false;
   }
 
+  // Install each fragment directly into the array to avoid the extra
+  // malloc + memcpy that fragment_array_add would do on top of the
+  // local buffer. Only the last fragment may need tail zero-padding.
   size_t offset = 0;
   while (offset < message_len) {
-    // Allocate fragment filled with zeros
-    uint8_t *fragment = (uint8_t *)calloc(fragment_len, 1);
+    uint8_t *fragment = (uint8_t *)malloc(fragment_len);
     if (!fragment) {
       fragment_array_free(fragments);
       return false;
     }
 
-    // Copy message data to fragment
     size_t copy_len = message_len - offset;
     if (copy_len > fragment_len) {
       copy_len = fragment_len;
     }
     memcpy(fragment, message + offset, copy_len);
-
-    if (!fragment_array_add(fragments, fragment, fragment_len)) {
-      free(fragment);
-      fragment_array_free(fragments);
-      return false;
+    if (copy_len < fragment_len) {
+      memset(fragment + copy_len, 0, fragment_len - copy_len);
     }
 
-    free(fragment);
+    fragments->fragments[fragments->count] = fragment;
+    fragments->fragment_lens[fragments->count] = fragment_len;
+    fragments->count++;
     offset += fragment_len;
   }
 

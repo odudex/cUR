@@ -109,22 +109,12 @@ ur_encoder_t *ur_encoder_new(const char *type, const uint8_t *cbor_data,
   }
   strcpy(encoder->type, type);
 
-  // Copy CBOR data
-  encoder->cbor_data = (uint8_t *)malloc(cbor_len);
-  if (!encoder->cbor_data) {
-    free(encoder->type);
-    free(encoder);
-    return NULL;
-  }
-  memcpy(encoder->cbor_data, cbor_data, cbor_len);
-  encoder->cbor_len = cbor_len;
-
-  // Create fountain encoder
+  // fountain_encoder_new partitions the payload into its own fragment
+  // buffers; we don't need to keep a second copy in the ur_encoder.
   encoder->fountain_encoder = fountain_encoder_new(
       cbor_data, cbor_len, max_fragment_len, first_seq_num, min_fragment_len);
 
   if (!encoder->fountain_encoder) {
-    free(encoder->cbor_data);
     free(encoder->type);
     free(encoder);
     return NULL;
@@ -139,7 +129,6 @@ void ur_encoder_free(ur_encoder_t *encoder) {
   }
 
   free(encoder->type);
-  free(encoder->cbor_data);
   fountain_encoder_free(encoder->fountain_encoder);
   free(encoder);
 }
@@ -213,10 +202,13 @@ bool ur_encoder_next_part(ur_encoder_t *encoder, char **ur_part_out) {
     return false;
   }
 
-  // If single part, encode directly
+  // If single part, encode directly from the fountain encoder's only
+  // fragment. For single-part payloads, fragment_len == cbor_len (no
+  // tail padding), so we hand it straight to ur_encoder_encode_single.
   if (ur_encoder_is_single_part(encoder)) {
-    return ur_encoder_encode_single(encoder->type, encoder->cbor_data,
-                                    encoder->cbor_len, ur_part_out);
+    const fragment_array_t *frags = &encoder->fountain_encoder->fragments;
+    return ur_encoder_encode_single(encoder->type, frags->fragments[0],
+                                    frags->fragment_lens[0], ur_part_out);
   }
 
   // Get next fountain encoder part

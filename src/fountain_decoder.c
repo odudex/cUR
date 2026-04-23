@@ -588,16 +588,6 @@ typedef enum {
   MIXED_SOURCE_CROSS_REDUCTION
 } mixed_part_source_t;
 
-static int compare_fragment_info(const void *a, const void *b) {
-  const struct {
-    size_t index;
-    uint8_t *data;
-    size_t len;
-  } *fa = a, *fb = b;
-
-  return (fa->index > fb->index) - (fa->index < fb->index);
-}
-
 static bool is_simple_part(const decoder_part_t *const part) {
   return part && part->indexes.count == 1;
 }
@@ -754,150 +744,97 @@ static void reduce_mixed_by(fountain_decoder_t *const decoder,
 
   mixed_parts_hash_t *hash = decoder->mixed_parts_hash;
 
-  size_t max_entries = hash->count;
-  size_t alloc_size =
-      max_entries * (sizeof(hash_entry_t *) * 2 + sizeof(size_t));
-  uint8_t *buf = safe_malloc(alloc_size);
-  if (!buf)
-    return;
+  // Entries that reduce to a new bucket are unlinked and threaded onto
+  // rehash_list via entry->next, then reinserted after the walk. This
+  // avoids the per-call malloc for a temp pointer array.
+  hash_entry_t *rehash_list = NULL;
 
-  hash_entry_t **to_remove = (hash_entry_t **)buf;
-  hash_entry_t **to_rehash =
-      (hash_entry_t **)(buf + max_entries * sizeof(hash_entry_t *));
-  size_t *old_buckets =
-      (size_t *)(buf + max_entries * sizeof(hash_entry_t *) * 2);
-  size_t remove_count = 0;
-  size_t rehash_count = 0;
-
-  // First pass: reduce entries in-place, mark for removal or rehashing
   for (size_t i = 0; i < hash->capacity; i++) {
     hash_entry_t *entry = hash->buckets[i];
+    hash_entry_t *prev = NULL;
+
     while (entry) {
-      hash_entry_t *next =
-          entry->next; // Save next before potential modification
+      hash_entry_t *next = entry->next;
 
-      // Check if this entry can be reduced by the given part
-      if (part_indexes_is_strict_subset(&part->indexes, &entry->key)) {
-        // Reduce the entry in-place
-        part_indexes_t new_indexes = {0};
-        if (!part_indexes_difference(&entry->key, &part->indexes,
-                                     &new_indexes)) {
-          entry = next;
-          continue;
-        }
-
-        // XOR the data in-place
-        for (size_t j = 0; j < entry->value.data_len && j < part->data_len;
-             j++) {
-          entry->value.data[j] ^= part->data[j];
-        }
-
-        // Update the indexes (free old, assign new)
-        if (entry->key.indexes) {
-          free(entry->key.indexes);
-        }
-        entry->key = new_indexes;
-        entry->key_hash = hash_indexes(&entry->key);
-
-        free(entry->value.indexes.indexes);
-        entry->value.indexes = (part_indexes_t){0};
-        part_indexes_copy(&new_indexes, &entry->value.indexes);
-
-        if (is_simple_part(&entry->value)) {
-          // Mark for removal and queue
-#ifdef DEBUG_STATS
-          decoder->mixed_parts_useful++;
-#endif
-          size_t fragment_idx = get_part_index(&entry->value);
-          if (!part_indexes_contains(&decoder->received_part_indexes,
-                                     fragment_idx)) {
-            queue_enqueue(&decoder->queue, &entry->value);
-          }
-          to_remove[remove_count++] = entry;
-        } else {
-          // Use cached hash to check if bucket changed
-          size_t new_bucket = entry->key_hash % hash->capacity;
-          if (new_bucket != i) {
-            // Entry needs to move to a different bucket
-            to_rehash[rehash_count] = entry;
-            old_buckets[rehash_count] = i;
-            rehash_count++;
-          }
-        }
+      if (!part_indexes_is_strict_subset(&part->indexes, &entry->key)) {
+        prev = entry;
+        entry = next;
+        continue;
       }
 
+      part_indexes_t new_indexes = {0};
+      if (!part_indexes_difference(&entry->key, &part->indexes, &new_indexes)) {
+        prev = entry;
+        entry = next;
+        continue;
+      }
+
+      // XOR the data in-place.
+      for (size_t j = 0; j < entry->value.data_len && j < part->data_len; j++) {
+        entry->value.data[j] ^= part->data[j];
+      }
+
+      free(entry->key.indexes);
+      entry->key = new_indexes;
+      entry->key_hash = hash_indexes(&entry->key);
+
+      free(entry->value.indexes.indexes);
+      entry->value.indexes = (part_indexes_t){0};
+      part_indexes_copy(&new_indexes, &entry->value.indexes);
+
+      if (is_simple_part(&entry->value)) {
+#ifdef DEBUG_STATS
+        decoder->mixed_parts_useful++;
+#endif
+        size_t fragment_idx = get_part_index(&entry->value);
+        if (!part_indexes_contains(&decoder->received_part_indexes,
+                                   fragment_idx)) {
+          queue_enqueue(&decoder->queue, &entry->value);
+        }
+
+        // Unlink from this bucket and free.
+        if (prev) {
+          prev->next = next;
+        } else {
+          hash->buckets[i] = next;
+        }
+        decoder_part_free(&entry->value);
+        free(entry->key.indexes);
+        free(entry);
+        hash->count--;
+        entry = next;
+        continue;
+      }
+
+      size_t new_bucket = entry->key_hash % hash->capacity;
+      if (new_bucket != i) {
+        // Unlink and stash for reinsertion below.
+        if (prev) {
+          prev->next = next;
+        } else {
+          hash->buckets[i] = next;
+        }
+        entry->next = rehash_list;
+        rehash_list = entry;
+        entry = next;
+        continue;
+      }
+
+      prev = entry;
       entry = next;
     }
   }
 
-  // Second pass: remove entries that became simple parts
-  for (size_t i = 0; i < remove_count; i++) {
-    hash_entry_t *entry = to_remove[i];
-    size_t bucket = entry->key_hash % hash->capacity;
-
-    // Find and unlink from bucket chain
-    hash_entry_t *curr = hash->buckets[bucket];
-    hash_entry_t *prev = NULL;
-    while (curr) {
-      if (curr == entry) {
-        if (prev) {
-          prev->next = curr->next;
-        } else {
-          hash->buckets[bucket] = curr->next;
-        }
-        // Free the entry
-        decoder_part_free(&entry->value);
-        if (entry->key.indexes) {
-          free(entry->key.indexes);
-        }
-        free(entry);
-        hash->count--;
-        break;
-      }
-      prev = curr;
-      curr = curr->next;
-    }
+  // Reinsert stashed entries at the head of their new bucket. A revisit
+  // during this call isn't possible — the outer bucket walk has already
+  // finished by the time we get here.
+  while (rehash_list) {
+    hash_entry_t *e = rehash_list;
+    rehash_list = rehash_list->next;
+    size_t b = e->key_hash % hash->capacity;
+    e->next = hash->buckets[b];
+    hash->buckets[b] = e;
   }
-
-  // Third pass: rehash entries that changed buckets
-  for (size_t i = 0; i < rehash_count; i++) {
-    hash_entry_t *entry = to_rehash[i];
-    size_t old_bucket = old_buckets[i];
-    size_t new_bucket = entry->key_hash % hash->capacity;
-
-    // Skip if entry was already removed (became simple part)
-    bool was_removed = false;
-    for (size_t j = 0; j < remove_count; j++) {
-      if (to_remove[j] == entry) {
-        was_removed = true;
-        break;
-      }
-    }
-    if (was_removed)
-      continue;
-
-    // Unlink from old bucket
-    hash_entry_t *curr = hash->buckets[old_bucket];
-    hash_entry_t *prev = NULL;
-    while (curr) {
-      if (curr == entry) {
-        if (prev) {
-          prev->next = curr->next;
-        } else {
-          hash->buckets[old_bucket] = curr->next;
-        }
-        break;
-      }
-      prev = curr;
-      curr = curr->next;
-    }
-
-    // Insert into new bucket
-    entry->next = hash->buckets[new_bucket];
-    hash->buckets[new_bucket] = entry;
-  }
-
-  free(buf);
 
 #ifdef DEBUG_STATS
   if (hash->count > decoder->maximum_mixed_parts) {
@@ -1124,57 +1061,49 @@ static void process_simple_part(fountain_decoder_t *const decoder,
                          decoder->expected_part_indexes)) {
 
     size_t part_count = decoder->simple_parts.count;
-    uint8_t **fragments = safe_malloc(part_count * sizeof(uint8_t *));
-    size_t *fragment_lens = safe_malloc(part_count * sizeof(size_t));
 
-    if (!fragments || !fragment_lens) {
-      if (fragments)
-        free(fragments);
-      if (fragment_lens)
-        free(fragment_lens);
-      return;
+    // Sort simple_parts by fragment index in place (paired insertion
+    // sort across the three parallel arrays). part_count <= seq_len,
+    // which is small in practice, so O(n²) is fine and saves the three
+    // temporary arrays the earlier qsort-based path allocated.
+    for (size_t i = 1; i < part_count; i++) {
+      size_t key = decoder->simple_parts.keys[i];
+      decoder_part_t val = decoder->simple_parts.values[i];
+      size_t val_len = decoder->simple_parts.value_lens[i];
+      size_t j = i;
+      while (j > 0 && decoder->simple_parts.keys[j - 1] > key) {
+        decoder->simple_parts.keys[j] = decoder->simple_parts.keys[j - 1];
+        decoder->simple_parts.values[j] = decoder->simple_parts.values[j - 1];
+        decoder->simple_parts.value_lens[j] =
+            decoder->simple_parts.value_lens[j - 1];
+        j--;
+      }
+      decoder->simple_parts.keys[j] = key;
+      decoder->simple_parts.values[j] = val;
+      decoder->simple_parts.value_lens[j] = val_len;
     }
-
-    typedef struct {
-      size_t index;
-      uint8_t *data;
-      size_t len;
-    } fragment_info_t;
-
-    fragment_info_t *sorted_fragments =
-        safe_malloc(part_count * sizeof(fragment_info_t));
-    if (!sorted_fragments) {
-      free(fragments);
-      free(fragment_lens);
-      return;
-    }
-
-    for (size_t i = 0; i < part_count; i++) {
-      sorted_fragments[i].index = decoder->simple_parts.keys[i];
-      sorted_fragments[i].data = decoder->simple_parts.values[i].data;
-      sorted_fragments[i].len = decoder->simple_parts.values[i].data_len;
-    }
-
-    // Sort fragments by index using qsort
-    qsort(sorted_fragments, part_count, sizeof(fragment_info_t),
-          compare_fragment_info);
-
-    for (size_t i = 0; i < part_count; i++) {
-      fragments[i] = sorted_fragments[i].data;
-      fragment_lens[i] = sorted_fragments[i].len;
-    }
-
-    free(sorted_fragments);
 
     uint8_t *message = safe_malloc_uninit(decoder->expected_message_len);
     if (!message) {
-      free(fragments);
-      free(fragment_lens);
       return;
     }
 
-    if (join_fragments(fragments, fragment_lens, part_count,
-                       decoder->expected_message_len, message)) {
+    // Inline join: same semantics as fountain_utils' join_fragments but
+    // reads directly from the sorted simple_parts without a pointer array.
+    {
+      size_t offset = 0;
+      for (size_t i = 0;
+           i < part_count && offset < decoder->expected_message_len; i++) {
+        decoder_part_t *p = &decoder->simple_parts.values[i];
+        if (!p->data || p->data_len == 0)
+          continue;
+        size_t copy_len = p->data_len;
+        if (offset + copy_len > decoder->expected_message_len)
+          copy_len = decoder->expected_message_len - offset;
+        memcpy(message + offset, p->data, copy_len);
+        offset += copy_len;
+      }
+
       uint32_t checksum =
           crc32_calculate(message, decoder->expected_message_len);
 
@@ -1214,8 +1143,6 @@ static void process_simple_part(fountain_decoder_t *const decoder,
 
     if (message)
       free(message);
-    free(fragments);
-    free(fragment_lens);
   }
 }
 
@@ -1418,6 +1345,14 @@ uint8_t *fountain_decoder_result_message(fountain_decoder_t *decoder) {
   if (!decoder || !decoder->result)
     return NULL;
   return decoder->result->data;
+}
+
+uint8_t *fountain_decoder_take_result_message(fountain_decoder_t *decoder) {
+  if (!decoder || !decoder->result)
+    return NULL;
+  uint8_t *data = decoder->result->data;
+  decoder->result->data = NULL;
+  return data;
 }
 
 size_t fountain_decoder_result_message_len(fountain_decoder_t *decoder) {

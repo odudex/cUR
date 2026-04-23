@@ -165,8 +165,24 @@ uint8_t *cbor_encode(cbor_value_t *value, size_t *out_len) {
     return NULL;
   }
 
-  uint8_t *data = urtypes_cbor_encoder_get_data(encoder, out_len);
+  // Steal the buffer's storage instead of copying it; the encoder is
+  // freed immediately after, so nothing else can read from it.
+  byte_buffer_t *buf = encoder->buffer;
+  uint8_t *data = buf->data;
+  *out_len = buf->len;
+  buf->data = NULL;
+  buf->len = 0;
+  buf->capacity = 0;
   urtypes_cbor_encoder_free(encoder);
 
-  return data;
+  if (!data || *out_len == 0) {
+    free(data);
+    *out_len = 0;
+    return NULL;
+  }
+
+  // Shrink-to-fit: the buffer doubles on grow, so capacity can be up to
+  // 2× the encoded size. Release the slack for embedded heaps.
+  uint8_t *shrunk = safe_realloc(data, *out_len);
+  return shrunk ? shrunk : data;
 }

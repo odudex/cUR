@@ -339,18 +339,21 @@ bool ur_decoder_receive_part(ur_decoder_t *decoder, const char *part_str) {
     goto cleanup;
   }
 
-  // Allocate fragment data that the encoder part will take ownership of
-  uint8_t *fragment_data = safe_malloc(fragment_len);
-  if (!fragment_data) {
-    decoder->last_error = UR_DECODER_ERROR_MEMORY;
-    goto cleanup;
+  // Reuse the bytewords-decoded cbor_data allocation for the fragment
+  // instead of mallocing a fresh buffer and copying. The fragment is a
+  // suffix of cbor_data; shift it to the front and shrink the block.
+  size_t fragment_offset = (size_t)(fragment_ptr - cbor_data);
+  if (fragment_offset > 0) {
+    memmove(cbor_data, cbor_data + fragment_offset, fragment_len);
   }
-  memcpy(fragment_data, fragment_ptr, fragment_len);
-  safe_free(cbor_data);
+  uint8_t *shrunk = safe_realloc(cbor_data, fragment_len);
+  uint8_t *fragment_data = shrunk ? shrunk : cbor_data;
+  cbor_data = NULL; // ownership transferred to fragment_data
 
   fountain_encoder_part_t *part = create_fountain_part_from_cbor(
       fragment_data, fragment_len, seq_num, seq_len, true);
   if (!part) {
+    free(fragment_data);
     decoder->last_error = UR_DECODER_ERROR_MEMORY;
     goto cleanup;
   }
@@ -372,16 +375,17 @@ bool ur_decoder_receive_part(ur_decoder_t *decoder, const char *part_str) {
         decoder->result->type = safe_strdup(type);
         size_t result_len =
             fountain_decoder_result_message_len(decoder->fountain_decoder);
+        // Steal the reassembled message from the fountain decoder rather
+        // than malloc+memcpy a private copy.
         uint8_t *result_data =
-            fountain_decoder_result_message(decoder->fountain_decoder);
+            fountain_decoder_take_result_message(decoder->fountain_decoder);
 
         if (result_data && result_len > 0) {
-          decoder->result->cbor_data = safe_malloc(result_len);
-          if (decoder->result->cbor_data) {
-            memcpy(decoder->result->cbor_data, result_data, result_len);
-            decoder->result->cbor_len = result_len;
-            decoder->is_complete_flag = true;
-          }
+          decoder->result->cbor_data = result_data;
+          decoder->result->cbor_len = result_len;
+          decoder->is_complete_flag = true;
+        } else {
+          free(result_data);
         }
       }
     } else {

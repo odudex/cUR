@@ -20,25 +20,27 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Minimal bytewords table: first+last character pairs for all 256 words
+// Minimal bytewords table: first+last character pairs for all 256 words.
+// Stored uppercase so bytewords_encode can emit directly without a per-byte
+// toupper() call. (Decode is unaffected — it reads only lookup_table below.)
 // For byte i: first_char = bytewords_minimal[i*2], last_char =
 // bytewords_minimal[i*2+1]
-static const char bytewords_minimal[] = "aeadaoaxaaahamatayasbkbdbnbtbabs"
-                                        "bebybgbwbbbzcmchcscfcycwcecackct"
-                                        "cxclcpcndkdadsdidedtdrdndwdpdmdl"
-                                        "dyeheyeoeeecenemetesftfrfnfsfmfh"
-                                        "fzfpfwfxfyfefgflfdgagegrgsgtglgw"
-                                        "gdgygmgughgohfhghdhkhthphhhlhyhe"
-                                        "hnhsidiaieihiyioisinimjejzjnjtjl"
-                                        "jojsjpjkjykpkoktkskkknkgkekikblb"
-                                        "lalylflslrlplnltloldlelulklgmnmy"
-                                        "mhmemomumwmdmtmsmknlnyndnsntnnne"
-                                        "nboyoeotoxonolospdptpkpypspmplpe"
-                                        "pfpaprqdqzrerprlrorhrdrkrfryrnrs"
-                                        "rtsesasrssskswstspsosgsbsfsntotk"
-                                        "titttdtetytltbtstptatnuyuoutueur"
-                                        "vtvyvovlvevwvavdvswlwdwmwpwewyws"
-                                        "wtwnwzwfwkykynylyaytzszoztzczezm";
+static const char bytewords_minimal[] = "AEADAOAXAAAHAMATAYASBKBDBNBTBABS"
+                                        "BEBYBGBWBBBZCMCHCSCFCYCWCECACKCT"
+                                        "CXCLCPCNDKDADSDIDEDTDRDNDWDPDMDL"
+                                        "DYEHEYEOEEECENEMETESFTFRFNFSFMFH"
+                                        "FZFPFWFXFYFEFGFLFDGAGEGRGSGTGLGW"
+                                        "GDGYGMGUGHGOHFHGHDHKHTHPHHHLHYHE"
+                                        "HNHSIDIAIEIHIYIOISINIMJEJZJNJTJL"
+                                        "JOJSJPJKJYKPKOKTKSKKKNKGKEKIKBLB"
+                                        "LALYLFLSLRLPLNLTLOLDLELULKLGMNMY"
+                                        "MHMEMOMUMWMDMTMSMKNLNYNDNSNTNNNE"
+                                        "NBOYOEOTOXONOLOSPDPTPKPYPSPMPLPE"
+                                        "PFPAPRQDQZRERPRLRORHRDRKRFRYRNRS"
+                                        "RTSESASRSSSKSWSTSPSOSGSBSFSNTOTK"
+                                        "TITTTDTETYTLTBTSTPTATNUYUOUTUEUR"
+                                        "VTVYVOVLVEVWVAVDVSWLWDWMWPWEWYWS"
+                                        "WTWNWZWFWKYKYNYLYAYTZSZOZTZCZEZM";
 
 // Optimized lookup table for fast word-to-byte mapping (2-char minimal style)
 // Uses first and last character positions to create 2D hash
@@ -96,31 +98,28 @@ bool bytewords_encode(const uint8_t *data, size_t data_len, char **encoded) {
 
   uint32_t crc = crc32_calculate(data, data_len);
   size_t total_len = data_len + 4;
-  uint8_t *buf = safe_malloc(total_len);
-  if (!buf)
-    return false;
 
-  memcpy(buf, data, data_len);
-  buf[data_len] = (crc >> 24) & 0xFF;
-  buf[data_len + 1] = (crc >> 16) & 0xFF;
-  buf[data_len + 2] = (crc >> 8) & 0xFF;
-  buf[data_len + 3] = crc & 0xFF;
-
-  // MINIMAL style: 2 chars per byte (first + last character of word)
-  *encoded = safe_malloc(total_len * 2 + 1);
-  if (!*encoded) {
-    free(buf);
+  // MINIMAL style: 2 chars per byte (first + last character of word).
+  // Written byte-by-byte below, so skip the zero-init.
+  *encoded = safe_malloc_uninit(total_len * 2 + 1);
+  if (!*encoded)
     return false;
-  }
 
   char *pos = *encoded;
-  for (size_t i = 0; i < total_len; i++) {
-    *pos++ = toupper((unsigned char)bytewords_minimal[buf[i] * 2]);
-    *pos++ = toupper((unsigned char)bytewords_minimal[buf[i] * 2 + 1]);
+  for (size_t i = 0; i < data_len; i++) {
+    const char *word = &bytewords_minimal[data[i] * 2];
+    *pos++ = word[0];
+    *pos++ = word[1];
+  }
+  const uint8_t crc_bytes[4] = {(uint8_t)(crc >> 24), (uint8_t)(crc >> 16),
+                                (uint8_t)(crc >> 8), (uint8_t)crc};
+  for (size_t i = 0; i < 4; i++) {
+    const char *word = &bytewords_minimal[crc_bytes[i] * 2];
+    *pos++ = word[0];
+    *pos++ = word[1];
   }
   *pos = '\0';
 
-  free(buf);
   return true;
 }
 
@@ -141,7 +140,7 @@ bool bytewords_decode_raw(const char *encoded, uint8_t **decoded,
   }
 
   size_t num_bytes = encoded_len / 2;
-  uint8_t *buf = safe_malloc(num_bytes);
+  uint8_t *buf = safe_malloc_uninit(num_bytes);
   if (!buf)
     return false;
 

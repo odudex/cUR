@@ -13,11 +13,11 @@
 
 typedef struct ur_encoder ur_encoder_t;
 
-// UR encoder structure
+// UR encoder structure. The CBOR payload lives inside fountain_encoder
+// (partitioned into fragments); for single-part encodes we read from
+// fragments[0] directly instead of keeping a second copy.
 typedef struct ur_encoder {
   char *type;
-  uint8_t *cbor_data;
-  size_t cbor_len;
   fountain_encoder_t *fountain_encoder;
 } ur_encoder_t;
 

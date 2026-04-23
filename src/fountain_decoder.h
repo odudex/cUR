@@ -91,4 +91,14 @@ uint8_t *fountain_decoder_result_message(fountain_decoder_t *decoder);
  */
 size_t fountain_decoder_result_message_len(fountain_decoder_t *decoder);
 
+/**
+ * Transfer ownership of the result message to the caller. The decoder
+ * drops its reference (internal result->data set to NULL) so a later
+ * fountain_decoder_free does not double-free. Returns NULL if no result
+ * is available.
+ * @param decoder Pointer to fountain decoder
+ * @return Heap pointer the caller must free, or NULL
+ */
+uint8_t *fountain_decoder_take_result_message(fountain_decoder_t *decoder);
+
 #endif // FOUNTAIN_DECODER_H

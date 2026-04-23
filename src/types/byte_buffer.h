@@ -18,9 +18,14 @@ byte_buffer_t *byte_buffer_new(void);
 byte_buffer_t *byte_buffer_new_with_capacity(size_t capacity);
 void byte_buffer_free(byte_buffer_t *buf);
 bool byte_buffer_append(byte_buffer_t *buf, const uint8_t *data, size_t len);
-bool byte_buffer_append_byte(byte_buffer_t *buf, uint8_t byte);
 uint8_t *byte_buffer_get_data(byte_buffer_t *buf);
 size_t byte_buffer_get_len(byte_buffer_t *buf);
+
+// Inlined here so toolchains that don't enable LTO (notably the K210
+// MaixPy build) don't pay the call overhead on the CBOR hot path.
+static inline bool byte_buffer_append_byte(byte_buffer_t *buf, uint8_t byte) {
+  return byte_buffer_append(buf, &byte, 1);
+}
 
 // Base58 encoding utilities
 char *base58_encode(const uint8_t *data, size_t len);

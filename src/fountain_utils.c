@@ -239,40 +239,32 @@ static bool choose_fragments_internal(uint32_t seq_num, size_t seq_len,
 
   size_t degree = choose_degree(seq_len, &rng, cached_sampler);
 
-  size_t *shuffled_indexes = safe_malloc(seq_len * sizeof(size_t));
-  if (!shuffled_indexes)
-    return false;
-
   size_t *remaining_indexes = safe_malloc(seq_len * sizeof(size_t));
-  if (!remaining_indexes) {
-    free(shuffled_indexes);
+  if (!remaining_indexes)
     return false;
-  }
 
   for (size_t i = 0; i < seq_len; i++) {
     remaining_indexes[i] = i;
   }
 
+  // Only the first `degree` drawn values matter. Stop after `degree`
+  // draws instead of shuffling the whole sequence. The shift-based
+  // removal is preserved to keep the PRNG call pattern identical to the
+  // Python reference implementation.
   size_t remaining_count = seq_len;
-  for (size_t i = 0; i < seq_len && remaining_count > 0; i++) {
+  size_t draws = (degree < seq_len) ? degree : seq_len;
+  for (size_t i = 0; i < draws && remaining_count > 0; i++) {
     uint32_t idx = prng_next_int(&rng, 0, remaining_count - 1);
-    shuffled_indexes[i] = remaining_indexes[idx];
-
+    if (!part_indexes_add(result, remaining_indexes[idx])) {
+      free(remaining_indexes);
+      return false;
+    }
     for (size_t j = idx; j < remaining_count - 1; j++) {
       remaining_indexes[j] = remaining_indexes[j + 1];
     }
     remaining_count--;
   }
 
-  for (size_t i = 0; i < degree && i < seq_len; i++) {
-    if (!part_indexes_add(result, shuffled_indexes[i])) {
-      free(shuffled_indexes);
-      free(remaining_indexes);
-      return false;
-    }
-  }
-
-  free(shuffled_indexes);
   free(remaining_indexes);
   return true;
 }

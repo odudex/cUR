@@ -79,10 +79,6 @@ bool byte_buffer_append(byte_buffer_t *buf, const uint8_t *data, size_t len) {
   return true;
 }
 
-bool byte_buffer_append_byte(byte_buffer_t *buf, uint8_t byte) {
-  return byte_buffer_append(buf, &byte, 1);
-}
-
 uint8_t *byte_buffer_get_data(byte_buffer_t *buf) {
   if (!buf)
     return NULL;
@@ -109,12 +105,13 @@ char *base58_encode(const uint8_t *data, size_t len) {
     leading_zeros++;
   }
 
-  // Allocate enough space (log(256)/log(58) ≈ 1.37)
+  // Allocate enough space (log(256)/log(58) ≈ 1.37).
+  // safe_malloc already zero-inits, which the carry loop relies on
+  // for the initial read of the high-order slot.
   size_t max_size = len * 138 / 100 + 1;
   uint8_t *encoded = safe_malloc(max_size);
   if (!encoded)
     return NULL;
-  memset(encoded, 0, max_size);
 
   // Process the bytes
   size_t output_len = 0;
