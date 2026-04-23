@@ -18,6 +18,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Hard caps on attacker-controlled fragment header fields. The first
+// fragment's seq_len drives O(seq_len) allocations inside the fountain
+// decoder (degree sampler, hash table, part-index bitmap); message_len
+// drives the final reassembly buffer. Reject anything larger than what a
+// real Bitcoin UR would ever need, to keep a malicious QR from exhausting
+// embedded heap.
+#define UR_MAX_SEQ_LEN 1024u
+#define UR_MAX_MESSAGE_LEN (256u * 1024u)
+
 static fountain_encoder_part_t *
 create_fountain_part_from_cbor(uint8_t *cbor_data, size_t cbor_len,
                                uint32_t seq_num, size_t seq_len,
@@ -276,6 +285,10 @@ bool ur_decoder_receive_part(ur_decoder_t *decoder, const char *part_str) {
     decoder->last_error = UR_DECODER_ERROR_INVALID_SEQUENCE_COMPONENT;
     goto cleanup;
   }
+  if (seq_len == 0 || seq_len > UR_MAX_SEQ_LEN) {
+    decoder->last_error = UR_DECODER_ERROR_INVALID_SEQUENCE_COMPONENT;
+    goto cleanup;
+  }
 
   size_t cbor_len;
   if (!bytewords_decode_raw(components[1], &cbor_data, &cbor_len)) {
@@ -308,6 +321,14 @@ bool ur_decoder_receive_part(ur_decoder_t *decoder, const char *part_str) {
       decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
       goto cleanup;
     }
+  }
+
+  // Fragment body must agree with URI path (spec requires it) and fall
+  // within the sanity caps.
+  if (cbor_seq_num != seq_num || cbor_seq_len != seq_len ||
+      cbor_message_len == 0 || cbor_message_len > UR_MAX_MESSAGE_LEN) {
+    decoder->last_error = UR_DECODER_ERROR_INVALID_FRAGMENT;
+    goto cleanup;
   }
 
   // Parse CBOR byte string (fragment data)

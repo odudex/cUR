@@ -1,7 +1,13 @@
 #include "byte_buffer.h"
 #include "../sha256/sha256_compat.h"
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+// Upper bound on the grown capacity. Large enough for any legitimate UR
+// payload, small enough to keep a malicious length from exhausting heap
+// or wrapping size_t.
+#define BYTE_BUFFER_MAX_CAPACITY (1024u * 1024u)
 
 // Byte buffer utilities
 byte_buffer_t *byte_buffer_new(void) {
@@ -41,9 +47,21 @@ bool byte_buffer_append(byte_buffer_t *buf, const uint8_t *data, size_t len) {
   if (!data)
     return false;
 
-  if (buf->len + len > buf->capacity) {
-    size_t new_capacity = buf->capacity;
-    while (new_capacity < buf->len + len) {
+  // Reject oversize appends up front: this also makes the required_total
+  // computation below safe from size_t wraparound.
+  if (len > BYTE_BUFFER_MAX_CAPACITY - buf->len)
+    return false;
+  size_t required_total = buf->len + len;
+
+  if (required_total > buf->capacity) {
+    size_t new_capacity = buf->capacity == 0 ? 16 : buf->capacity;
+    while (new_capacity < required_total) {
+      // Avoid the *= 2 overflow: stop doubling past the hard cap and
+      // bump straight to required_total (still ≤ BYTE_BUFFER_MAX_CAPACITY).
+      if (new_capacity > BYTE_BUFFER_MAX_CAPACITY / 2) {
+        new_capacity = required_total;
+        break;
+      }
       new_capacity *= 2;
     }
 
@@ -56,7 +74,7 @@ bool byte_buffer_append(byte_buffer_t *buf, const uint8_t *data, size_t len) {
   }
 
   memcpy(buf->data + buf->len, data, len);
-  buf->len += len;
+  buf->len = required_total;
 
   return true;
 }

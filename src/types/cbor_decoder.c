@@ -11,6 +11,17 @@
 #define CBOR_MAJOR_TAG 6
 #define CBOR_MAJOR_SIMPLE 7
 
+// Hard caps on attacker-influenced values. UR payloads are constrained by
+// QR capacity; these limits are well above any legitimate Bitcoin UR type
+// but small enough to keep a malicious fragment from exhausting embedded
+// heap or stack.
+#define CBOR_MAX_ITEM_LEN (256u * 1024u) // bytes/string length
+#define CBOR_MAX_ITEMS 1024u             // array/map element count
+#define CBOR_MAX_DEPTH 16                // nesting depth
+
+static cbor_value_t *decode_value(urtypes_cbor_decoder_t *decoder,
+                                  unsigned depth);
+
 static bool read_byte(urtypes_cbor_decoder_t *decoder, uint8_t *out) {
   if (decoder->offset >= decoder->len)
     return false;
@@ -20,7 +31,8 @@ static bool read_byte(urtypes_cbor_decoder_t *decoder, uint8_t *out) {
 
 static bool read_bytes(urtypes_cbor_decoder_t *decoder, uint8_t *out,
                        size_t count) {
-  if (decoder->offset + count > decoder->len)
+  // Compare remaining-to-read instead of offset+count so the sum can't wrap.
+  if (count > decoder->len - decoder->offset)
     return false;
   memcpy(out, decoder->data + decoder->offset, count);
   decoder->offset += count;
@@ -55,8 +67,6 @@ static bool read_argument(urtypes_cbor_decoder_t *decoder, uint8_t additional,
   return false;
 }
 
-static cbor_value_t *decode_value(urtypes_cbor_decoder_t *decoder);
-
 static cbor_value_t *decode_unsigned_int(urtypes_cbor_decoder_t *decoder,
                                          uint8_t additional) {
   uint64_t value;
@@ -70,17 +80,20 @@ static cbor_value_t *decode_bytes(urtypes_cbor_decoder_t *decoder,
   uint64_t len;
   if (!read_argument(decoder, additional, &len))
     return NULL;
+  if (len > CBOR_MAX_ITEM_LEN)
+    return NULL;
 
-  uint8_t *data = safe_malloc((size_t)len);
+  size_t slen = (size_t)len;
+  uint8_t *data = safe_malloc(slen);
   if (!data)
     return NULL;
 
-  if (!read_bytes(decoder, data, (size_t)len)) {
+  if (!read_bytes(decoder, data, slen)) {
     free(data);
     return NULL;
   }
 
-  cbor_value_t *value = cbor_value_new_bytes(data, (size_t)len);
+  cbor_value_t *value = cbor_value_new_bytes(data, slen);
   free(data);
   return value;
 }
@@ -90,26 +103,31 @@ static cbor_value_t *decode_string(urtypes_cbor_decoder_t *decoder,
   uint64_t len;
   if (!read_argument(decoder, additional, &len))
     return NULL;
+  if (len > CBOR_MAX_ITEM_LEN)
+    return NULL;
 
-  char *str = safe_malloc((size_t)len + 1);
+  size_t slen = (size_t)len;
+  char *str = safe_malloc(slen + 1);
   if (!str)
     return NULL;
 
-  if (!read_bytes(decoder, (uint8_t *)str, (size_t)len)) {
+  if (!read_bytes(decoder, (uint8_t *)str, slen)) {
     free(str);
     return NULL;
   }
 
-  str[len] = '\0';
+  str[slen] = '\0';
   cbor_value_t *value = cbor_value_new_string(str);
   free(str);
   return value;
 }
 
 static cbor_value_t *decode_array(urtypes_cbor_decoder_t *decoder,
-                                  uint8_t additional) {
+                                  uint8_t additional, unsigned depth) {
   uint64_t count;
   if (!read_argument(decoder, additional, &count))
+    return NULL;
+  if (count > CBOR_MAX_ITEMS)
     return NULL;
 
   cbor_value_t *array = cbor_value_new_array();
@@ -117,7 +135,7 @@ static cbor_value_t *decode_array(urtypes_cbor_decoder_t *decoder,
     return NULL;
 
   for (size_t i = 0; i < (size_t)count; i++) {
-    cbor_value_t *item = decode_value(decoder);
+    cbor_value_t *item = decode_value(decoder, depth + 1);
     if (!item) {
       cbor_value_free(array);
       return NULL;
@@ -134,9 +152,11 @@ static cbor_value_t *decode_array(urtypes_cbor_decoder_t *decoder,
 }
 
 static cbor_value_t *decode_map(urtypes_cbor_decoder_t *decoder,
-                                uint8_t additional) {
+                                uint8_t additional, unsigned depth) {
   uint64_t count;
   if (!read_argument(decoder, additional, &count))
+    return NULL;
+  if (count > CBOR_MAX_ITEMS)
     return NULL;
 
   cbor_value_t *map = cbor_value_new_map();
@@ -144,13 +164,13 @@ static cbor_value_t *decode_map(urtypes_cbor_decoder_t *decoder,
     return NULL;
 
   for (size_t i = 0; i < (size_t)count; i++) {
-    cbor_value_t *key = decode_value(decoder);
+    cbor_value_t *key = decode_value(decoder, depth + 1);
     if (!key) {
       cbor_value_free(map);
       return NULL;
     }
 
-    cbor_value_t *value = decode_value(decoder);
+    cbor_value_t *value = decode_value(decoder, depth + 1);
     if (!value) {
       cbor_value_free(key);
       cbor_value_free(map);
@@ -169,12 +189,12 @@ static cbor_value_t *decode_map(urtypes_cbor_decoder_t *decoder,
 }
 
 static cbor_value_t *decode_tag(urtypes_cbor_decoder_t *decoder,
-                                uint8_t additional) {
+                                uint8_t additional, unsigned depth) {
   uint64_t tag;
   if (!read_argument(decoder, additional, &tag))
     return NULL;
 
-  cbor_value_t *content = decode_value(decoder);
+  cbor_value_t *content = decode_value(decoder, depth + 1);
   if (!content)
     return NULL;
 
@@ -191,7 +211,11 @@ static cbor_value_t *decode_simple(uint8_t additional) {
   return NULL;
 }
 
-static cbor_value_t *decode_value(urtypes_cbor_decoder_t *decoder) {
+static cbor_value_t *decode_value(urtypes_cbor_decoder_t *decoder,
+                                  unsigned depth) {
+  if (depth > CBOR_MAX_DEPTH)
+    return NULL;
+
   uint8_t initial_byte;
   if (!read_byte(decoder, &initial_byte))
     return NULL;
@@ -207,11 +231,11 @@ static cbor_value_t *decode_value(urtypes_cbor_decoder_t *decoder) {
   case CBOR_MAJOR_STRING:
     return decode_string(decoder, additional);
   case CBOR_MAJOR_ARRAY:
-    return decode_array(decoder, additional);
+    return decode_array(decoder, additional, depth);
   case CBOR_MAJOR_MAP:
-    return decode_map(decoder, additional);
+    return decode_map(decoder, additional, depth);
   case CBOR_MAJOR_TAG:
-    return decode_tag(decoder, additional);
+    return decode_tag(decoder, additional, depth);
   case CBOR_MAJOR_SIMPLE:
     return decode_simple(additional);
   default:
@@ -246,7 +270,7 @@ void urtypes_cbor_decoder_free(urtypes_cbor_decoder_t *decoder) {
 cbor_value_t *urtypes_cbor_decoder_decode(urtypes_cbor_decoder_t *decoder) {
   if (!decoder)
     return NULL;
-  return decode_value(decoder);
+  return decode_value(decoder, 0);
 }
 
 // Convenience function to decode bytes to a value
