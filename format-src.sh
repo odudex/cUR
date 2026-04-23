@@ -1,23 +1,21 @@
 #!/bin/bash
-
-# Script to run clang-format on all .c and .h files in the main folder
+# Format all C/H files under src/ and tests/, plus the uUR.c MicroPython
+# wrapper at the repo root. Uses the rules from .clang-format.
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MAIN_DIR="$SCRIPT_DIR/src"
+cd "$SCRIPT_DIR"
 
-if [ ! -d "$MAIN_DIR" ]; then
-    echo "Error: src directory not found at $MAIN_DIR"
-    exit 1
+echo "Running clang-format..."
+
+find src tests -type f \( -name '*.c' -o -name '*.h' \) \
+    -not -path '*/build/*' -not -path '*/obj/*' \
+    -exec clang-format -i {} +
+
+# MicroPython wrapper lives at the repo root.
+if [ -f uUR.c ]; then
+    clang-format -i uUR.c
 fi
 
-echo "Running clang-format on all .c and .h files in main folder..."
-
-# Find and format all .c files
-find "$MAIN_DIR" -type f -name "*.c" -not -path "*/build/*" -exec clang-format -i {} \;
-
-# Find and format all .h files
-find "$MAIN_DIR" -type f -name "*.h" -not -path "*/build/*" -exec clang-format -i {} \;
-
-echo "Formatting complete!"
+echo "Formatting complete."
