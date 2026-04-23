@@ -28,6 +28,41 @@ typedef struct {
 static const mp_obj_type_t mp_type_ur_decoder;
 static const mp_obj_type_t mp_type_ur_encoder;
 
+// Shared UR decoder error -> MicroPython exception mapping. Called on
+// any path that produces an error; mp_raise_msg does not return so the
+// helper is effectively NORETURN.
+static void raise_ur_decoder_error(ur_decoder_error_t error) {
+  switch (error) {
+  case UR_DECODER_ERROR_INVALID_SCHEME:
+    mp_raise_msg(&mp_type_ValueError, "Invalid UR scheme");
+    break;
+  case UR_DECODER_ERROR_INVALID_TYPE:
+    mp_raise_msg(&mp_type_ValueError, "Invalid UR type");
+    break;
+  case UR_DECODER_ERROR_INVALID_PATH_LENGTH:
+    mp_raise_msg(&mp_type_ValueError, "Invalid UR path length");
+    break;
+  case UR_DECODER_ERROR_INVALID_SEQUENCE_COMPONENT:
+    mp_raise_msg(&mp_type_ValueError, "Invalid sequence component");
+    break;
+  case UR_DECODER_ERROR_INVALID_FRAGMENT:
+    mp_raise_msg(&mp_type_ValueError, "Invalid fragment");
+    break;
+  case UR_DECODER_ERROR_INVALID_PART:
+    mp_raise_msg(&mp_type_ValueError, "Invalid part");
+    break;
+  case UR_DECODER_ERROR_INVALID_CHECKSUM:
+    mp_raise_msg(&mp_type_ValueError, "Invalid checksum");
+    break;
+  case UR_DECODER_ERROR_MEMORY:
+    mp_raise_msg(&mp_type_RuntimeError, "Memory error");
+    break;
+  default:
+    mp_raise_msg(&mp_type_RuntimeError, "URDecoder error");
+    break;
+  }
+}
+
 // UR class structure for returning results (matches Python UR interface)
 typedef struct {
   mp_obj_base_t base;
@@ -172,27 +207,7 @@ static mp_obj_t ur_decoder_receive_part_py(mp_obj_t self_in,
   bool result = ur_decoder_receive_part(self->decoder, part_cstr);
 
   if (!result) {
-    ur_decoder_error_t error = ur_decoder_get_last_error(self->decoder);
-    switch (error) {
-    case UR_DECODER_ERROR_INVALID_SCHEME:
-      mp_raise_msg(&mp_type_ValueError, "Invalid UR scheme");
-      break;
-    case UR_DECODER_ERROR_INVALID_TYPE:
-      mp_raise_msg(&mp_type_ValueError, "Invalid UR type");
-      break;
-    case UR_DECODER_ERROR_INVALID_PATH_LENGTH:
-      mp_raise_msg(&mp_type_ValueError, "Invalid UR path length");
-      break;
-    case UR_DECODER_ERROR_INVALID_SEQUENCE_COMPONENT:
-      mp_raise_msg(&mp_type_ValueError, "Invalid sequence component");
-      break;
-    case UR_DECODER_ERROR_INVALID_FRAGMENT:
-      mp_raise_msg(&mp_type_ValueError, "Invalid fragment");
-      break;
-    default:
-      mp_raise_msg(&mp_type_RuntimeError, "URDecoder error");
-      break;
-    }
+    raise_ur_decoder_error(ur_decoder_get_last_error(self->decoder));
   }
 
   return mp_obj_new_bool(result);
@@ -236,36 +251,7 @@ static mp_obj_t ur_decoder_result(mp_obj_t self_in) {
 
   // Check if decoding was successful before getting the result
   if (!ur_decoder_is_success(self->decoder)) {
-    ur_decoder_error_t error = ur_decoder_get_last_error(self->decoder);
-    switch (error) {
-    case UR_DECODER_ERROR_INVALID_CHECKSUM:
-      mp_raise_msg(&mp_type_ValueError, "Invalid checksum");
-      break;
-    case UR_DECODER_ERROR_INVALID_SCHEME:
-      mp_raise_msg(&mp_type_ValueError, "Invalid UR scheme");
-      break;
-    case UR_DECODER_ERROR_INVALID_TYPE:
-      mp_raise_msg(&mp_type_ValueError, "Invalid UR type");
-      break;
-    case UR_DECODER_ERROR_INVALID_PATH_LENGTH:
-      mp_raise_msg(&mp_type_ValueError, "Invalid UR path length");
-      break;
-    case UR_DECODER_ERROR_INVALID_SEQUENCE_COMPONENT:
-      mp_raise_msg(&mp_type_ValueError, "Invalid sequence component");
-      break;
-    case UR_DECODER_ERROR_INVALID_FRAGMENT:
-      mp_raise_msg(&mp_type_ValueError, "Invalid fragment");
-      break;
-    case UR_DECODER_ERROR_INVALID_PART:
-      mp_raise_msg(&mp_type_ValueError, "Invalid part");
-      break;
-    case UR_DECODER_ERROR_MEMORY:
-      mp_raise_msg(&mp_type_RuntimeError, "Memory error");
-      break;
-    default:
-      mp_raise_msg(&mp_type_RuntimeError, "URDecoder error");
-      break;
-    }
+    raise_ur_decoder_error(ur_decoder_get_last_error(self->decoder));
   }
 
   ur_result_t *result = ur_decoder_get_result(self->decoder);

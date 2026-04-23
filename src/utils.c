@@ -62,20 +62,19 @@ size_t str_split(const char *str, char delimiter, char **parts,
 }
 
 bool is_ur_type(const char *type) {
-  if (!type || strlen(type) == 0)
+  if (!type || *type == '\0' || *type == '-')
     return false;
 
-  if (type[0] == '-' || type[strlen(type) - 1] == '-')
-    return false;
-
+  char last = 0;
   for (const char *p = type; *p; p++) {
     if (!islower((unsigned char)*p) && !isdigit((unsigned char)*p) &&
         *p != '-') {
       return false;
     }
+    last = *p;
   }
 
-  return true;
+  return last != '-';
 }
 
 bool parse_ur_string(const char *ur_str, char **type, char ***components,
