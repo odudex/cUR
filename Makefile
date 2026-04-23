@@ -42,7 +42,7 @@ TEST_STEMS = bytes_decoder bytes_encoder output_decoder output_encoder \
 TEST_BINS = $(TEST_STEMS:%=tests/test_ur_%)
 TEST_TARGETS = $(foreach s,$(TEST_STEMS),test-$(subst _,-,$(s)))
 
-.PHONY: all clean test check $(TEST_TARGETS)
+.PHONY: all clean test check coverage $(TEST_TARGETS)
 
 all: $(TARGET)
 
@@ -51,6 +51,11 @@ test: $(TEST_TARGETS)
 	@echo "All tests passed."
 
 check: test
+
+# Rebuilds the library with gcov instrumentation, runs every test, and
+# produces coverage_html/. Requires gcov (from gcc) and lcov.
+coverage:
+	./scripts/coverage.sh
 
 $(TARGET): $(OBJECTS)
 	ar rcs $@ $^

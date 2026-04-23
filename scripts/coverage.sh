@@ -71,8 +71,10 @@ ar rcs src/libur_cov.a "$COV_OBJDIR"/*.o "$COV_OBJDIR"/sha256/*.o "$COV_OBJDIR"/
 # Discover and run all tests
 echo -e "${YELLOW}Discovering tests in tests/ folder...${NC}"
 
-# Find all test_*.c files in tests folder (excluding test_utils.c)
-TEST_FILES=($(find tests -maxdepth 1 -name "test_*.c" ! -name "test_utils.c" -type f | sort))
+# Find all test_*.c files in tests folder (excluding the support objects
+# test_utils.c and test_harness.c, which are linked into every test).
+TEST_FILES=($(find tests -maxdepth 1 -name "test_*.c" \
+    ! -name "test_utils.c" ! -name "test_harness.c" -type f | sort))
 
 if [ ${#TEST_FILES[@]} -eq 0 ]; then
     echo -e "${RED}Error: No test files found in tests/ folder${NC}"
@@ -81,21 +83,24 @@ fi
 
 echo -e "Found ${GREEN}${#TEST_FILES[@]}${NC} test files"
 
-# Build test utilities if needed
-echo -e "${YELLOW}Building test utilities...${NC}"
-if [ -f "tests/test_utils.c" ]; then
-    gcc $CFLAGS $INCLUDES -c "tests/test_utils.c" -o "tests/test_utils_cov.o"
-    TEST_UTILS_OBJ="tests/test_utils_cov.o"
-else
-    TEST_UTILS_OBJ=""
-fi
+# Build test support objects (utilities + harness) once, link into every test
+echo -e "${YELLOW}Building test support objects...${NC}"
+SUPPORT_OBJS=""
+for support in test_utils test_harness; do
+    src="tests/${support}.c"
+    if [ -f "$src" ]; then
+        obj="tests/${support}_cov.o"
+        gcc $CFLAGS $INCLUDES -c "$src" -o "$obj"
+        SUPPORT_OBJS="$SUPPORT_OBJS $obj"
+    fi
+done
 
 # Build and run each test
 echo -e "${YELLOW}Building and running tests...${NC}"
 for test_file in "${TEST_FILES[@]}"; do
     test_name=$(basename "$test_file" .c)
     echo -e "  Building ${test_name}..."
-    gcc $CFLAGS $INCLUDES "$test_file" $TEST_UTILS_OBJ -Lsrc -lur_cov -lm -o "tests/${test_name}_cov" --coverage
+    gcc $CFLAGS $INCLUDES "$test_file" $SUPPORT_OBJS -Lsrc -lur_cov -lm -o "tests/${test_name}_cov" --coverage
 
     echo -e "  Running ${test_name}..."
     "./tests/${test_name}_cov" || true
@@ -115,7 +120,7 @@ echo -e "${YELLOW}Cleaning up intermediary files...${NC}"
 find . -name "*.gcda" -delete
 find . -name "*.gcno" -delete
 rm -f tests/*_cov
-rm -f tests/test_utils_cov.o
+rm -f tests/test_utils_cov.o tests/test_harness_cov.o
 rm -f src/libur_cov.a
 rm -rf "$COV_OBJDIR"
 
