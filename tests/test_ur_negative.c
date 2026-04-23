@@ -74,10 +74,7 @@ static void test_null_and_empty(void) {
 static void test_malformed_ur(void) {
   printf("\n=== malformed_ur ===\n");
   const char *cases[] = {
-      "not-a-ur-at-all",
-      "http://bytes/abc",
-      "ur:",
-      "ur:/foo",
+      "not-a-ur-at-all",       "http://bytes/abc", "ur:", "ur:/foo",
       "ur:bytes/zzzzzzzzzzzz", // not valid bytewords
   };
 

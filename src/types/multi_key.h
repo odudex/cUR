@@ -11,7 +11,7 @@ typedef struct {
   uint32_t threshold;      // M in M-of-N multisig
   hd_key_data_t **hd_keys; // Array of HD keys
   size_t hd_key_count;
-  size_t hd_key_capacity;  // >= hd_key_count; grows in doubling steps
+  size_t hd_key_capacity; // >= hd_key_count; grows in doubling steps
 } multi_key_data_t;
 
 // Create and destroy MultiKey
