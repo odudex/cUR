@@ -18,5 +18,14 @@ jobs:
       - name: Run all tests
         run: make test
 
-  # TODO: add an esp-idf job once a minimal smoke-test app exists under
-  # tests/esp-idf-smoke/. Use espressif/esp-idf-ci-action@v1 with that path.
+  esp-idf:
+    name: ESP-IDF component build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build smoke-test app for esp32
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.4
+          target: esp32
+          path: 'tests/esp-idf-smoke'
