@@ -23,6 +23,20 @@
 
 #define TEST_CASES_DIR "tests/test_cases/output"
 
+static bool test_invalid_empty_multi_threshold(void) {
+  const char *invalid =
+      "wsh(multi(,[65fb43fe/48'/1'/0'/2']tpubDFM6mziafLfJPA9StFuzvdC5htjaMTsVaPSA"
+      "jsahgE4c2CMWpg9yKaK4JyoaBjVYJKUFX9Kdyb4fgFaFUQmZNGU71Q1wZgZiGM1Go7p59NW,"
+      "[08c3586c/48'/1'/0'/2']tpubDENsrbyiJuWcD9JptRuTwGgixi5raa1fDUqFNk23Uocau"
+      "yqSGcyFbQ3QjBRXb7RfNiPqWNdEfT9e9SdNaqUUiNxB42zdvvrX4oT8JhJWEBk))";
+  output_data_t *output = output_from_descriptor_string(invalid);
+  if (output) {
+    output_free(output);
+    return false;
+  }
+  return true;
+}
+
 static bool test_file(const char *filepath) {
   printf("\n=== Testing: %s ===\n", filepath);
 
@@ -170,6 +184,16 @@ static bool test_file(const char *filepath) {
 }
 
 int main(int argc, char *argv[]) {
-  return run_test_suite(argc, argv, "UR Output Descriptor Roundtrip Test",
-                        TEST_CASES_DIR, ".descriptor.txt", test_file);
+  int rc = run_test_suite(argc, argv, "UR Output Descriptor Roundtrip Test",
+                          TEST_CASES_DIR, ".descriptor.txt", test_file);
+
+  printf("\n=== Testing invalid descriptor: empty multisig threshold ===\n");
+  if (test_invalid_empty_multi_threshold()) {
+    printf("PASS - Empty multisig threshold is rejected\n");
+  } else {
+    printf("FAIL - Empty multisig threshold should be rejected\n");
+    rc = 1;
+  }
+
+  return rc;
 }
