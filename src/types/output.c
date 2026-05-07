@@ -345,8 +345,15 @@ static bool parse_keypath_components(const char *path, size_t len,
     } else if (isdigit((unsigned char)*p)) {
       c->wildcard = false;
       c->index = 0;
-      while (p < end && isdigit((unsigned char)*p))
-        c->index = c->index * 10 + (*p++ - '0');
+      while (p < end && isdigit((unsigned char)*p)) {
+        uint32_t digit = (uint32_t)(*p - '0');
+        if (c->index > (UINT32_MAX - digit) / 10) {
+          free(comp);
+          return false;
+        }
+        c->index = c->index * 10 + digit;
+        p++;
+      }
     } else {
       free(comp);
       return false;
@@ -522,8 +529,21 @@ output_data_t *output_from_descriptor_string(const char *descriptor) {
 
   if (is_multi) {
     uint32_t threshold = 0;
-    while (p < content_end && isdigit((unsigned char)*p))
-      threshold = threshold * 10 + (*p++ - '0');
+    size_t threshold_digits = 0;
+    while (p < content_end && isdigit((unsigned char)*p)) {
+      uint32_t digit = (uint32_t)(*p - '0');
+      if (threshold > (UINT32_MAX - digit) / 10) {
+        output_free(output);
+        return NULL;
+      }
+      threshold = threshold * 10 + digit;
+      threshold_digits++;
+      p++;
+    }
+    if (threshold_digits == 0) {
+      output_free(output);
+      return NULL;
+    }
     if (p < content_end && *p == ',')
       p++;
 
