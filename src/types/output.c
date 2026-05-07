@@ -313,6 +313,15 @@ static int hex_val(char c) {
   return -1;
 }
 
+static bool append_decimal_digit_u32(uint32_t *value, uint32_t digit) {
+  if (!value || digit > 9)
+    return false;
+  if (*value > (UINT32_MAX - digit) / 10)
+    return false;
+  *value = (*value * 10) + digit;
+  return true;
+}
+
 static bool parse_keypath_components(const char *path, size_t len,
                                      path_component_t **out_components,
                                      size_t *out_count) {
@@ -347,11 +356,10 @@ static bool parse_keypath_components(const char *path, size_t len,
       c->index = 0;
       while (p < end && isdigit((unsigned char)*p)) {
         uint32_t digit = (uint32_t)(*p - '0');
-        if (c->index > (UINT32_MAX - digit) / 10) {
+        if (!append_decimal_digit_u32(&c->index, digit)) {
           free(comp);
           return false;
         }
-        c->index = c->index * 10 + digit;
         p++;
       }
     } else {
@@ -532,11 +540,10 @@ output_data_t *output_from_descriptor_string(const char *descriptor) {
     size_t threshold_digits = 0;
     while (p < content_end && isdigit((unsigned char)*p)) {
       uint32_t digit = (uint32_t)(*p - '0');
-      if (threshold > (UINT32_MAX - digit) / 10) {
+      if (!append_decimal_digit_u32(&threshold, digit)) {
         output_free(output);
         return NULL;
       }
-      threshold = threshold * 10 + digit;
       threshold_digits++;
       p++;
     }

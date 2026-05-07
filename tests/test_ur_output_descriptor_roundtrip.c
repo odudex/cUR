@@ -24,12 +24,12 @@
 #define TEST_CASES_DIR "tests/test_cases/output"
 
 static bool test_invalid_empty_multi_threshold(void) {
-  const char *invalid =
+  const char *invalid_descriptor =
       "wsh(multi(,[65fb43fe/48'/1'/0'/2']tpubDFM6mziafLfJPA9StFuzvdC5htjaMTsVaPSA"
       "jsahgE4c2CMWpg9yKaK4JyoaBjVYJKUFX9Kdyb4fgFaFUQmZNGU71Q1wZgZiGM1Go7p59NW,"
       "[08c3586c/48'/1'/0'/2']tpubDENsrbyiJuWcD9JptRuTwGgixi5raa1fDUqFNk23Uocau"
       "yqSGcyFbQ3QjBRXb7RfNiPqWNdEfT9e9SdNaqUUiNxB42zdvvrX4oT8JhJWEBk))";
-  output_data_t *output = output_from_descriptor_string(invalid);
+  output_data_t *output = output_from_descriptor_string(invalid_descriptor);
   if (output) {
     output_free(output);
     return false;
