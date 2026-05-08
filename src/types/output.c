@@ -313,6 +313,15 @@ static int hex_val(char c) {
   return -1;
 }
 
+static bool append_decimal_digit_u32(uint32_t *value, uint32_t digit) {
+  if (!value || digit > 9)
+    return false;
+  if (*value > (UINT32_MAX - digit) / 10)
+    return false;
+  *value = (*value * 10) + digit;
+  return true;
+}
+
 static bool parse_keypath_components(const char *path, size_t len,
                                      path_component_t **out_components,
                                      size_t *out_count) {
@@ -345,8 +354,14 @@ static bool parse_keypath_components(const char *path, size_t len,
     } else if (isdigit((unsigned char)*p)) {
       c->wildcard = false;
       c->index = 0;
-      while (p < end && isdigit((unsigned char)*p))
-        c->index = c->index * 10 + (*p++ - '0');
+      while (p < end && isdigit((unsigned char)*p)) {
+        uint32_t digit = (uint32_t)(*p - '0');
+        if (!append_decimal_digit_u32(&c->index, digit)) {
+          free(comp);
+          return false;
+        }
+        p++;
+      }
     } else {
       free(comp);
       return false;
@@ -408,6 +423,10 @@ static hd_key_data_t *parse_hd_key_from_string(const char *str, size_t len) {
     hd_key->origin =
         keypath_new(origin_comp, origin_count, fp, (int)origin_count);
     free(origin_comp);
+    if (!hd_key->origin) {
+      hd_key_free(hd_key);
+      return NULL;
+    }
     p = bracket_end + 1;
   }
 
@@ -439,16 +458,23 @@ static hd_key_data_t *parse_hd_key_from_string(const char *str, size_t len) {
   //        [13-44]chain_code [45-77]key
   if (dec[5] || dec[6] || dec[7] || dec[8]) {
     hd_key->parent_fingerprint = safe_malloc(4);
-    if (hd_key->parent_fingerprint)
-      memcpy(hd_key->parent_fingerprint, dec + 5, 4);
+    if (!hd_key->parent_fingerprint) {
+      free(dec);
+      hd_key_free(hd_key);
+      return NULL;
+    }
+    memcpy(hd_key->parent_fingerprint, dec + 5, 4);
   }
   hd_key->chain_code = safe_malloc(32);
-  if (hd_key->chain_code)
-    memcpy(hd_key->chain_code, dec + 13, 32);
   hd_key->key_len = 33;
   hd_key->key = safe_malloc(33);
-  if (hd_key->key)
-    memcpy(hd_key->key, dec + 45, 33);
+  if (!hd_key->chain_code || !hd_key->key) {
+    free(dec);
+    hd_key_free(hd_key);
+    return NULL;
+  }
+  memcpy(hd_key->chain_code, dec + 13, 32);
+  memcpy(hd_key->key, dec + 45, 33);
   if (hd_key->origin)
     hd_key->origin->depth = (int)dec[4];
   free(dec);
@@ -458,10 +484,16 @@ static hd_key_data_t *parse_hd_key_from_string(const char *str, size_t len) {
     size_t ch_len = end - (xpub_end + 1);
     path_component_t *ch_comp = NULL;
     size_t ch_count = 0;
-    if (ch_len > 0 &&
-        parse_keypath_components(xpub_end + 1, ch_len, &ch_comp, &ch_count)) {
-      hd_key->children = keypath_new(ch_comp, ch_count, NULL, -1);
-      free(ch_comp);
+    if (ch_len == 0 ||
+        !parse_keypath_components(xpub_end + 1, ch_len, &ch_comp, &ch_count)) {
+      hd_key_free(hd_key);
+      return NULL;
+    }
+    hd_key->children = keypath_new(ch_comp, ch_count, NULL, -1);
+    free(ch_comp);
+    if (!hd_key->children) {
+      hd_key_free(hd_key);
+      return NULL;
     }
   }
 
@@ -522,8 +554,24 @@ output_data_t *output_from_descriptor_string(const char *descriptor) {
 
   if (is_multi) {
     uint32_t threshold = 0;
-    while (p < content_end && isdigit((unsigned char)*p))
-      threshold = threshold * 10 + (*p++ - '0');
+    size_t threshold_digits = 0;
+    while (p < content_end && isdigit((unsigned char)*p)) {
+      uint32_t digit = (uint32_t)(*p - '0');
+      if (!append_decimal_digit_u32(&threshold, digit)) {
+        output_free(output);
+        return NULL;
+      }
+      threshold_digits++;
+      p++;
+    }
+    if (threshold_digits == 0) {
+      output_free(output);
+      return NULL;
+    }
+    if (threshold == 0) {
+      output_free(output);
+      return NULL;
+    }
     if (p < content_end && *p == ',')
       p++;
 
@@ -537,9 +585,18 @@ output_data_t *output_from_descriptor_string(const char *descriptor) {
       const char *comma = memchr(p, ',', content_end - p);
       const char *key_end = comma ? comma : content_end;
       hd_key_data_t *hk = parse_hd_key_from_string(p, key_end - p);
-      if (hk)
-        multi_key_add_hd_key(mk, hk);
+      if (!hk || !multi_key_add_hd_key(mk, hk)) {
+        hd_key_free(hk);
+        multi_key_free(mk);
+        output_free(output);
+        return NULL;
+      }
       p = comma ? comma + 1 : content_end;
+    }
+    if (mk->hd_key_count == 0 || threshold > mk->hd_key_count) {
+      multi_key_free(mk);
+      output_free(output);
+      return NULL;
     }
     output->key_type = KEY_TYPE_MULTI;
     output->crypto_key.multi_key = mk;

@@ -23,6 +23,57 @@
 
 #define TEST_CASES_DIR "tests/test_cases/output"
 
+static bool descriptor_is_rejected(const char *descriptor) {
+  output_data_t *output = output_from_descriptor_string(descriptor);
+  if (output) {
+    output_free(output);
+    return false;
+  }
+  return true;
+}
+
+static bool test_invalid_descriptors(void) {
+  const char *invalid_descriptors[] = {
+      "wsh(multi(,[65fb43fe/48'/1'/0'/"
+      "2']tpubDFM6mziafLfJPA9StFuzvdC5htjaMTsVaPSA"
+      "jsahgE4c2CMWpg9yKaK4JyoaBjVYJKUFX9Kdyb4fgFaFUQmZNGU71Q1wZgZiGM1Go7p59NW,"
+      "[08c3586c/48'/1'/0'/2']tpubDENsrbyiJuWcD9JptRuTwGgixi5raa1fDUqFNk23Uocau"
+      "yqSGcyFbQ3QjBRXb7RfNiPqWNdEfT9e9SdNaqUUiNxB42zdvvrX4oT8JhJWEBk))",
+      "pkh([65fb43fe/"
+      "4294967296]tpubDDe8bRQqws125ChaJ4ZoB6qVbFn1sBubiim6SYcfmFz8"
+      "XVSp4WWiMj4gAuzSxJPRDZwT9rT928wQmWX993CAq4TjBXdcoCUtuG2E115mLD5)",
+      "pkh([65fb43fe/44'/1'/0']tpubDDe8bRQqws125ChaJ4ZoB6qVbFn1sBubiim6SYcfmFz8"
+      "XVSp4WWiMj4gAuzSxJPRDZwT9rT928wQmWX993CAq4TjBXdcoCUtuG2E115mLD5/"
+      "4294967296)",
+      "pkh([65fb43fe/44'/1'/0']tpubDDe8bRQqws125ChaJ4ZoB6qVbFn1sBubiim6SYcfmFz8"
+      "XVSp4WWiMj4gAuzSxJPRDZwT9rT928wQmWX993CAq4TjBXdcoCUtuG2E115mLD5/"
+      "4294967296h)",
+      "wsh(multi(0,[65fb43fe/48'/1'/0'/"
+      "2']tpubDFM6mziafLfJPA9StFuzvdC5htjaMTsVaPSA"
+      "jsahgE4c2CMWpg9yKaK4JyoaBjVYJKUFX9Kdyb4fgFaFUQmZNGU71Q1wZgZiGM1Go7p59NW)"
+      ")",
+      "wsh(multi(3,[65fb43fe/48'/1'/0'/"
+      "2']tpubDFM6mziafLfJPA9StFuzvdC5htjaMTsVaPSA"
+      "jsahgE4c2CMWpg9yKaK4JyoaBjVYJKUFX9Kdyb4fgFaFUQmZNGU71Q1wZgZiGM1Go7p59NW,"
+      "[08c3586c/48'/1'/0'/2']tpubDENsrbyiJuWcD9JptRuTwGgixi5raa1fDUqFNk23Uocau"
+      "yqSGcyFbQ3QjBRXb7RfNiPqWNdEfT9e9SdNaqUUiNxB42zdvvrX4oT8JhJWEBk))",
+      "wsh(multi(2,[65fb43fe/48'/1'/0'/"
+      "2']tpubDFM6mziafLfJPA9StFuzvdC5htjaMTsVaPSA"
+      "jsahgE4c2CMWpg9yKaK4JyoaBjVYJKUFX9Kdyb4fgFaFUQmZNGU71Q1wZgZiGM1Go7p59NW,"
+      "not-a-valid-key))",
+      NULL,
+  };
+
+  for (size_t i = 0; invalid_descriptors[i]; i++) {
+    if (!descriptor_is_rejected(invalid_descriptors[i])) {
+      printf("FAIL - Invalid descriptor accepted: %s\n",
+             invalid_descriptors[i]);
+      return false;
+    }
+  }
+  return true;
+}
+
 static bool test_file(const char *filepath) {
   printf("\n=== Testing: %s ===\n", filepath);
 
@@ -170,6 +221,15 @@ static bool test_file(const char *filepath) {
 }
 
 int main(int argc, char *argv[]) {
-  return run_test_suite(argc, argv, "UR Output Descriptor Roundtrip Test",
-                        TEST_CASES_DIR, ".descriptor.txt", test_file);
+  int rc = run_test_suite(argc, argv, "UR Output Descriptor Roundtrip Test",
+                          TEST_CASES_DIR, ".descriptor.txt", test_file);
+
+  printf("\n=== Testing invalid descriptors ===\n");
+  if (test_invalid_descriptors()) {
+    printf("PASS - Invalid descriptors are rejected\n");
+  } else {
+    rc = 1;
+  }
+
+  return rc;
 }

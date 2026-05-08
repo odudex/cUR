@@ -330,14 +330,20 @@ static void queue_free(part_queue_t *queue) {
   memset(queue, 0, sizeof(part_queue_t));
 }
 
-static bool queue_enqueue(part_queue_t *queue, const decoder_part_t *part) {
+static void decoder_part_move(decoder_part_t *src, decoder_part_t *dst) {
+  if (!src || !dst)
+    return;
+
+  decoder_part_free(dst);
+  *dst = *src;
+  *src = (decoder_part_t){0};
+}
+
+static bool queue_enqueue(part_queue_t *queue, decoder_part_t *part) {
   if (!queue || !part || queue->count >= queue->capacity)
     return false;
 
-  if (!decoder_part_copy(part, &queue->parts[queue->rear])) {
-    return false;
-  }
-
+  decoder_part_move(part, &queue->parts[queue->rear]);
   queue->rear = (queue->rear + 1) % queue->capacity;
   queue->count++;
 
@@ -348,11 +354,7 @@ static bool queue_dequeue(part_queue_t *queue, decoder_part_t *part) {
   if (!queue || !part || queue->count == 0)
     return false;
 
-  if (!decoder_part_copy(&queue->parts[queue->front], part)) {
-    return false;
-  }
-
-  decoder_part_free(&queue->parts[queue->front]);
+  decoder_part_move(&queue->parts[queue->front], part);
   queue->front = (queue->front + 1) % queue->capacity;
   queue->count--;
 
@@ -734,6 +736,26 @@ static bool add_mixed_part(fountain_decoder_t *const decoder,
   (void)source;
 
   return true;
+}
+
+static void fountain_decoder_clear_initialization(fountain_decoder_t *decoder) {
+  if (!decoder)
+    return;
+
+  if (decoder->expected_part_indexes) {
+    part_indexes_free(decoder->expected_part_indexes);
+    decoder->expected_part_indexes = NULL;
+  }
+  if (decoder->mixed_parts_hash) {
+    mixed_hash_free(decoder->mixed_parts_hash);
+    safe_free(decoder->mixed_parts_hash);
+  }
+  hash_set_free(&decoder->received_fragments_hashes);
+  random_sampler_free(&decoder->degree_sampler);
+
+  decoder->expected_fragment_len = 0;
+  decoder->expected_message_len = 0;
+  decoder->expected_checksum = 0;
 }
 
 static void reduce_mixed_by(fountain_decoder_t *const decoder,
@@ -1230,7 +1252,10 @@ bool fountain_decoder_receive_part(fountain_decoder_t *decoder,
       return false;
 
     for (size_t i = 0; i < part->seq_len; i++) {
-      part_indexes_add(decoder->expected_part_indexes, i);
+      if (!part_indexes_add(decoder->expected_part_indexes, i)) {
+        fountain_decoder_clear_initialization(decoder);
+        return false;
+      }
     }
 
     decoder->expected_checksum = part->checksum;
@@ -1243,30 +1268,37 @@ bool fountain_decoder_receive_part(fountain_decoder_t *decoder,
             : part->seq_len * HASH_CAPACITY_MULTIPLIER;
 
     decoder->mixed_parts_hash = safe_malloc(sizeof(mixed_parts_hash_t));
-    if (!decoder->mixed_parts_hash)
+    if (!decoder->mixed_parts_hash) {
+      fountain_decoder_clear_initialization(decoder);
       return false;
+    }
 
     if (!mixed_hash_init(decoder->mixed_parts_hash, hash_capacity)) {
-      safe_free(decoder->mixed_parts_hash);
+      fountain_decoder_clear_initialization(decoder);
       return false;
     }
 
     if (!hash_set_init(&decoder->received_fragments_hashes, hash_capacity)) {
-      mixed_hash_free(decoder->mixed_parts_hash);
-      safe_free(decoder->mixed_parts_hash);
+      fountain_decoder_clear_initialization(decoder);
       return false;
     }
 
     if (part->seq_len > 0) {
       double *degree_probs = safe_malloc(part->seq_len * sizeof(double));
-      if (degree_probs) {
-        for (size_t i = 0; i < part->seq_len; i++) {
-          degree_probs[i] = 1.0 / (i + 1);
-        }
-        random_sampler_init(&decoder->degree_sampler, degree_probs,
-                            part->seq_len);
-        free(degree_probs);
+      if (!degree_probs) {
+        fountain_decoder_clear_initialization(decoder);
+        return false;
       }
+      for (size_t i = 0; i < part->seq_len; i++) {
+        degree_probs[i] = 1.0 / (i + 1);
+      }
+      if (!random_sampler_init(&decoder->degree_sampler, degree_probs,
+                               part->seq_len)) {
+        free(degree_probs);
+        fountain_decoder_clear_initialization(decoder);
+        return false;
+      }
+      free(degree_probs);
     }
   }
 
