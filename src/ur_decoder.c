@@ -380,23 +380,34 @@ bool ur_decoder_receive_part(ur_decoder_t *decoder, const char *part_str) {
 
   if (fountain_decoder_is_complete(decoder->fountain_decoder)) {
     if (fountain_decoder_is_success(decoder->fountain_decoder)) {
-      decoder->result = safe_malloc(sizeof(ur_result_t));
-      if (decoder->result) {
-        decoder->result->type = safe_strdup(type);
-        size_t result_len =
-            fountain_decoder_result_message_len(decoder->fountain_decoder);
-        // Steal the reassembled message from the fountain decoder rather
-        // than malloc+memcpy a private copy.
-        uint8_t *result_data =
-            fountain_decoder_take_result_message(decoder->fountain_decoder);
+      ur_result_t *decoded_result = safe_malloc(sizeof(ur_result_t));
+      char *result_type = safe_strdup(type);
+      if (!decoded_result || !result_type) {
+        free(decoded_result);
+        free(result_type);
+        decoder->last_error = UR_DECODER_ERROR_MEMORY;
+        goto cleanup;
+      }
 
-        if (result_data && result_len > 0) {
-          decoder->result->cbor_data = result_data;
-          decoder->result->cbor_len = result_len;
-          decoder->is_complete_flag = true;
-        } else {
-          free(result_data);
-        }
+      size_t result_len =
+          fountain_decoder_result_message_len(decoder->fountain_decoder);
+      // Steal the reassembled message from the fountain decoder rather
+      // than malloc+memcpy a private copy.
+      uint8_t *result_data =
+          fountain_decoder_take_result_message(decoder->fountain_decoder);
+
+      if (result_data && result_len > 0) {
+        decoded_result->type = result_type;
+        decoded_result->cbor_data = result_data;
+        decoded_result->cbor_len = result_len;
+        decoder->result = decoded_result;
+        decoder->is_complete_flag = true;
+      } else {
+        free(result_data);
+        free(result_type);
+        free(decoded_result);
+        decoder->last_error = UR_DECODER_ERROR_MEMORY;
+        goto cleanup;
       }
     } else {
       decoder->last_error = UR_DECODER_ERROR_INVALID_CHECKSUM;

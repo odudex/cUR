@@ -70,9 +70,56 @@ uint8_t *psbt_to_cbor(psbt_data_t *psbt, size_t *out_len) {
   return registry_item_to_cbor(&item, out_len);
 }
 
+static bool read_cbor_byte_string(const uint8_t *cbor_data, size_t len,
+                                  const uint8_t **data, size_t *data_len) {
+  if (!cbor_data || len == 0 || !data || !data_len)
+    return false;
+
+  uint8_t head = cbor_data[0];
+  if ((head >> 5) != 2)
+    return false;
+
+  uint8_t additional = head & 0x1f;
+  size_t header_len = 1;
+  size_t value_len = 0;
+
+  if (additional < 24) {
+    value_len = additional;
+  } else if (additional == 24) {
+    if (len < 2)
+      return false;
+    value_len = cbor_data[1];
+    header_len = 2;
+  } else if (additional == 25) {
+    if (len < 3)
+      return false;
+    value_len = ((size_t)cbor_data[1] << 8) | (size_t)cbor_data[2];
+    header_len = 3;
+  } else if (additional == 26) {
+    if (len < 5)
+      return false;
+    value_len = ((size_t)cbor_data[1] << 24) | ((size_t)cbor_data[2] << 16) |
+                ((size_t)cbor_data[3] << 8) | (size_t)cbor_data[4];
+    header_len = 5;
+  } else {
+    return false;
+  }
+
+  if (value_len != len - header_len)
+    return false;
+
+  *data = cbor_data + header_len;
+  *data_len = value_len;
+  return true;
+}
+
 psbt_data_t *psbt_from_cbor(const uint8_t *cbor_data, size_t len) {
-  return (psbt_data_t *)registry_item_unwrap_from_cbor(cbor_data, len,
-                                                       psbt_from_data_item);
+  const uint8_t *data = NULL;
+  size_t data_len = 0;
+  if (!read_cbor_byte_string(cbor_data, len, &data, &data_len))
+    return NULL;
+
+  return psbt_new(data, data_len);
 }
 
 // Accessors

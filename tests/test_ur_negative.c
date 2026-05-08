@@ -10,6 +10,7 @@
 
 #include "../src/bytewords.h"
 #include "../src/types/bytes_type.h"
+#include "../src/types/psbt.h"
 #include "../src/ur.h"
 #include "../src/ur_decoder.h"
 #include <stdio.h>
@@ -169,6 +170,10 @@ static void test_malformed_cbor(void) {
   uint8_t wrong_type[] = {0x80};
   ASSERT(bytes_from_cbor(wrong_type, sizeof(wrong_type)) == NULL,
          "rejects CBOR with wrong major type for bytes");
+
+  uint8_t psbt_trailing[] = {0x41, 0x00, 0x00};
+  ASSERT(psbt_from_cbor(psbt_trailing, sizeof(psbt_trailing)) == NULL,
+         "psbt_from_cbor rejects trailing bytes");
 }
 
 int main(void) {
