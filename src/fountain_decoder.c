@@ -1373,6 +1373,61 @@ fountain_decoder_estimated_percent_complete(fountain_decoder_t *decoder) {
   return progress > 0.99 ? 0.99 : progress;
 }
 
+// Weighted-mixed-frames completion estimate. Ports SeedSigner's
+// weight_mixed_frames=True method (helpers/ur2/fountain_decoder.py): count the
+// fully decoded fragments, plus partial credit for fragments that are still
+// only present inside mixed (XOR'd) frames. Each mixed frame contributes
+// 1/(frames mixed) to every index it covers; each index's total contribution
+// is capped at 0.75 so a not-yet-decoded fragment never counts as much as a
+// decoded one (and so the reported percentage cannot decrease mid-decode).
+// Backward-compatible addition — the reference estimate above is unchanged.
+double fountain_decoder_estimated_percent_complete_weighted(
+    fountain_decoder_t *decoder) {
+  if (!decoder)
+    return 0.0;
+  if (fountain_decoder_is_complete(decoder))
+    return 1.0;
+  if (!decoder->expected_part_indexes ||
+      decoder->expected_part_indexes->count == 0)
+    return 0.0;
+
+  size_t parts = decoder->expected_part_indexes->count;
+
+  // Per-index partial scores from the mixed parts. Fragment indexes are in
+  // [0, seq_len) == [0, parts), so a scratch array keyed by index mirrors the
+  // Python dict `mixed_index_scoring`. Fall back to the reference estimate if
+  // the scratch allocation fails.
+  double *scoring = calloc(parts, sizeof(double));
+  if (!scoring)
+    return fountain_decoder_estimated_percent_complete(decoder);
+
+  mixed_parts_hash_t *hash = decoder->mixed_parts_hash;
+  if (hash) {
+    for (size_t b = 0; b < hash->capacity; b++) {
+      for (hash_entry_t *entry = hash->buckets[b]; entry; entry = entry->next) {
+        size_t cnt = entry->key.count;
+        if (cnt == 0)
+          continue;
+        double score = 1.0 / (double)cnt;
+        for (size_t k = 0; k < cnt; k++) {
+          size_t index = entry->key.indexes[k];
+          if (index < parts)
+            scoring[index] += score;
+        }
+      }
+    }
+  }
+
+  double mixed_score = 0.0;
+  for (size_t i = 0; i < parts; i++) {
+    mixed_score += scoring[i] < 0.75 ? scoring[i] : 0.75;
+  }
+  free(scoring);
+
+  double num_complete = (double)decoder->received_part_indexes.count;
+  return (num_complete + mixed_score) / (double)parts;
+}
+
 uint8_t *fountain_decoder_result_message(fountain_decoder_t *decoder) {
   if (!decoder || !decoder->result)
     return NULL;

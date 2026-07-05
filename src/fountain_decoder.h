@@ -78,6 +78,15 @@ size_t fountain_decoder_processed_parts_count(fountain_decoder_t *decoder);
 double fountain_decoder_estimated_percent_complete(fountain_decoder_t *decoder);
 
 /**
+ * Get estimated completion percentage using the weighted-mixed-frames method
+ * (partial credit for fragments still only present inside mixed/XOR'd frames).
+ * @param decoder Pointer to fountain decoder
+ * @return Completion percentage (0.0 to 1.0)
+ */
+double fountain_decoder_estimated_percent_complete_weighted(
+    fountain_decoder_t *decoder);
+
+/**
  * Get result message
  * @param decoder Pointer to fountain decoder
  * @return Pointer to result data or NULL

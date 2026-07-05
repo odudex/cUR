@@ -295,18 +295,34 @@ static mp_obj_t ur_decoder_processed_parts_count_py(mp_obj_t self_in) {
 static MP_DEFINE_CONST_FUN_OBJ_1(ur_decoder_processed_parts_count_obj,
                                  ur_decoder_processed_parts_count_py);
 
-// estimated_percent_complete method
-static mp_obj_t ur_decoder_estimated_percent_complete_py(mp_obj_t self_in) {
-  mp_obj_ur_decoder_t *self = MP_OBJ_TO_PTR(self_in);
+// estimated_percent_complete(weight_mixed_frames=False) method.
+// weight_mixed_frames is an opt-in flag: the default (False) returns the
+// original reference estimate byte-for-byte, so existing callers are
+// unaffected; True selects the weighted-mixed-frames method, which gives
+// partial credit for fragments still only present inside mixed/XOR'd frames.
+static mp_obj_t ur_decoder_estimated_percent_complete_py(size_t n_args,
+                                                         const mp_obj_t *pos_args,
+                                                         mp_map_t *kw_args) {
+  static const mp_arg_t allowed_args[] = {
+      {MP_QSTR_weight_mixed_frames, MP_ARG_BOOL, {.u_bool = false}},
+  };
+  mp_arg_val_t parsed[MP_ARRAY_SIZE(allowed_args)];
+  mp_arg_parse_all(n_args - 1, pos_args + 1, kw_args,
+                   MP_ARRAY_SIZE(allowed_args), allowed_args, parsed);
 
+  mp_obj_ur_decoder_t *self = MP_OBJ_TO_PTR(pos_args[0]);
   if (!self->decoder) {
     return mp_obj_new_float(0.0);
   }
 
-  return mp_obj_new_float(ur_decoder_estimated_percent_complete(self->decoder));
+  double pct =
+      parsed[0].u_bool
+          ? ur_decoder_estimated_percent_complete_weighted(self->decoder)
+          : ur_decoder_estimated_percent_complete(self->decoder);
+  return mp_obj_new_float(pct);
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(ur_decoder_estimated_percent_complete_obj,
-                                 ur_decoder_estimated_percent_complete_py);
+static MP_DEFINE_CONST_FUN_OBJ_KW(ur_decoder_estimated_percent_complete_obj, 1,
+                                  ur_decoder_estimated_percent_complete_py);
 
 // URDecoder locals dict
 static const mp_rom_map_elem_t ur_decoder_locals_dict_table[] = {

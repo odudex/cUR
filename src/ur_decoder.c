@@ -458,6 +458,13 @@ double ur_decoder_estimated_percent_complete(ur_decoder_t *decoder) {
   return fountain_decoder_estimated_percent_complete(decoder->fountain_decoder);
 }
 
+double ur_decoder_estimated_percent_complete_weighted(ur_decoder_t *decoder) {
+  if (!decoder || !decoder->fountain_decoder)
+    return 0.0;
+  return fountain_decoder_estimated_percent_complete_weighted(
+      decoder->fountain_decoder);
+}
+
 ur_decoder_error_t ur_decoder_get_last_error(ur_decoder_t *decoder) {
   return decoder ? decoder->last_error : UR_DECODER_ERROR_NULL_POINTER;
 }

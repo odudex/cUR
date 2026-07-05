@@ -98,6 +98,13 @@ size_t ur_decoder_processed_parts_count(ur_decoder_t *decoder);
 double ur_decoder_estimated_percent_complete(ur_decoder_t *decoder);
 
 /**
+ * Get estimated completion percentage using the weighted-mixed-frames method.
+ * @param decoder Pointer to URDecoder instance
+ * @return Completion percentage (0.0 to 1.0)
+ */
+double ur_decoder_estimated_percent_complete_weighted(ur_decoder_t *decoder);
+
+/**
  * Get last error
  * @param decoder Pointer to URDecoder instance
  * @return Last error code
