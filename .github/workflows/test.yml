@@ -31,13 +31,23 @@ jobs:
         run: make test
 
   esp-idf:
-    name: ESP-IDF component build
+    name: ESP-IDF ${{ matrix.idf }} build (${{ matrix.target }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # v5.5.x uses plain mbedtls; v6.x (mbedTLS v4) exercises the
+        # mbedtls_compat shim path. esp32p4 is Kern's target on IDF 6.
+        include:
+          - idf: v5.5.4
+            target: esp32
+          - idf: v6.0.2
+            target: esp32p4
     steps:
       - uses: actions/checkout@v4
-      - name: Build smoke-test app for esp32
+      - name: Build smoke-test app
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v5.5.4
-          target: esp32
+          esp_idf_version: ${{ matrix.idf }}
+          target: ${{ matrix.target }}
           path: 'tests/esp-idf-smoke'
