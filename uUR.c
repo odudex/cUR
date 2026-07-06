@@ -1026,8 +1026,18 @@ const mp_obj_module_t bc_ur_module = {
 // legacy form and fail to compile. MICROPY_VERSION is
 // (major << 16 | minor << 8 | micro); on builds too old to define it, the
 // expression evaluates to 0 and correctly selects the legacy 3-arg form.
+//
+// The modern branch registers through the UR_REGISTER_MODULE alias, not the
+// macro's own name: the legacy MaixPy (K210) build generates
+// genhdr/moduledefs.h by regex-scanning the RAW source for the macro name,
+// ignoring preprocessor conditionals, and with two visible registrations the
+// scan mangles the generated header ("#else after #else"). The alias keeps
+// the modern line invisible to that scanner; modern builds collect
+// registrations from PREPROCESSED source, where the alias has already
+// expanded to the real macro.
 #if MICROPY_VERSION >= ((1 << 16) | (19 << 8)) // >= v1.19
-MP_REGISTER_MODULE(MP_QSTR_uUR, bc_ur_module);
+#define UR_REGISTER_MODULE MP_REGISTER_MODULE
+UR_REGISTER_MODULE(MP_QSTR_uUR, bc_ur_module);
 #else
 MP_REGISTER_MODULE(MP_QSTR_uUR, bc_ur_module, MODULE_BC_UR_ENABLED);
 #endif
