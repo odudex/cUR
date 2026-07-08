@@ -63,7 +63,8 @@ static bool test_file(const char *filepath) {
 
   // Feed all fragments
   for (int i = 0; i < fragment_count; i++) {
-    if (ur_decoder_receive_part(decoder, fragments[i])) {
+    ur_decoder_state_t state = ur_decoder_receive_part(decoder, fragments[i]);
+    if (!ur_decoder_state_is_error(state)) {
       parts_used++;
 
       // Check ongoing decode status using the functions we want to cover
@@ -78,20 +79,16 @@ static bool test_file(const char *filepath) {
         progress_reported = 1;
       }
 
-      if (ur_decoder_is_complete(decoder)) {
+      if (ur_decoder_state_is_terminal(state)) {
         printf("Decoder complete after %d parts\n", parts_used);
         break;
       }
     } else {
-      // Check error status if receive_part failed
-      ur_decoder_error_t error = ur_decoder_get_last_error(decoder);
-      if (error != UR_DECODER_OK) {
-        fprintf(stderr, "Decode error at fragment %d: %d\n", i, error);
-      }
+      fprintf(stderr, "Decode error at fragment %d: %d\n", i, state);
     }
   }
 
-  if (ur_decoder_is_complete(decoder) && ur_decoder_is_success(decoder)) {
+  if (ur_decoder_get_state(decoder) == UR_DECODER_OK) {
     printf("✓ Decoding successful\n");
 
     // Get the UR result

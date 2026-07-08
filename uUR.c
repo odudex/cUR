@@ -58,42 +58,6 @@ typedef struct {
                                     // prevent memory leaks
 } mp_obj_ur_encoder_t;
 
-// Shared UR decoder error -> MicroPython exception mapping. Called on
-// any path that produces an error; mp_raise_msg does not return so the
-// helper is effectively NORETURN.
-static void raise_ur_decoder_error(ur_decoder_error_t error) {
-  switch (error) {
-  case UR_DECODER_ERROR_INVALID_SCHEME:
-    mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("Invalid UR scheme"));
-    break;
-  case UR_DECODER_ERROR_INVALID_TYPE:
-    mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("Invalid UR type"));
-    break;
-  case UR_DECODER_ERROR_INVALID_PATH_LENGTH:
-    mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("Invalid UR path length"));
-    break;
-  case UR_DECODER_ERROR_INVALID_SEQUENCE_COMPONENT:
-    mp_raise_msg(&mp_type_ValueError,
-                 MP_ERROR_TEXT("Invalid sequence component"));
-    break;
-  case UR_DECODER_ERROR_INVALID_FRAGMENT:
-    mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("Invalid fragment"));
-    break;
-  case UR_DECODER_ERROR_INVALID_PART:
-    mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("Invalid part"));
-    break;
-  case UR_DECODER_ERROR_INVALID_CHECKSUM:
-    mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("Invalid checksum"));
-    break;
-  case UR_DECODER_ERROR_MEMORY:
-    mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("Memory error"));
-    break;
-  default:
-    mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("URDecoder error"));
-    break;
-  }
-}
-
 // UR class structure for returning results (matches Python UR interface)
 typedef struct {
   mp_obj_base_t base;
@@ -195,9 +159,8 @@ static void ur_decoder_print(const mp_print_t *print, mp_obj_t self_in,
   (void)kind;
   mp_obj_ur_decoder_t *self = MP_OBJ_TO_PTR(self_in);
   double progress = ur_decoder_estimated_percent_complete(self->decoder);
-  mp_printf(print, "URDecoder(complete=%s, progress=%.1f%%)",
-            ur_decoder_is_complete(self->decoder) ? "True" : "False",
-            progress * 100.0);
+  mp_printf(print, "URDecoder(state=%d, progress=%.1f%%)",
+            (int)ur_decoder_get_state(self->decoder), progress * 100.0);
 }
 
 static mp_obj_t ur_decoder_make_new(const mp_obj_type_t *type, size_t n_args,
@@ -230,7 +193,11 @@ static mp_obj_t ur_decoder_del(mp_obj_t self_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ur_decoder_del_obj, ur_decoder_del);
 
-// receive_part method
+// receive_part method — returns the decoder state (one of the module's
+// DECODER_* constants) after processing, mirroring the C API. Decode
+// errors are returned, not raised: junk or misread frames are expected in
+// a QR scan loop. NOTE: DECODER_OK == 0 is falsy in Python — compare the
+// return against the DECODER_* constants, never use it as a boolean.
 static mp_obj_t ur_decoder_receive_part_py(mp_obj_t self_in,
                                            mp_obj_t part_str) {
   mp_obj_ur_decoder_t *self = MP_OBJ_TO_PTR(self_in);
@@ -240,103 +207,11 @@ static mp_obj_t ur_decoder_receive_part_py(mp_obj_t self_in,
   }
 
   const char *part_cstr = mp_obj_str_get_str(part_str);
-  bool result = ur_decoder_receive_part(self->decoder, part_cstr);
-
-  if (!result) {
-    raise_ur_decoder_error(ur_decoder_get_last_error(self->decoder));
-  }
-
-  return mp_obj_new_bool(result);
+  return mp_obj_new_int(
+      (mp_int_t)ur_decoder_receive_part(self->decoder, part_cstr));
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(ur_decoder_receive_part_obj,
                                  ur_decoder_receive_part_py);
-
-// is_complete method
-static mp_obj_t ur_decoder_is_complete_py(mp_obj_t self_in) {
-  mp_obj_ur_decoder_t *self = MP_OBJ_TO_PTR(self_in);
-
-  if (!self->decoder) {
-    return mp_const_false;
-  }
-
-  return mp_obj_new_bool(ur_decoder_is_complete(self->decoder));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ur_decoder_is_complete_obj,
-                                 ur_decoder_is_complete_py);
-
-// is_success method
-static mp_obj_t ur_decoder_is_success_py(mp_obj_t self_in) {
-  mp_obj_ur_decoder_t *self = MP_OBJ_TO_PTR(self_in);
-
-  if (!self->decoder) {
-    return mp_const_false;
-  }
-
-  return mp_obj_new_bool(ur_decoder_is_success(self->decoder));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ur_decoder_is_success_obj,
-                                 ur_decoder_is_success_py);
-
-// `result`, `expected_part_count`, and `processed_parts_count` are exposed as
-// read-only attributes via ur_decoder_attr() below (not as bound methods), so
-// these method-object definitions are unused. Kept only for the legacy
-// (pre-v1.19) build; modern toolchains reject them under
-// -Werror=unused-const-variable.
-#if !defined(MP_DEFINE_CONST_OBJ_TYPE)
-// result property
-static mp_obj_t ur_decoder_result(mp_obj_t self_in) {
-  mp_obj_ur_decoder_t *self = MP_OBJ_TO_PTR(self_in);
-
-  if (!self->decoder) {
-    mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("URDecoder is closed"));
-  }
-
-  // Check if decoding was successful before getting the result
-  if (!ur_decoder_is_success(self->decoder)) {
-    raise_ur_decoder_error(ur_decoder_get_last_error(self->decoder));
-  }
-
-  ur_result_t *result = ur_decoder_get_result(self->decoder);
-  if (!result) {
-    return mp_const_none;
-  }
-
-  // Create UR object (matches Python interface)
-  mp_obj_t type_str = mp_obj_new_str(result->type, strlen(result->type));
-  mp_obj_t cbor_bytes =
-      mp_obj_new_bytearray(result->cbor_len, result->cbor_data);
-
-  mp_obj_t args[2] = {type_str, cbor_bytes};
-  return ur_make_new(&mp_type_ur, 2, 0, args);
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ur_decoder_result_obj, ur_decoder_result);
-
-// expected_part_count method
-static mp_obj_t ur_decoder_expected_part_count_py(mp_obj_t self_in) {
-  mp_obj_ur_decoder_t *self = MP_OBJ_TO_PTR(self_in);
-
-  if (!self->decoder) {
-    return mp_obj_new_int(0);
-  }
-
-  return mp_obj_new_int(ur_decoder_expected_part_count(self->decoder));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ur_decoder_expected_part_count_obj,
-                                 ur_decoder_expected_part_count_py);
-
-// processed_parts_count property
-static mp_obj_t ur_decoder_processed_parts_count_py(mp_obj_t self_in) {
-  mp_obj_ur_decoder_t *self = MP_OBJ_TO_PTR(self_in);
-
-  if (!self->decoder) {
-    return mp_obj_new_int(0);
-  }
-
-  return mp_obj_new_int(ur_decoder_processed_parts_count(self->decoder));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ur_decoder_processed_parts_count_obj,
-                                 ur_decoder_processed_parts_count_py);
-#endif // !MP_DEFINE_CONST_OBJ_TYPE
 
 // estimated_percent_complete(weight_mixed_frames=False) method.
 // weight_mixed_frames is an opt-in flag: the default (False) returns the
@@ -371,8 +246,6 @@ static const mp_rom_map_elem_t ur_decoder_locals_dict_table[] = {
     {MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&ur_decoder_del_obj)},
     {MP_ROM_QSTR(MP_QSTR_receive_part),
      MP_ROM_PTR(&ur_decoder_receive_part_obj)},
-    {MP_ROM_QSTR(MP_QSTR_is_complete), MP_ROM_PTR(&ur_decoder_is_complete_obj)},
-    {MP_ROM_QSTR(MP_QSTR_is_success), MP_ROM_PTR(&ur_decoder_is_success_obj)},
     {MP_ROM_QSTR(MP_QSTR_estimated_percent_complete),
      MP_ROM_PTR(&ur_decoder_estimated_percent_complete_obj)},
 };
@@ -404,6 +277,10 @@ static void ur_decoder_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
 
       mp_obj_t args[2] = {type_str, cbor_bytes};
       dest[0] = ur_make_new(&mp_type_ur, 2, 0, args);
+    } else if (attr == MP_QSTR_state) {
+      // Closed decoder -> NULL -> DECODER_ERR_NULL_POINTER, matching the C
+      // API's get_state(NULL) behavior.
+      dest[0] = mp_obj_new_int((mp_int_t)ur_decoder_get_state(self->decoder));
     } else if (attr == MP_QSTR_expected_part_count) {
       if (!self->decoder) {
         dest[0] = mp_obj_new_int(0);
@@ -1011,6 +888,31 @@ static const mp_rom_map_elem_t bc_ur_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_UREncoder), MP_ROM_PTR(&mp_type_ur_encoder)},
     {MP_ROM_QSTR(MP_QSTR_UR), MP_ROM_PTR(&mp_type_ur)},
     {MP_ROM_QSTR(MP_QSTR_Types), MP_ROM_PTR(&types_module)},
+    // Decoder state constants (mirror ur_decoder_state_t). Compare
+    // URDecoder.receive_part() / URDecoder.state against these; never use
+    // the value as a boolean — DECODER_OK is 0 and therefore falsy.
+    {MP_ROM_QSTR(MP_QSTR_DECODER_OK), MP_ROM_INT(UR_DECODER_OK)},
+    {MP_ROM_QSTR(MP_QSTR_DECODER_PROCESSING),
+     MP_ROM_INT(UR_DECODER_PROCESSING)},
+    {MP_ROM_QSTR(MP_QSTR_DECODER_NO_RESULT), MP_ROM_INT(UR_DECODER_NO_RESULT)},
+    {MP_ROM_QSTR(MP_QSTR_DECODER_ERR_INVALID_SCHEME),
+     MP_ROM_INT(UR_DECODER_ERROR_INVALID_SCHEME)},
+    {MP_ROM_QSTR(MP_QSTR_DECODER_ERR_INVALID_TYPE),
+     MP_ROM_INT(UR_DECODER_ERROR_INVALID_TYPE)},
+    {MP_ROM_QSTR(MP_QSTR_DECODER_ERR_INVALID_PATH_LENGTH),
+     MP_ROM_INT(UR_DECODER_ERROR_INVALID_PATH_LENGTH)},
+    {MP_ROM_QSTR(MP_QSTR_DECODER_ERR_INVALID_SEQUENCE_COMPONENT),
+     MP_ROM_INT(UR_DECODER_ERROR_INVALID_SEQUENCE_COMPONENT)},
+    {MP_ROM_QSTR(MP_QSTR_DECODER_ERR_INVALID_FRAGMENT),
+     MP_ROM_INT(UR_DECODER_ERROR_INVALID_FRAGMENT)},
+    {MP_ROM_QSTR(MP_QSTR_DECODER_ERR_INVALID_PART),
+     MP_ROM_INT(UR_DECODER_ERROR_INVALID_PART)},
+    {MP_ROM_QSTR(MP_QSTR_DECODER_ERR_INVALID_CHECKSUM),
+     MP_ROM_INT(UR_DECODER_ERROR_INVALID_CHECKSUM)},
+    {MP_ROM_QSTR(MP_QSTR_DECODER_ERR_MEMORY),
+     MP_ROM_INT(UR_DECODER_ERROR_MEMORY)},
+    {MP_ROM_QSTR(MP_QSTR_DECODER_ERR_NULL_POINTER),
+     MP_ROM_INT(UR_DECODER_ERROR_NULL_POINTER)},
 };
 static MP_DEFINE_CONST_DICT(bc_ur_globals, bc_ur_globals_table);
 

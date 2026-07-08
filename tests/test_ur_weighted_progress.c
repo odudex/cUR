@@ -41,12 +41,13 @@ static bool test_file(const char *filepath) {
   double prev = 0.0;
   int parts_used = 0;
   for (int i = 0; i < fragment_count && ok; i++) {
-    if (!ur_decoder_receive_part(decoder, fragments[i]))
+    ur_decoder_state_t state = ur_decoder_receive_part(decoder, fragments[i]);
+    if (ur_decoder_state_is_error(state))
       continue;
     parts_used++;
 
     double weighted = ur_decoder_estimated_percent_complete_weighted(decoder);
-    bool complete = ur_decoder_is_complete(decoder);
+    bool complete = ur_decoder_state_is_terminal(state);
 
     if (weighted < 0.0 || weighted > 1.0) {
       fprintf(stderr, "❌ Frame %d: %.6f outside [0, 1]\n", i, weighted);
@@ -72,7 +73,7 @@ static bool test_file(const char *filepath) {
       break;
   }
 
-  if (ok && !ur_decoder_is_complete(decoder)) {
+  if (ok && ur_decoder_get_state(decoder) != UR_DECODER_OK) {
     fprintf(stderr, "❌ Decode did not complete after %d parts\n", parts_used);
     ok = false;
   }

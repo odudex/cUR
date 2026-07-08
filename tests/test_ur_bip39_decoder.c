@@ -160,26 +160,18 @@ static bool test_file(const char *filepath) {
 
   bool success = false;
 
-  // Feed the UR string to the decoder
-  if (ur_decoder_receive_part(decoder, ur_string)) {
-    if (ur_decoder_is_complete(decoder)) {
-      printf("✓ Decoding complete\n");
-    } else {
-      fprintf(stderr, "❌ Decoder not complete after receiving part\n");
-      ur_decoder_free(decoder);
-      free(ur_string);
-      free_words(expected_words, expected_count);
-      return false;
-    }
-  } else {
-    fprintf(stderr, "❌ Failed to receive UR part\n");
+  // Feed the UR string to the decoder — a single-part UR must return OK
+  // directly.
+  if (ur_decoder_receive_part(decoder, ur_string) != UR_DECODER_OK) {
+    fprintf(stderr, "❌ Single-part UR did not decode to UR_DECODER_OK\n");
     ur_decoder_free(decoder);
     free(ur_string);
     free_words(expected_words, expected_count);
     return false;
   }
+  printf("✓ Decoding complete\n");
 
-  if (ur_decoder_is_complete(decoder) && ur_decoder_is_success(decoder)) {
+  if (ur_decoder_get_state(decoder) == UR_DECODER_OK) {
     printf("✓ Decoding successful\n");
 
     // Get the UR result

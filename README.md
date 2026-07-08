@@ -65,20 +65,37 @@ ur_encoder_t *enc = ur_encoder_new("bytes", cbor, cbor_len,
 
 ur_decoder_t *dec = ur_decoder_new();
 char *part = NULL;
-while (!ur_decoder_is_complete(dec)) {
+ur_decoder_state_t state = UR_DECODER_PROCESSING;
+while (!ur_decoder_state_is_terminal(state)) {
     if (!ur_encoder_next_part(enc, &part)) break;
-    ur_decoder_receive_part(dec, part);
+    state = ur_decoder_receive_part(dec, part);
     free(part);
 }
 
-if (ur_decoder_is_success(dec)) {
-    ur_result_t *r = ur_decoder_get_result(dec);
+if (state == UR_DECODER_OK) {
+    ur_result_t *r = ur_decoder_get_result(dec); /* guaranteed non-NULL */
     // r->type, r->cbor_data, r->cbor_len
 }
 
 ur_decoder_free(dec);
 ur_encoder_free(enc);
 ```
+
+The decoder is a state machine: `ur_decoder_receive_part()` returns the
+state after each part (`ur_decoder_get_state()` polls it without feeding).
+`UR_DECODER_PROCESSING` means keep feeding parts; `UR_DECODER_OK` means
+done with a result available; terminal states (`UR_DECODER_OK`,
+`UR_DECODER_NO_RESULT`, `UR_DECODER_ERROR_INVALID_CHECKSUM`) are
+permanent, while every other error is transient — the offending frame was
+rejected, and it is safe to keep feeding parts (misread QR frames are
+expected during scanning).
+
+> **Migrating from the `is_complete`/`is_success`/`get_last_error` API:**
+> `ur_decoder_receive_part()` now returns `ur_decoder_state_t`, and
+> `UR_DECODER_OK == 0`, so a legacy `if (ur_decoder_receive_part(...))`
+> check silently inverts its meaning. Compare the return value against
+> the state constants (or use `ur_decoder_state_is_error()` /
+> `ur_decoder_state_is_terminal()`); never treat it as a boolean.
 
 Type-specific helpers (`bytes_from_cbor`, `psbt_from_cbor`,
 `output_from_descriptor_string`, etc.) live in `src/types/*.h`.

@@ -134,7 +134,8 @@ static bool test_file(const char *filepath) {
   int parts_sent = 0;
   size_t max_parts = ur_encoder_seq_len(encoder) * 2 + 10;
 
-  while (!ur_decoder_is_complete(decoder) && parts_sent < (int)max_parts) {
+  ur_decoder_state_t state = UR_DECODER_PROCESSING;
+  while (!ur_decoder_state_is_terminal(state) && parts_sent < (int)max_parts) {
     char *part = NULL;
     if (!ur_encoder_next_part(encoder, &part)) {
       fprintf(stderr, "Failed to get next UR part\n");
@@ -145,12 +146,12 @@ static bool test_file(const char *filepath) {
       free(descriptor);
       return false;
     }
-    ur_decoder_receive_part(decoder, part);
+    state = ur_decoder_receive_part(decoder, part);
     free(part);
     parts_sent++;
   }
 
-  if (!ur_decoder_is_complete(decoder) || !ur_decoder_is_success(decoder)) {
+  if (state != UR_DECODER_OK) {
     fprintf(stderr, "UR decoding failed after %d parts\n", parts_sent);
     ur_decoder_free(decoder);
     ur_encoder_free(encoder);

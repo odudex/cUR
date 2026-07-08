@@ -51,14 +51,22 @@ static void test_null_and_empty(void) {
   ur_decoder_t *d = ur_decoder_new();
   ASSERT(d != NULL, "decoder_new returns non-NULL");
 
-  ASSERT(!ur_decoder_receive_part(d, NULL), "receive_part rejects NULL string");
-  ASSERT(ur_decoder_get_last_error(d) == UR_DECODER_ERROR_NULL_POINTER,
-         "  -> sets NULL_POINTER error code");
+  ASSERT(ur_decoder_get_state(d) == UR_DECODER_PROCESSING,
+         "fresh decoder state is PROCESSING");
+  ASSERT(ur_decoder_get_state(NULL) == UR_DECODER_ERROR_NULL_POINTER,
+         "get_state(NULL) returns NULL_POINTER");
 
-  ASSERT(!ur_decoder_receive_part(NULL, VALID_FRAGMENT),
+  ASSERT(ur_decoder_receive_part(d, NULL) == UR_DECODER_ERROR_NULL_POINTER,
+         "receive_part rejects NULL string");
+  ASSERT(ur_decoder_get_state(d) == UR_DECODER_ERROR_NULL_POINTER,
+         "  -> state reflects NULL_POINTER");
+
+  ASSERT(ur_decoder_receive_part(NULL, VALID_FRAGMENT) ==
+             UR_DECODER_ERROR_NULL_POINTER,
          "receive_part rejects NULL decoder");
 
-  ASSERT(!ur_decoder_receive_part(d, ""), "receive_part rejects empty string");
+  ASSERT(ur_decoder_receive_part(d, "") == UR_DECODER_ERROR_INVALID_SCHEME,
+         "receive_part rejects empty string");
 
   ur_decoder_free(d);
   ur_decoder_free(NULL); // no-op, must not crash
@@ -81,8 +89,8 @@ static void test_malformed_ur(void) {
 
   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
     ur_decoder_t *d = ur_decoder_new();
-    bool ok = ur_decoder_receive_part(d, cases[i]);
-    ASSERT(!ok, cases[i]);
+    ur_decoder_state_t state = ur_decoder_receive_part(d, cases[i]);
+    ASSERT(ur_decoder_state_is_error(state), cases[i]);
     ur_decoder_free(d);
   }
 }
@@ -101,8 +109,14 @@ static void test_bad_crc(void) {
   mutated[mid] = (mutated[mid] == 'a' ? 'b' : 'a');
 
   ur_decoder_t *d = ur_decoder_new();
-  ASSERT(!ur_decoder_receive_part(d, mutated),
+  ASSERT(ur_decoder_state_is_error(ur_decoder_receive_part(d, mutated)),
          "rejects fragment with flipped letter");
+
+  // Transient errors clear on the next receive_part: feeding a pristine
+  // fragment into the same decoder resumes decoding.
+  ASSERT(ur_decoder_receive_part(d, VALID_FRAGMENT) == UR_DECODER_PROCESSING,
+         "pristine fragment after transient error returns PROCESSING");
+
   ur_decoder_free(d);
   free(mutated);
 }
@@ -118,7 +132,8 @@ static void test_truncated_fragment(void) {
   truncated[n - 20] = '\0';
 
   ur_decoder_t *d = ur_decoder_new();
-  ASSERT(!ur_decoder_receive_part(d, truncated), "rejects truncated fragment");
+  ASSERT(ur_decoder_state_is_error(ur_decoder_receive_part(d, truncated)),
+         "rejects truncated fragment");
   ur_decoder_free(d);
   free(truncated);
 }
@@ -143,10 +158,70 @@ static void test_empty_fragment_payload(void) {
   snprintf(ur, n, "ur:bytes/1-1/%s", bytewords);
 
   ur_decoder_t *d = ur_decoder_new();
-  ASSERT(!ur_decoder_receive_part(d, ur),
+  ASSERT(ur_decoder_receive_part(d, ur) == UR_DECODER_ERROR_INVALID_FRAGMENT,
          "rejects empty-byte-string fragment payload");
-  ASSERT(ur_decoder_get_last_error(d) == UR_DECODER_ERROR_INVALID_FRAGMENT,
-         "  -> sets INVALID_FRAGMENT error code");
+  ASSERT(ur_decoder_get_state(d) == UR_DECODER_ERROR_INVALID_FRAGMENT,
+         "  -> state agrees with returned INVALID_FRAGMENT");
+
+  ur_decoder_free(d);
+  free(bytewords);
+  free(ur);
+}
+
+// A 1-of-1 multipart fragment whose CBOR checksum field is deliberately
+// wrong: the fountain layer completes, verification fails, and the decoder
+// must land in the terminal INVALID_CHECKSUM state and stay there.
+static void test_checksum_terminal(void) {
+  printf("\n=== checksum_terminal ===\n");
+  // CBOR: [seq_num=1, seq_len=1, message_len=4, checksum=0, h'DEADBEEF'].
+  // CRC32 of DEADBEEF is not 0, so verification fails.
+  uint8_t cbor[] = {0x85, 0x01, 0x01, 0x04, 0x00, 0x44, 0xDE, 0xAD, 0xBE, 0xEF};
+  char *bytewords = NULL;
+  ASSERT(bytewords_encode(cbor, sizeof(cbor), &bytewords),
+         "bytewords_encode crafted fragment");
+
+  size_t n = strlen("ur:bytes/1-1/") + strlen(bytewords) + 1;
+  char *ur = malloc(n);
+  ASSERT(ur != NULL, "alloc ur string");
+  snprintf(ur, n, "ur:bytes/1-1/%s", bytewords);
+
+  ur_decoder_t *d = ur_decoder_new();
+  ASSERT(ur_decoder_receive_part(d, ur) == UR_DECODER_ERROR_INVALID_CHECKSUM,
+         "bad-checksum completing frame returns INVALID_CHECKSUM");
+  ASSERT(ur_decoder_get_result(d) == NULL, "no result after checksum failure");
+  ASSERT(ur_decoder_receive_part(d, VALID_FRAGMENT) ==
+             UR_DECODER_ERROR_INVALID_CHECKSUM,
+         "terminal state sticks: further parts are not processed");
+  ASSERT(ur_decoder_receive_part(d, NULL) == UR_DECODER_ERROR_INVALID_CHECKSUM,
+         "terminal state beats NULL input");
+
+  ur_decoder_free(d);
+  free(bytewords);
+  free(ur);
+}
+
+// A valid single-part UR reaches the terminal OK state: the result is
+// guaranteed non-NULL and further parts are ignored.
+static void test_ok_terminal(void) {
+  printf("\n=== ok_terminal ===\n");
+  // CBOR byte string h'DEADBEEF' as the single-part payload.
+  uint8_t cbor[] = {0x44, 0xDE, 0xAD, 0xBE, 0xEF};
+  char *bytewords = NULL;
+  ASSERT(bytewords_encode(cbor, sizeof(cbor), &bytewords),
+         "bytewords_encode single-part payload");
+
+  size_t n = strlen("ur:bytes/") + strlen(bytewords) + 1;
+  char *ur = malloc(n);
+  ASSERT(ur != NULL, "alloc ur string");
+  snprintf(ur, n, "ur:bytes/%s", bytewords);
+
+  ur_decoder_t *d = ur_decoder_new();
+  ASSERT(ur_decoder_receive_part(d, ur) == UR_DECODER_OK,
+         "valid single-part UR returns OK");
+  ASSERT(ur_decoder_get_state(d) == UR_DECODER_OK, "state polls as OK");
+  ASSERT(ur_decoder_get_result(d) != NULL, "OK guarantees non-NULL result");
+  ASSERT(ur_decoder_receive_part(d, VALID_FRAGMENT) == UR_DECODER_OK,
+         "terminal OK sticks: further parts are not processed");
 
   ur_decoder_free(d);
   free(bytewords);
@@ -183,6 +258,8 @@ int main(void) {
   test_bad_crc();
   test_truncated_fragment();
   test_empty_fragment_payload();
+  test_checksum_terminal();
+  test_ok_terminal();
   test_malformed_cbor();
 
   printf("\n=== Summary ===\n");

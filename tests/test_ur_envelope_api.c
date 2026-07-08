@@ -45,7 +45,8 @@ static bool test_file(const char *filepath) {
 
   size_t prev = 0;
   for (int i = 0; i < fragment_count && ok; i++) {
-    if (!ur_decoder_receive_part(decoder, fragments[i]))
+    ur_decoder_state_t state = ur_decoder_receive_part(decoder, fragments[i]);
+    if (ur_decoder_state_is_error(state))
       continue;
 
     const size_t received = ur_decoder_received_parts_count(decoder);
@@ -64,17 +65,19 @@ static bool test_file(const char *filepath) {
     prev = received;
 
     // A duplicate of a frame already seen must not change the count
-    if (ok && ur_decoder_receive_part(decoder, fragments[i]) &&
+    if (ok &&
+        !ur_decoder_state_is_error(
+            ur_decoder_receive_part(decoder, fragments[i])) &&
         ur_decoder_received_parts_count(decoder) != received) {
       fprintf(stderr, "❌ Frame %d: duplicate changed received count\n", i);
       ok = false;
     }
 
-    if (ur_decoder_is_complete(decoder))
+    if (ur_decoder_state_is_terminal(state))
       break;
   }
 
-  if (ok && !ur_decoder_is_success(decoder)) {
+  if (ok && ur_decoder_get_state(decoder) != UR_DECODER_OK) {
     fprintf(stderr, "❌ Decode did not succeed\n");
     ok = false;
   }
@@ -138,8 +141,7 @@ static bool test_single_part_encoder(void) {
 
   if (ok) {
     ur_decoder_t *decoder = ur_decoder_new();
-    if (!decoder || !ur_decoder_receive_part(decoder, part) ||
-        !ur_decoder_is_success(decoder)) {
+    if (!decoder || ur_decoder_receive_part(decoder, part) != UR_DECODER_OK) {
       fprintf(stderr, "❌ Single part did not decode\n");
       ok = false;
     } else {

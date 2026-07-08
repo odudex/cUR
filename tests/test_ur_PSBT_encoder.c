@@ -91,7 +91,8 @@ static bool test_file(const char *filename) {
 
   printf("Encoding and decoding:\n");
 
-  while (!ur_decoder_is_complete(decoder) && parts_sent < (int)max_parts) {
+  ur_decoder_state_t state = UR_DECODER_PROCESSING;
+  while (!ur_decoder_state_is_terminal(state) && parts_sent < (int)max_parts) {
     char *part = NULL;
     if (!ur_encoder_next_part(encoder, &part)) {
       printf("❌ Failed to get next part\n");
@@ -104,11 +105,11 @@ static bool test_file(const char *filename) {
     }
 
     // Feed to decoder
-    ur_decoder_receive_part(decoder, part);
+    state = ur_decoder_receive_part(decoder, part);
     free(part);
     parts_sent++;
 
-    if (parts_sent % 10 == 0 || ur_decoder_is_complete(decoder)) {
+    if (parts_sent % 10 == 0 || ur_decoder_state_is_terminal(state)) {
       printf("  Parts sent: %d, Progress: %.1f%%\n", parts_sent,
              ur_decoder_estimated_percent_complete(decoder) * 100.0);
     }
@@ -116,9 +117,9 @@ static bool test_file(const char *filename) {
 
   bool success = false;
 
-  if (!ur_decoder_is_complete(decoder)) {
+  if (state == UR_DECODER_PROCESSING) {
     printf("❌ Decoder did not complete after %d parts\n", parts_sent);
-  } else if (!ur_decoder_is_success(decoder)) {
+  } else if (state != UR_DECODER_OK) {
     printf("❌ Decoder completed but not successful\n");
   } else {
     printf("✓ Decoder completed successfully\n");

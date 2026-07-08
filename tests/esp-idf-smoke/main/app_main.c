@@ -21,7 +21,7 @@ void app_main(void) {
   }
 
   // Negative path: decoder must reject malformed input without crashing.
-  if (ur_decoder_receive_part(dec, "not-a-ur")) {
+  if (!ur_decoder_state_is_error(ur_decoder_receive_part(dec, "not-a-ur"))) {
     ESP_LOGE(TAG, "decoder accepted malformed input");
     ur_decoder_free(dec);
     return;

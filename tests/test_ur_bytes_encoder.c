@@ -80,14 +80,14 @@ static bool test_file(const char *filepath) {
 
   // Feed all fragments to initial decoder
   for (int i = 0; i < fragment_count; i++) {
-    ur_decoder_receive_part(decoder1, fragments[i]);
-    if (ur_decoder_is_complete(decoder1)) {
+    if (ur_decoder_state_is_terminal(
+            ur_decoder_receive_part(decoder1, fragments[i]))) {
       printf("Initial decoding complete after %d parts\n", i + 1);
       break;
     }
   }
 
-  if (!ur_decoder_is_complete(decoder1) || !ur_decoder_is_success(decoder1)) {
+  if (ur_decoder_get_state(decoder1) != UR_DECODER_OK) {
     printf("❌ Initial decoding failed\n");
     ur_decoder_free(decoder1);
     free_fragments(fragments, fragment_count);
@@ -201,7 +201,8 @@ static bool test_file(const char *filepath) {
 
   printf("Encoding and decoding:\n");
 
-  while (!ur_decoder_is_complete(decoder2) && parts_sent < (int)max_parts) {
+  ur_decoder_state_t state2 = UR_DECODER_PROCESSING;
+  while (!ur_decoder_state_is_terminal(state2) && parts_sent < (int)max_parts) {
     char *part = NULL;
     if (!ur_encoder_next_part(encoder, &part)) {
       printf("❌ Failed to get next part\n");
@@ -216,11 +217,11 @@ static bool test_file(const char *filepath) {
     }
 
     // Feed to decoder
-    ur_decoder_receive_part(decoder2, part);
+    state2 = ur_decoder_receive_part(decoder2, part);
     free(part);
     parts_sent++;
 
-    if (parts_sent % 10 == 0 || ur_decoder_is_complete(decoder2)) {
+    if (parts_sent % 10 == 0 || ur_decoder_state_is_terminal(state2)) {
       printf("  Parts sent: %d, Progress: %.1f%%\n", parts_sent,
              ur_decoder_estimated_percent_complete(decoder2) * 100.0);
     }
@@ -228,9 +229,9 @@ static bool test_file(const char *filepath) {
 
   bool success = false;
 
-  if (!ur_decoder_is_complete(decoder2)) {
+  if (state2 == UR_DECODER_PROCESSING) {
     printf("❌ Decoder did not complete after %d parts\n", parts_sent);
-  } else if (!ur_decoder_is_success(decoder2)) {
+  } else if (state2 != UR_DECODER_OK) {
     printf("❌ Decoder completed but not successful\n");
   } else {
     printf("✓ Decoder completed successfully\n");
