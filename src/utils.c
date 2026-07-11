@@ -131,13 +131,39 @@ void ur_xor(uint8_t *restrict out, const uint8_t *restrict a,
  * where the fountain decoder's churn of variably-sized part buffers fragments
  * that scarce heap. These are plain CPU-accessed byte buffers, so cached PSRAM
  * is fine, and free() works on heap_caps allocations. Off-device: no-op.
- * Opt out with UR_NO_PSRAM_ALLOC (Kconfig: UR_ALLOC_PSRAM). */
-#if defined(ESP_PLATFORM) && !defined(UR_NO_PSRAM_ALLOC)
+ * Opt out with UR_NO_PSRAM_ALLOC (Kconfig: UR_ALLOC_PSRAM).
+ *
+ * With UR_XOR_ESP32P4_SIMD, allocations are additionally 16-byte aligned (the
+ * plain heap guarantees only 8): the PIE vector path requires 16-byte
+ * co-aligned XOR operands, and every fountain buffer comes from these
+ * allocators, so aligning here — the single choke point — makes the SIMD path
+ * engage instead of falling back to the word loop. Shrink-reallocs (received
+ * fragments) resize in place and keep the aligned address. This applies even
+ * when PSRAM routing is opted out. */
+#if defined(ESP_PLATFORM) &&                                                   \
+    (!defined(UR_NO_PSRAM_ALLOC) || defined(UR_XOR_ESP32P4_SIMD))
 #include "esp_heap_caps.h"
+
+#if defined(UR_XOR_ESP32P4_SIMD)
+#define ur_caps_alloc(sz, caps) heap_caps_aligned_alloc(16, (sz), (caps))
+#else
+#define ur_caps_alloc(sz, caps) heap_caps_malloc((sz), (caps))
+#endif
+
 static void *ur_heap_malloc(size_t size) {
-  void *p = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-  return p ? p : heap_caps_malloc(size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+#if !defined(UR_NO_PSRAM_ALLOC)
+  void *p = ur_caps_alloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (p)
+    return p;
+  return ur_caps_alloc(size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+#else
+  /* PSRAM routing opted out: same heaps malloc() would pick, just aligned. */
+  return ur_caps_alloc(size, MALLOC_CAP_DEFAULT);
+#endif
 }
+#define UR_MALLOC(sz) ur_heap_malloc(sz)
+
+#if !defined(UR_NO_PSRAM_ALLOC)
 static void *ur_heap_realloc(void *ptr, size_t size) {
   if (size == 0) {
     /* heap_caps_realloc(ptr, 0, caps) frees ptr and returns NULL; retrying
@@ -150,8 +176,11 @@ static void *ur_heap_realloc(void *ptr, size_t size) {
            : heap_caps_realloc(ptr, size,
                                MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
 }
-#define UR_MALLOC(sz) ur_heap_malloc(sz)
 #define UR_REALLOC(p, sz) ur_heap_realloc((p), (sz))
+#else
+#define UR_REALLOC(p, sz) realloc((p), (sz))
+#endif
+
 #else
 #define UR_MALLOC(sz) malloc(sz)
 #define UR_REALLOC(p, sz) realloc((p), (sz))

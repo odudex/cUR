@@ -17,7 +17,8 @@ config UR_XOR_ESP32P4_SIMD
         fountain-code XOR reduction. About 16x faster than a byte loop
         (and ~4x faster than the portable word-wise path) on aligned
         runs; unaligned data transparently falls back to the word-wise
-        path. ESP32-P4 only.
+        path. When enabled, cUR 16-byte-aligns its buffer allocations
+        so the vector path engages on them. ESP32-P4 only.
 
 config UR_ALLOC_PSRAM
     bool "Allocate working buffers in PSRAM"

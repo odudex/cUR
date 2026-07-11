@@ -248,7 +248,9 @@ bool fragment_array_add(fragment_array_t *arr, const uint8_t *data,
   if (!arr || !data || arr->count >= arr->capacity)
     return false;
 
-  arr->fragments[arr->count] = (uint8_t *)malloc(len);
+  // Through the platform allocator: PSRAM routing and, with the P4 SIMD
+  // XOR, the 16-byte alignment the vector path needs on these operands.
+  arr->fragments[arr->count] = (uint8_t *)safe_malloc_uninit(len);
   if (!arr->fragments[arr->count])
     return false;
 
@@ -301,7 +303,7 @@ bool fountain_encoder_partition_message(const uint8_t *message,
   // local buffer. Only the last fragment may need tail zero-padding.
   size_t offset = 0;
   while (offset < message_len) {
-    uint8_t *fragment = (uint8_t *)malloc(fragment_len);
+    uint8_t *fragment = (uint8_t *)safe_malloc_uninit(fragment_len);
     if (!fragment) {
       fragment_array_free(fragments);
       return false;
@@ -417,7 +419,10 @@ static bool mix_fragments(const fountain_encoder_t *encoder,
     return false;
   }
 
-  uint8_t *result = (uint8_t *)calloc(encoder->fragment_len, 1);
+  // safe_malloc (not bare calloc) so the buffer goes through the platform
+  // allocator routing — PSRAM placement and, with UR_XOR_ESP32P4_SIMD, the
+  // 16-byte alignment the vector XOR path needs.
+  uint8_t *result = safe_malloc(encoder->fragment_len);
   if (!result) {
     return false;
   }
