@@ -1,6 +1,7 @@
 #ifndef UR_SHA256_COMPAT_H
 #define UR_SHA256_COMPAT_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -15,10 +16,18 @@
 
 static inline void ur_sha256(const uint8_t *input, size_t len,
                              uint8_t output[32]) {
-  size_t hash_len = 0;
-  if (psa_crypto_init() != PSA_SUCCESS) {
-    abort();
+  // psa_crypto_init() is idempotent but takes the PSA global-data mutex on
+  // every call; init once per translation unit instead of once per hash
+  // (ur_sha256 runs per fountain part). psa_crypto_init() is safe to call
+  // again if a benign first-call race double-runs it.
+  static bool psa_ready = false;
+  if (!psa_ready) {
+    if (psa_crypto_init() != PSA_SUCCESS) {
+      abort();
+    }
+    psa_ready = true;
   }
+  size_t hash_len = 0;
   if (psa_hash_compute(PSA_ALG_SHA_256, input, len, output, 32, &hash_len) !=
           PSA_SUCCESS ||
       hash_len != 32) {

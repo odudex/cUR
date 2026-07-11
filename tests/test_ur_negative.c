@@ -9,10 +9,14 @@
  */
 
 #include "../src/bytewords.h"
+#include "../src/fountain_decoder.h"
+#include "../src/fountain_encoder.h"
+#include "../src/fountain_types.h"
 #include "../src/types/bytes_type.h"
 #include "../src/types/psbt.h"
 #include "../src/ur.h"
 #include "../src/ur_decoder.h"
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -251,6 +255,59 @@ static void test_malformed_cbor(void) {
          "psbt_from_cbor rejects trailing bytes");
 }
 
+// Regression for the fountain-layer heap out-of-bounds read in
+// reduce_part_by_part. Every part of a message carries the same padded
+// fragment length; a malformed stream that varies it (a short degree-1 part
+// {0} establishing the length, then a longer part whose fragment set contains
+// 0) used to reach the XOR reduction, where ur_xor read the longer part's
+// length out of the shorter stored part's buffer. The decoder must reject any
+// length-mismatched part at receive time so the reduction is never reached.
+// Under `make DEBUG=1 test` (ASan) this also proves there is no OOB access.
+static void test_fountain_fragment_length_mismatch(void) {
+  printf("\n=== fountain_fragment_length_mismatch ===\n");
+  const size_t short_len = 10, long_len = 4000;
+  const uint32_t checksum = 0x11223344u;
+
+  // Sweep second-part sequence numbers: for at least one of them the decoder's
+  // fragment selection yields a set that strictly contains the stored {0},
+  // which is what drives reduce_part_by_part. The first part fixes the
+  // expected fragment length at short_len, so every long_len part must be
+  // rejected regardless of its index set.
+  int trials = 0, rejected = 0;
+  for (uint32_t seq = 2; seq < 400; seq++) {
+    fountain_decoder_t *d = fountain_decoder_new();
+
+    fountain_encoder_part_t simple = {0};
+    simple.seq_num = 1;
+    simple.seq_len = 2;
+    simple.message_len = 2 * short_len;
+    simple.checksum = checksum;
+    simple.data = calloc(short_len, 1);
+    simple.data_len = short_len;
+    fountain_decoder_receive_part(d, &simple); // degree-1 {0}, sets the length
+    fountain_encoder_part_free(&simple);
+
+    fountain_encoder_part_t longer = {0};
+    longer.seq_num = seq;
+    longer.seq_len = 2;
+    longer.message_len = 2 * short_len;
+    longer.checksum = checksum;
+    longer.data = calloc(long_len, 1);
+    longer.data_len = long_len;
+    bool accepted = fountain_decoder_receive_part(d, &longer);
+    fountain_encoder_part_free(&longer);
+
+    trials++;
+    if (!accepted)
+      rejected++;
+
+    fountain_decoder_free(d);
+  }
+
+  ASSERT(rejected == trials,
+         "length-mismatched fountain parts are all rejected (no OOB reduce)");
+}
+
 int main(void) {
   printf("=== UR Negative-Path Tests ===\n");
   test_null_and_empty();
@@ -261,6 +318,7 @@ int main(void) {
   test_checksum_terminal();
   test_ok_terminal();
   test_malformed_cbor();
+  test_fountain_fragment_length_mismatch();
 
   printf("\n=== Summary ===\n");
   printf("Tests passed: %d/%d\n", asserts - failures, asserts);

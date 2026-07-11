@@ -16,8 +16,13 @@
 
 #include <string.h>
 
-#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
-#error "UR_CRC32_SLICE_BY_8 requires little-endian word loads"
+// Fail closed: the slice-by-8 kernel does little-endian word loads, so refuse
+// to build unless the byte order is known to be little-endian. A compiler that
+// doesn't define __BYTE_ORDER__ can't prove it, so it must use the portable
+// nibble table (build without UR_CRC32_SLICE_BY_8) instead of silently
+// computing wrong CRCs.
+#if !defined(__BYTE_ORDER__) || __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
+#error "UR_CRC32_SLICE_BY_8 requires a known little-endian byte order"
 #endif
 
 #include "crc32_slice_table.h"

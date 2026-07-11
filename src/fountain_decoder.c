@@ -1302,6 +1302,16 @@ bool fountain_decoder_receive_part(fountain_decoder_t *decoder,
     }
   }
 
+  // Every part of a message carries the same padded fragment length
+  // (ceil(message_len / seq_len), last fragment zero-padded by the encoder).
+  // A part whose length disagrees is malformed; accepting it would let the XOR
+  // reduction (reduce_part_by_part / create_symmetric_diff / reduce_mixed_by)
+  // read past a shorter part's buffer. The first part sets the expected length
+  // above, so it always passes this check.
+  if (part->data_len != decoder->expected_fragment_len) {
+    return false;
+  }
+
   decoder_part_t decoder_part;
   if (!create_decoder_part_from_encoder_part(part, &decoder_part,
                                              &decoder->degree_sampler)) {
