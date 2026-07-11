@@ -15,6 +15,39 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Allocator routing. On an ESP32 with external SPIRAM, the fountain decoder's
+ * working set — up to MAX_MIXED_PARTS part buffers plus per-part fragments,
+ * allocated and freed as parts arrive and are XOR-reduced — is many small,
+ * variably-sized allocations. ESP-IDF's default malloc() forces allocations at
+ * or below CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL (16 KB by default) into scarce
+ * INTERNAL RAM, where they steadily grow the footprint and, worse, fragment the
+ * heap: the largest contiguous free block shrinks well below total free. The
+ * damaging symptom is not the decode itself running out of memory, but a later
+ * allocation that needs a contiguous internal block failing even with ample
+ * free RAM — e.g. re-initializing another internal-RAM subsystem after a scan
+ * (re-launching the camera, whose driver needs a contiguous internal buffer/
+ * stack the fragmented heap can no longer supply). These are plain CPU-accessed
+ * byte buffers, so route them to PSRAM instead (falling back to internal RAM if
+ * no PSRAM is present). Off-device this is a no-op. */
+#ifdef ESP_PLATFORM
+#include "esp_heap_caps.h"
+static void *ur_heap_malloc(size_t size) {
+  void *p = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  return p ? p : heap_caps_malloc(size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+}
+static void *ur_heap_realloc(void *ptr, size_t size) {
+  void *p = heap_caps_realloc(ptr, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  return p ? p
+           : heap_caps_realloc(ptr, size,
+                               MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+}
+#define UR_MALLOC(sz) ur_heap_malloc(sz)
+#define UR_REALLOC(p, sz) ur_heap_realloc((p), (sz))
+#else
+#define UR_MALLOC(sz) malloc(sz)
+#define UR_REALLOC(p, sz) realloc((p), (sz))
+#endif
+
 bool str_has_prefix(const char *str, const char *prefix) {
   if (!str || !prefix)
     return false;
@@ -209,7 +242,7 @@ void free_string_array(char **strings, size_t count) {
 void *safe_malloc(size_t size) {
   if (size == 0)
     return NULL;
-  void *ptr = malloc(size);
+  void *ptr = UR_MALLOC(size);
   if (ptr) {
     memset(ptr, 0, size);
   }
@@ -219,10 +252,10 @@ void *safe_malloc(size_t size) {
 void *safe_malloc_uninit(size_t size) {
   if (size == 0)
     return NULL;
-  return malloc(size);
+  return UR_MALLOC(size);
 }
 
-void *safe_realloc(void *ptr, size_t size) { return realloc(ptr, size); }
+void *safe_realloc(void *ptr, size_t size) { return UR_REALLOC(ptr, size); }
 
 char *safe_strdup(const char *str) {
   if (!str)
