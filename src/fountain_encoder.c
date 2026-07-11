@@ -73,7 +73,7 @@ static bool cbor_lite_ensure_capacity(cbor_lite_encoder_t *enc,
   if (new_capacity > CBOR_ENCODER_MAX_CAPACITY)
     new_capacity = CBOR_ENCODER_MAX_CAPACITY;
 
-  uint8_t *new_buffer = (uint8_t *)realloc(enc->buffer, new_capacity);
+  uint8_t *new_buffer = (uint8_t *)safe_realloc(enc->buffer, new_capacity);
   if (!new_buffer)
     return false;
 
@@ -141,7 +141,10 @@ static bool cbor_lite_encoder_init(cbor_lite_encoder_t *enc,
   if (!enc)
     return false;
 
-  enc->buffer = (uint8_t *)malloc(initial_capacity);
+  // Through the platform allocator (PSRAM routing on ESP targets): this
+  // fragment-sized staging buffer is allocated and freed once per emitted
+  // part, exactly the churn the routing exists to keep off internal RAM.
+  enc->buffer = (uint8_t *)safe_malloc_uninit(initial_capacity);
   if (!enc->buffer)
     return false;
 
@@ -169,7 +172,7 @@ static uint8_t *cbor_lite_encoder_get_buffer(cbor_lite_encoder_t *enc,
   uint8_t *result = enc->buffer;
 
   if (enc->size < enc->capacity) {
-    uint8_t *shrunk = (uint8_t *)realloc(result, enc->size);
+    uint8_t *shrunk = (uint8_t *)safe_realloc(result, enc->size);
     if (shrunk)
       result = shrunk;
   }
