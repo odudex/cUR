@@ -115,7 +115,7 @@ compile-time flag picks the backend; see `src/sha256/sha256_compat.h`.
 | Target           | Flag                    | Backend                       |
 |------------------|-------------------------|-------------------------------|
 | PC (default)     | *(none)*                | bundled `src/sha256/sha256.c` |
-| ESP-IDF          | `UR_USE_MBEDTLS_SHA256` | mbedTLS (HW-accelerated)      |
+| ESP-IDF          | `UR_USE_MBEDTLS_SHA256` | mbedTLS PSA (HW-accelerated)  |
 | Kendryte K210    | `UR_USE_K210_SHA256`    | `sha256_hard_calculate` (HW)  |
 
 ### ESP-IDF component
@@ -166,7 +166,7 @@ src/
   ur_encoder.c, ur_decoder.c, ur.c   # top-level UR API
   fountain_encoder.c, fountain_decoder.c, fountain_utils.c
   bytewords.c, crc32.c
-  sha256/                            # bundled SHA-256 + compat shim
+  sha256/                            # bundled SHA-256 + backend selector
   types/                             # CBOR + per-type encode/decode
 tests/
   test_ur_*.c                        # one per UR type + negative

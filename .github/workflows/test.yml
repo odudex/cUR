@@ -36,8 +36,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # v5.5.x uses plain mbedtls; v6.x (mbedTLS v4) exercises the
-        # mbedtls_compat shim path. esp32p4 is Kern's target on IDF 6.
+        # v5.5.x and v6.x both exercise the public mbedTLS PSA SHA-256 path.
+        # esp32p4 is Kern's target on IDF 6.
         include:
           - idf: v5.5.4
             target: esp32
