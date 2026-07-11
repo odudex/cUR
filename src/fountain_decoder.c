@@ -16,6 +16,7 @@
 #include "crc32.h"
 #include "fountain_utils.h"
 #include "utils.h"
+#include "xor_internal.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -691,9 +692,7 @@ static bool reduce_part_by_part(const decoder_part_t *const a,
   }
 
   result->data_len = a->data_len;
-  for (size_t i = 0; i < a->data_len; i++) {
-    result->data[i] = a->data[i] ^ b->data[i];
-  }
+  ur_xor(result->data, a->data, b->data, a->data_len);
   return true;
 }
 
@@ -792,9 +791,10 @@ static void reduce_mixed_by(fountain_decoder_t *const decoder,
       }
 
       // XOR the data in-place.
-      for (size_t j = 0; j < entry->value.data_len && j < part->data_len; j++) {
-        entry->value.data[j] ^= part->data[j];
-      }
+      size_t xor_len = entry->value.data_len < part->data_len
+                           ? entry->value.data_len
+                           : part->data_len;
+      ur_xor_inplace(entry->value.data, part->data, xor_len);
 
       free(entry->key.indexes);
       entry->key = new_indexes;
@@ -893,9 +893,7 @@ static bool create_symmetric_diff(const decoder_part_t *const a,
   }
 
   result->data_len = a->data_len;
-  for (size_t i = 0; i < a->data_len; i++) {
-    result->data[i] = a->data[i] ^ b->data[i];
-  }
+  ur_xor(result->data, a->data, b->data, a->data_len);
 
   return true;
 }

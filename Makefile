@@ -96,12 +96,12 @@ clean:
 	rm -rf $(OBJDIR) $(TARGET) $(TEST_SUPPORT_OBJECTS) $(TEST_BINS)
 
 # Dependencies
-$(OBJDIR)/utils.o: $(SRCDIR)/utils.c $(SRCDIR)/utils.h
+$(OBJDIR)/utils.o: $(SRCDIR)/utils.c $(SRCDIR)/utils.h $(SRCDIR)/xor_internal.h
 $(OBJDIR)/crc32.o: $(SRCDIR)/crc32.c $(SRCDIR)/crc32.h $(SRCDIR)/crc32_slice_table.h
 $(OBJDIR)/bytewords.o: $(SRCDIR)/bytewords.c $(SRCDIR)/bytewords.h $(SRCDIR)/utils.h $(SRCDIR)/crc32.h
 $(OBJDIR)/fountain_utils.o: $(SRCDIR)/fountain_utils.c $(SRCDIR)/fountain_utils.h $(SRCDIR)/fountain_decoder.h $(SRCDIR)/fountain_types.h $(SRCDIR)/utils.h $(SRCDIR)/sha256/sha256_compat.h $(SRCDIR)/sha256/sha256.h
-$(OBJDIR)/fountain_decoder.o: $(SRCDIR)/fountain_decoder.c $(SRCDIR)/fountain_decoder.h $(SRCDIR)/fountain_utils.h $(SRCDIR)/fountain_types.h $(SRCDIR)/crc32.h $(SRCDIR)/utils.h
-$(OBJDIR)/fountain_encoder.o: $(SRCDIR)/fountain_encoder.c $(SRCDIR)/fountain_encoder.h $(SRCDIR)/fountain_decoder.h $(SRCDIR)/fountain_utils.h $(SRCDIR)/fountain_types.h $(SRCDIR)/crc32.h $(SRCDIR)/utils.h
+$(OBJDIR)/fountain_decoder.o: $(SRCDIR)/fountain_decoder.c $(SRCDIR)/fountain_decoder.h $(SRCDIR)/fountain_utils.h $(SRCDIR)/fountain_types.h $(SRCDIR)/crc32.h $(SRCDIR)/utils.h $(SRCDIR)/xor_internal.h
+$(OBJDIR)/fountain_encoder.o: $(SRCDIR)/fountain_encoder.c $(SRCDIR)/fountain_encoder.h $(SRCDIR)/fountain_decoder.h $(SRCDIR)/fountain_utils.h $(SRCDIR)/fountain_types.h $(SRCDIR)/crc32.h $(SRCDIR)/utils.h $(SRCDIR)/xor_internal.h
 $(OBJDIR)/types/byte_buffer.o: $(SRCDIR)/types/byte_buffer.c $(SRCDIR)/types/byte_buffer.h $(SRCDIR)/sha256/sha256_compat.h $(SRCDIR)/sha256/sha256.h $(SRCDIR)/utils.h
 $(OBJDIR)/types/output.o: $(SRCDIR)/types/output.c $(SRCDIR)/types/output.h $(SRCDIR)/types/byte_buffer.h $(SRCDIR)/sha256/sha256_compat.h $(SRCDIR)/utils.h
 $(OBJDIR)/ur_decoder.o: $(SRCDIR)/ur_decoder.c $(SRCDIR)/ur_decoder.h $(SRCDIR)/fountain_decoder.h $(SRCDIR)/bytewords.h $(SRCDIR)/utils.h

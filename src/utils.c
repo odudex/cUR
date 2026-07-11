@@ -11,9 +11,41 @@
 //
 
 #include "utils.h"
+#include "xor_internal.h"
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
+
+// In-place XOR: dst[i] ^= src[i] for n bytes. Word-wise (8 bytes/iter) with a
+// scalar tail -- roughly 4x faster than a byte loop. Buffers must not overlap.
+void ur_xor_inplace(uint8_t *restrict dst, const uint8_t *restrict src,
+                    size_t n) {
+  size_t i = 0;
+  for (; i + 8 <= n; i += 8) {
+    uint64_t a, b;
+    memcpy(&a, dst + i, 8);
+    memcpy(&b, src + i, 8);
+    a ^= b;
+    memcpy(dst + i, &a, 8);
+  }
+  for (; i < n; i++)
+    dst[i] ^= src[i];
+}
+
+// Out-of-place XOR: out[i] = a[i] ^ b[i] for n bytes. Buffers must not overlap.
+void ur_xor(uint8_t *restrict out, const uint8_t *restrict a,
+            const uint8_t *restrict b, size_t n) {
+  size_t i = 0;
+  for (; i + 8 <= n; i += 8) {
+    uint64_t x, y;
+    memcpy(&x, a + i, 8);
+    memcpy(&y, b + i, 8);
+    x ^= y;
+    memcpy(out + i, &x, 8);
+  }
+  for (; i < n; i++)
+    out[i] = a[i] ^ b[i];
+}
 
 bool str_has_prefix(const char *str, const char *prefix) {
   if (!str || !prefix)

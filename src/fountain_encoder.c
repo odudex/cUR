@@ -16,6 +16,7 @@
 #include "crc32.h"
 #include "fountain_utils.h"
 #include "utils.h"
+#include "xor_internal.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -429,9 +430,7 @@ static bool mix_fragments(const fountain_encoder_t *encoder,
     }
 
     const uint8_t *fragment = encoder->fragments.fragments[index];
-    for (size_t j = 0; j < encoder->fragment_len; j++) {
-      result[j] ^= fragment[j];
-    }
+    ur_xor_inplace(result, fragment, encoder->fragment_len);
   }
 
   *result_out = result;
