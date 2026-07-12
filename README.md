@@ -4,9 +4,13 @@ A lightweight C implementation of the [Blockchain Commons Uniform Resources (UR)
 specification — a method for encoding structured binary data optimized
 for transport via QR codes.
 
-Targets PC, ESP-IDF (e.g. ESP32, ESP32-P4), and the Kendryte K210
-(Krux / MaixPy) from a single source tree. SHA-256 backend is selected
-at compile time to use the platform's hardware when available.
+Targets PC and ESP-IDF (e.g. ESP32, ESP32-P4) from a single source
+tree. SHA-256 backend is selected at compile time to use the
+platform's hardware when available.
+
+The implementation favors being small and easy to review. Optional
+performance paths exist, but every default is the simplest, smallest
+variant; see [Build options](#build-options).
 
 ## Supported UR types
 
@@ -107,6 +111,21 @@ expected during scanning).
 Type-specific helpers (`bytes_from_cbor`, `psbt_from_cbor`,
 `output_from_descriptor_string`, etc.) live in `src/types/*.h`.
 
+## Build options
+
+All options default to the smallest, simplest implementation; the
+performance variants are opt-in (or, for the P4 vector path, gated by
+the CPU with an opt-out). Each option is a single flag with the same
+name everywhere it appears — Makefile variable, CMake option, and
+ESP-IDF Kconfig.
+
+| Option | Default | Effect |
+|--------|---------|--------|
+| `UR_CRC32_SLICE_BY_8` | off | Slice-by-8 CRC32: ~2.7x faster, +8 KB flash for a const table. The default 64-byte nibble table is rarely a bottleneck (CRCs run per fragment, a few hundred bytes each). |
+| `UR_XOR_ESP32P4_SIMD` | on (ESP32-P4 only) | PIE 128-bit vector XOR for fountain-code mixing, with transparent word-wise fallback on unaligned data. Only exists on ESP32-P4; Kconfig opt-out. |
+| `UR_ALLOC_PSRAM` | on (ESP targets) | Route the library's buffers to PSRAM with internal-RAM fallback, keeping fountain-decoder churn out of scarce internal heap. Kconfig opt-out; no-op elsewhere. |
+| `UR_ENVELOPE_ONLY` | off | CMake: build only the UR transport layer (bytewords, fountain, multi-part assembly), excluding the `src/types/` payload codecs, for integrators that do their own CBOR. |
+
 ## Platform integration
 
 The SHA-256 dependency is the only platform-sensitive piece. A
@@ -116,7 +135,7 @@ compile-time flag picks the backend; see `src/sha256/sha256_compat.h`.
 |------------------|-------------------------|-------------------------------|
 | PC (default)     | *(none)*                | bundled `src/sha256/sha256.c` |
 | ESP-IDF          | `UR_USE_MBEDTLS_SHA256` | mbedTLS PSA (HW-accelerated)  |
-| Kendryte K210    | `UR_USE_K210_SHA256`    | `sha256_hard_calculate` (HW)  |
+| K210 (legacy)    | `UR_USE_K210_SHA256`    | `sha256_hard_calculate` (HW)  |
 
 ### ESP-IDF component
 
@@ -132,32 +151,19 @@ idf_component_register(SRCS "app_main.c" INCLUDE_DIRS "." REQUIRES cUR)
 
 Then include headers normally: `#include "ur_encoder.h"`.
 
-### Kendryte K210 (Krux / MaixPy)
+### Legacy K210 port
 
-MaixPy's port does **not** wire components via USERMOD/`py.mk`; it
-uses a hardcoded `register_component()` + `append_srcs_dir()` block in
-`components/micropython/CMakeLists.txt`. The `-DUR_USE_K210_SHA256`
-flag must be added inside that block, or the link fails with
-undefined references to `ur_bundled_sha256_*`:
-
-```cmake
-# Inside the CONFIG_MAIXPY_BC_UR_ENABLE block:
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DUR_USE_K210_SHA256")
-```
-
-This mirrors how `CONFIG_MAIXPY_SECP256K1_ENABLE` sets its own flags.
-Without this flag the bundled SHA implementation is selected, but its
-symbol names now live under the `ur_bundled_sha256_*` namespace
-precisely to surface the missing flag as a link error rather than a
-silent runtime hardfault.
+Maintained for compatibility only. The build wiring lives in the
+consuming project, which must pass `-DUR_USE_K210_SHA256`; without it
+the link fails with undefined references to `ur_bundled_sha256_*`
+(deliberate — a link error instead of a silent runtime hardfault).
 
 ### MicroPython wrapper (`uUR.c`)
 
 `uUR.c` at the repo root wraps the C library as a MicroPython module
-exposing `URDecoder`, `UREncoder`, `UR`, and `FountainEncoder`. Krux
-consumes this file as-is (byte-identical). For vanilla MicroPython
-USERMOD builds the repo-root `micropython.mk` provides the wiring;
-MaixPy K210 ignores it and uses the CMakeLists route above.
+exposing `URDecoder`, `UREncoder`, `UR`, and `FountainEncoder`. For
+vanilla MicroPython USERMOD builds the repo-root `micropython.mk`
+provides the wiring; legacy ports wire it in their own build instead.
 
 ## Repository layout
 
