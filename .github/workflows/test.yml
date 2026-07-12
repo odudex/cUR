@@ -30,8 +30,8 @@ jobs:
       - name: Run all tests
         run: make test
 
-      - name: Run all tests (small CRC table)
-        run: make clean && make test UR_CRC32_SLICE_BY_8=0
+      - name: Run all tests (slice-by-8 CRC)
+        run: make clean && make test UR_CRC32_SLICE_BY_8=1
 
   esp-idf:
     name: ESP-IDF ${{ matrix.idf }} build (${{ matrix.target }})

@@ -2,11 +2,13 @@ menu "cUR (Uniform Resources)"
 
 config UR_CRC32_SLICE_BY_8
     bool "CRC32: use slice-by-8 (faster, +8 KB flash)"
-    default y
+    default n
     help
-        Use the slice-by-8 CRC32 implementation instead of the small
-        nibble table. About 2.7x faster on ESP32-P4, at the cost of 8 KB
-        of flash for a const lookup table.
+        Use the slice-by-8 CRC32 implementation instead of the default
+        64-byte nibble table. About 2.7x faster on ESP32-P4, at the cost
+        of 8 KB of flash for a const lookup table. UR CRCs run over
+        individual fragments (typically a few hundred bytes per QR
+        frame), so the small table is rarely a bottleneck in practice.
 
 config UR_XOR_ESP32P4_SIMD
     bool "Fountain XOR: use ESP32-P4 PIE 128-bit SIMD"
