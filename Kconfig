@@ -13,14 +13,16 @@ config UR_CRC32_SLICE_BY_8
 config UR_XOR_ESP32P4_SIMD
     bool "Fountain XOR: use ESP32-P4 PIE 128-bit SIMD"
     depends on IDF_TARGET_ESP32P4
-    default n
+    default y
     help
         Use the ESP32-P4 PIE (xesppie) 128-bit vector unit for the
-        fountain-code XOR reduction. About 16x faster than a byte loop
-        (and ~4x faster than the portable word-wise path) on aligned
-        runs; unaligned data transparently falls back to the word-wise
-        path. When enabled, cUR 16-byte-aligns its buffer allocations
-        so the vector path engages on them. ESP32-P4 only.
+        fountain-code XOR reduction. About 4x faster than the portable
+        word-wise path on aligned runs; unaligned data transparently
+        falls back to the word-wise path. When enabled, cUR
+        16-byte-aligns its buffer allocations so the vector path
+        engages on them. Only visible on ESP32-P4; enabled by default
+        there since it costs no RAM and little flash — disable it to
+        keep the library free of target-specific code paths.
 
 config UR_ALLOC_PSRAM
     bool "Allocate working buffers in PSRAM"
