@@ -16,10 +16,55 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Word type for the portable XOR loops: pointer-width chunks, so 32-bit
+// targets don't emulate 64-bit arithmetic with register pairs.
+#if UINTPTR_MAX > 0xFFFFFFFFu
+typedef uint64_t ur_xor_word_t;
+#else
+typedef uint32_t ur_xor_word_t;
+#endif
+
+// Portable word-wise XOR loops (byte tail). memcpy is the aliasing- and
+// alignment-safe word access and compiles to plain loads/stores wherever the
+// target allows them; pointer casts here would be undefined behavior under
+// strict aliasing and fault on strict-alignment CPUs.
+static void ur_xor_portable_inplace(uint8_t *restrict dst,
+                                    const uint8_t *restrict src, size_t n) {
+  size_t i = 0;
+  for (; i + sizeof(ur_xor_word_t) <= n; i += sizeof(ur_xor_word_t)) {
+    ur_xor_word_t a, b;
+    memcpy(&a, dst + i, sizeof(a));
+    memcpy(&b, src + i, sizeof(b));
+    a ^= b;
+    memcpy(dst + i, &a, sizeof(a));
+  }
+  for (; i < n; i++)
+    dst[i] ^= src[i];
+}
+
+static void ur_xor_portable(uint8_t *restrict out, const uint8_t *restrict a,
+                            const uint8_t *restrict b, size_t n) {
+  size_t i = 0;
+  for (; i + sizeof(ur_xor_word_t) <= n; i += sizeof(ur_xor_word_t)) {
+    ur_xor_word_t x, y;
+    memcpy(&x, a + i, sizeof(x));
+    memcpy(&y, b + i, sizeof(y));
+    x ^= y;
+    memcpy(out + i, &x, sizeof(x));
+  }
+  for (; i < n; i++)
+    out[i] = a[i] ^ b[i];
+}
+
 #if defined(UR_XOR_ESP32P4_SIMD)
 #if !defined(CONFIG_IDF_TARGET_ESP32P4)
 #error "UR_XOR_ESP32P4_SIMD requires ESP32-P4"
 #endif
+
+// ESP32-P4 PIE (xesppie) implementations: scalar head bytes until the
+// destination is 16-byte aligned, 128-bit vector body when the operands are
+// co-aligned, portable word-wise loop for the tail (and as the fallback when
+// co-alignment is impossible).
 
 // Pointers are pinned because esp.vld/esp.vst require low address registers.
 static inline void ur_xor128_inplace(uint8_t *dst, const uint8_t *src,
@@ -53,15 +98,10 @@ static inline void ur_xor128_out(uint8_t *out, const uint8_t *a,
                    :
                    : "memory");
 }
-#endif
 
-// In-place XOR: dst[i] ^= src[i] for n bytes. Word-wise (8 bytes/iter) with a
-// scalar tail -- roughly 4x faster than a byte loop. On ESP32-P4 with
-// UR_XOR_ESP32P4_SIMD, 16-byte-aligned runs use the PIE 128-bit path (~16x).
-// Buffers must not overlap.
+// In-place XOR: dst[i] ^= src[i] for n bytes. Buffers must not overlap.
 void ur_xor_inplace(uint8_t *restrict dst, const uint8_t *restrict src,
                     size_t n) {
-#if defined(UR_XOR_ESP32P4_SIMD)
   size_t head = (size_t)((0u - (uintptr_t)dst) & 15u);
   if (head > n)
     head = n;
@@ -78,23 +118,12 @@ void ur_xor_inplace(uint8_t *restrict dst, const uint8_t *restrict src,
     src += done;
     n -= done;
   }
-#endif
-  size_t i = 0;
-  for (; i + 8 <= n; i += 8) {
-    uint64_t a, b;
-    memcpy(&a, dst + i, 8);
-    memcpy(&b, src + i, 8);
-    a ^= b;
-    memcpy(dst + i, &a, 8);
-  }
-  for (; i < n; i++)
-    dst[i] ^= src[i];
+  ur_xor_portable_inplace(dst, src, n);
 }
 
 // Out-of-place XOR: out[i] = a[i] ^ b[i] for n bytes. Buffers must not overlap.
 void ur_xor(uint8_t *restrict out, const uint8_t *restrict a,
             const uint8_t *restrict b, size_t n) {
-#if defined(UR_XOR_ESP32P4_SIMD)
   size_t head = (size_t)((0u - (uintptr_t)out) & 15u);
   if (head > n)
     head = n;
@@ -113,18 +142,24 @@ void ur_xor(uint8_t *restrict out, const uint8_t *restrict a,
     b += done;
     n -= done;
   }
-#endif
-  size_t i = 0;
-  for (; i + 8 <= n; i += 8) {
-    uint64_t x, y;
-    memcpy(&x, a + i, 8);
-    memcpy(&y, b + i, 8);
-    x ^= y;
-    memcpy(out + i, &x, 8);
-  }
-  for (; i < n; i++)
-    out[i] = a[i] ^ b[i];
+  ur_xor_portable(out, a, b, n);
 }
+
+#else // portable builds: the word-wise loops are the whole implementation
+
+// In-place XOR: dst[i] ^= src[i] for n bytes. Buffers must not overlap.
+void ur_xor_inplace(uint8_t *restrict dst, const uint8_t *restrict src,
+                    size_t n) {
+  ur_xor_portable_inplace(dst, src, n);
+}
+
+// Out-of-place XOR: out[i] = a[i] ^ b[i] for n bytes. Buffers must not overlap.
+void ur_xor(uint8_t *restrict out, const uint8_t *restrict a,
+            const uint8_t *restrict b, size_t n) {
+  ur_xor_portable(out, a, b, n);
+}
+
+#endif
 
 /* On ESP32 targets, route allocations to PSRAM (falling back to internal RAM
  * when absent). ESP-IDF's malloc() keeps small allocations in internal RAM,
