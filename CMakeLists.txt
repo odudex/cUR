@@ -61,7 +61,7 @@ if(ESP_PLATFORM)
 else()
     # Plain host build (e.g. added via add_subdirectory from a simulator or
     # test harness). Uses the bundled SHA-256 so it has no dependencies.
-    option(UR_CRC32_SLICE_BY_8 "CRC32: use slice-by-8 (faster, +8 KB flash)" ON)
+    option(UR_CRC32_SLICE_BY_8 "CRC32: use slice-by-8 (faster, +8 KB flash)" OFF)
     add_library(ur STATIC ${UR_SRCS} "src/sha256/sha256.c")
     set_target_properties(ur PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_include_directories(ur PUBLIC "src")

@@ -10,7 +10,7 @@ LDFLAGS =
 INCLUDES = -Isrc
 SRCDIR = src
 OBJDIR = src/obj
-UR_CRC32_SLICE_BY_8 ?= 1
+UR_CRC32_SLICE_BY_8 ?= 0
 
 # DEBUG=1 switches to -O0 with AddressSanitizer + UndefinedBehaviorSanitizer.
 # Requires a full rebuild when toggling (sanitized and non-sanitized objects
@@ -22,7 +22,7 @@ else
   CFLAGS  += -O2
 endif
 
-# Defaults to the fast CRC path; set UR_CRC32_SLICE_BY_8=0 for the small table.
+# Defaults to the small CRC table; set UR_CRC32_SLICE_BY_8=1 for slice-by-8.
 ifeq ($(UR_CRC32_SLICE_BY_8),1)
   CFLAGS += -DUR_CRC32_SLICE_BY_8
 endif
