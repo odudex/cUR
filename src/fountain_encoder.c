@@ -339,6 +339,14 @@ fountain_encoder_t *fountain_encoder_new(const uint8_t *message,
     return NULL;
   }
 
+  // Allocation-safety floor: a tiny max_fragment_len explodes the fragment
+  // count (one heap block plus bookkeeping per fragment). The Python bindings
+  // clamp to >= 10 as QR-transport policy; enforce the floor here so direct C
+  // consumers get the same protection.
+  if (max_fragment_len < 10) {
+    return NULL;
+  }
+
   fountain_encoder_t *encoder =
       (fountain_encoder_t *)calloc(1, sizeof(fountain_encoder_t));
   if (!encoder) {

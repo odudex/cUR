@@ -16,6 +16,7 @@
 #include "../src/types/psbt.h"
 #include "../src/ur.h"
 #include "../src/ur_decoder.h"
+#include "../src/ur_encoder.h"
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -308,6 +309,70 @@ static void test_fountain_fragment_length_mismatch(void) {
          "length-mismatched fountain parts are all rejected (no OOB reduce)");
 }
 
+static void test_ur_new_type_validation(void) {
+  printf("\n=== ur_new_type_validation ===\n");
+  const uint8_t cbor[] = {0x41, 0x01};
+
+  ur_t *u = ur_new("crypto-psbt", cbor, sizeof(cbor));
+  ASSERT(u != NULL, "ur_new accepts a valid type");
+  ur_free(u);
+
+  ASSERT(ur_new("BYTES", cbor, sizeof(cbor)) == NULL,
+         "ur_new rejects uppercase type");
+  ASSERT(ur_new("with space", cbor, sizeof(cbor)) == NULL,
+         "ur_new rejects type with space");
+  ASSERT(ur_new("", cbor, sizeof(cbor)) == NULL, "ur_new rejects empty type");
+  ASSERT(ur_new("-bytes", cbor, sizeof(cbor)) == NULL,
+         "ur_new rejects leading dash");
+  ASSERT(ur_new("bytes-", cbor, sizeof(cbor)) == NULL,
+         "ur_new rejects trailing dash");
+
+  char *single = NULL;
+  ASSERT(!ur_encoder_encode_single("with space", cbor, sizeof(cbor), &single),
+         "ur_encoder_encode_single rejects an invalid type");
+  ASSERT(single == NULL, "failed single-part encoding leaves output NULL");
+
+  ASSERT(ur_encoder_new("with space", cbor, sizeof(cbor), 10, 0, 1) == NULL,
+         "ur_encoder_new rejects an invalid type");
+}
+
+static void test_fountain_fragment_floor(void) {
+  printf("\n=== fountain_fragment_floor ===\n");
+  uint8_t msg[64];
+  memset(msg, 0xAB, sizeof(msg));
+
+  ASSERT(fountain_encoder_new(msg, sizeof(msg), 9, 0, 1) == NULL,
+         "fountain_encoder_new rejects max_fragment_len < 10");
+  fountain_encoder_t *e = fountain_encoder_new(msg, sizeof(msg), 10, 0, 1);
+  ASSERT(e != NULL, "fountain_encoder_new accepts max_fragment_len == 10");
+  fountain_encoder_free(e);
+}
+
+static void test_empty_bytes_cbor_roundtrip(void) {
+  printf("\n=== empty_bytes_cbor_roundtrip ===\n");
+  // Regression: 0x40 (empty byte string) must decode. safe_malloc(0) returns
+  // NULL, which decode_bytes used to misread as OOM, so bytes_from_cbor
+  // rejected the exact CBOR bytes_to_cbor produced for an empty payload.
+  bytes_data_t *b = bytes_new(NULL, 0);
+  ASSERT(b != NULL, "bytes_new accepts an empty payload");
+
+  size_t cbor_len = 0;
+  uint8_t *cbor = b ? bytes_to_cbor(b, &cbor_len) : NULL;
+  bytes_free(b);
+  ASSERT(cbor != NULL && cbor_len == 1 && cbor[0] == 0x40,
+         "empty Bytes encodes to 0x40");
+
+  bytes_data_t *back = cbor ? bytes_from_cbor(cbor, cbor_len) : NULL;
+  ASSERT(back != NULL, "empty Bytes CBOR (0x40) decodes");
+  if (back) {
+    size_t len = 99;
+    (void)bytes_get_data(back, &len);
+    ASSERT(len == 0, "decoded empty Bytes has length 0");
+    bytes_free(back);
+  }
+  free(cbor);
+}
+
 int main(void) {
   printf("=== UR Negative-Path Tests ===\n");
   test_null_and_empty();
@@ -319,6 +384,9 @@ int main(void) {
   test_ok_terminal();
   test_malformed_cbor();
   test_fountain_fragment_length_mismatch();
+  test_ur_new_type_validation();
+  test_fountain_fragment_floor();
+  test_empty_bytes_cbor_roundtrip();
 
   printf("\n=== Summary ===\n");
   printf("Tests passed: %d/%d\n", asserts - failures, asserts);

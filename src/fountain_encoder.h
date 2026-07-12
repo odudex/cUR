@@ -62,8 +62,8 @@ bool fountain_encoder_partition_message(const uint8_t *message,
 /**
  * Create new fountain encoder
  * @param message Message to encode
- * @param message_len Message length
- * @param max_fragment_len Maximum fragment length
+ * @param message_len Message length; must be >= min_fragment_len
+ * @param max_fragment_len Maximum fragment length; must be >= 10
  * @param first_seq_num First sequence number (default 0)
  * @param min_fragment_len Minimum fragment length (default 10)
  * @return Pointer to encoder or NULL on error
