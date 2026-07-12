@@ -10,6 +10,12 @@ tests/test_ur_*
 *.gcno
 *_cov
 
+# CPython extension build artifacts (python/ binding)
+*.so
+*.egg-info/
+dist/
+__pycache__/
+
 # ESP-IDF build artifacts (component is built inside parent project,
 # but keep patterns in case of in-tree builds)
 build/
