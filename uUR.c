@@ -9,6 +9,7 @@
 #include "src/ur.h"
 #include "src/ur_decoder.h"
 #include "src/ur_encoder.h"
+#include "src/utils.h" // is_ur_type()
 
 // ---------------------------------------------------------------------------
 // MicroPython version compatibility.
@@ -86,6 +87,18 @@ static mp_obj_t ur_make_new(const mp_obj_type_t *type, size_t n_args,
   mp_buffer_info_t cbor_buf;
   mp_get_buffer_raise(args[1], &cbor_buf, MP_BUFFER_READ);
 
+  // Distinguish bad arguments (ValueError) from allocation failure
+  // (MemoryError): ur_new returns NULL for both. Matches the CPython binding.
+  if (!is_ur_type(ur_type)) {
+    mp_raise_msg(
+        &mp_type_ValueError,
+        MP_ERROR_TEXT(
+            "invalid UR type (want [a-z0-9-], no leading/trailing '-')"));
+  }
+  if (cbor_buf.len == 0) {
+    mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("cbor must not be empty"));
+  }
+
   // Create internal UR object first so a failure doesn't leak the wrapper
   // through the exception long-jump in mp_raise_msg.
   ur_t *ur = ur_new(ur_type, cbor_buf.buf, cbor_buf.len);
@@ -126,13 +139,58 @@ static void ur_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
       }
     } else if (attr == MP_QSTR_cbor) {
       if (self->ur) {
-        dest[0] = mp_obj_new_bytearray(ur_get_cbor_len(self->ur),
-                                       ur_get_cbor(self->ur));
+        // A snapshot copy of the payload, so hand it out as immutable bytes:
+        // writing to a copy could never reach the UR. Same on the CPython side.
+        dest[0] =
+            mp_obj_new_bytes(ur_get_cbor(self->ur), ur_get_cbor_len(self->ur));
       } else {
         dest[0] = mp_const_none;
       }
     }
   }
+}
+
+// Value equality over (type, cbor) — consumers compare decoded URs against
+// expected ones, and identity comparison would make every such check fail.
+// A closed UR (payload freed by __del__) equals only another closed UR.
+static mp_obj_t ur_binary_op(mp_binary_op_t op, mp_obj_t lhs_in,
+                             mp_obj_t rhs_in) {
+  // This slot is only reachable through mp_type_ur, so lhs is always a UR;
+  // comparing against its own type avoids naming mp_type_ur before it is
+  // defined (its storage class differs between the two API branches below).
+  if (op != MP_BINARY_OP_EQUAL ||
+      mp_obj_get_type(rhs_in) != mp_obj_get_type(lhs_in)) {
+    return MP_OBJ_NULL; // op not supported
+  }
+  const ur_t *lhs = ((mp_obj_ur_t *)MP_OBJ_TO_PTR(lhs_in))->ur;
+  const ur_t *rhs = ((mp_obj_ur_t *)MP_OBJ_TO_PTR(rhs_in))->ur;
+  bool eq;
+  if (!lhs || !rhs) {
+    eq = (lhs == rhs);
+  } else {
+    size_t lhs_len = ur_get_cbor_len(lhs);
+    eq = strcmp(ur_get_type(lhs), ur_get_type(rhs)) == 0 &&
+         lhs_len == ur_get_cbor_len(rhs) &&
+         memcmp(ur_get_cbor(lhs), ur_get_cbor(rhs), lhs_len) == 0;
+  }
+  return eq ? mp_const_true : mp_const_false;
+}
+
+// Hash over the same (type, cbor) the comparison uses, so equal URs hash
+// equal — without this the default identity hash would break dict/set use.
+static mp_obj_t ur_unary_op(mp_unary_op_t op, mp_obj_t self_in) {
+  if (op != MP_UNARY_OP_HASH) {
+    return MP_OBJ_NULL; // op not supported
+  }
+  mp_obj_ur_t *self = MP_OBJ_TO_PTR(self_in);
+  if (!self->ur) {
+    return MP_OBJ_NEW_SMALL_INT(0);
+  }
+  const char *type = ur_get_type(self->ur);
+  mp_uint_t hash =
+      qstr_compute_hash((const byte *)type, strlen(type)) ^
+      qstr_compute_hash(ur_get_cbor(self->ur), ur_get_cbor_len(self->ur));
+  return MP_OBJ_NEW_SMALL_INT(hash);
 }
 
 // UR locals dict
@@ -143,13 +201,15 @@ static MP_DEFINE_CONST_DICT(ur_locals_dict, ur_locals_dict_table);
 
 #if defined(MP_DEFINE_CONST_OBJ_TYPE)
 MP_DEFINE_CONST_OBJ_TYPE(mp_type_ur, MP_QSTR_UR, MP_TYPE_FLAG_NONE, make_new,
-                         ur_make_new, print, ur_print, attr, ur_attr,
-                         locals_dict, &ur_locals_dict);
+                         ur_make_new, print, ur_print, attr, ur_attr, unary_op,
+                         ur_unary_op, binary_op, ur_binary_op, locals_dict,
+                         &ur_locals_dict);
 #else
 static const mp_obj_type_t mp_type_ur = {
-    {&mp_type_type},   .name = MP_QSTR_UR,
-    .print = ur_print, .make_new = ur_make_new,
-    .attr = ur_attr,   .locals_dict = (mp_obj_dict_t *)&ur_locals_dict,
+    {&mp_type_type},         .name = MP_QSTR_UR,
+    .print = ur_print,       .make_new = ur_make_new,
+    .unary_op = ur_unary_op, .binary_op = ur_binary_op,
+    .attr = ur_attr,         .locals_dict = (mp_obj_dict_t *)&ur_locals_dict,
 };
 #endif
 
@@ -273,7 +333,7 @@ static void ur_decoder_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
       // Create UR object
       mp_obj_t type_str = mp_obj_new_str(result->type, strlen(result->type));
       mp_obj_t cbor_bytes =
-          mp_obj_new_bytearray(result->cbor_len, result->cbor_data);
+          mp_obj_new_bytes(result->cbor_data, result->cbor_len);
 
       mp_obj_t args[2] = {type_str, cbor_bytes};
       dest[0] = ur_make_new(&mp_type_ur, 2, 0, args);
@@ -382,13 +442,30 @@ static mp_obj_t ur_encoder_make_new(const mp_obj_type_t *type, size_t n_args,
   }
   size_t max_fragment_len = (size_t)raw_max;
   size_t min_fragment_len = (size_t)raw_min;
-  uint32_t first_seq_num = parsed_args[ARG_first_seq_num].u_int;
+
+  // Range-check before the cast: a negative value would silently become a
+  // huge sequence number and fail later, inside next_part().
+  mp_int_t raw_seq = parsed_args[ARG_first_seq_num].u_int;
+  if (raw_seq < 0 || (uintmax_t)raw_seq > (uintmax_t)UINT32_MAX) {
+    mp_raise_msg(&mp_type_ValueError,
+                 MP_ERROR_TEXT("first_seq_num out of range (0..4294967295)"));
+  }
+  uint32_t first_seq_num = (uint32_t)raw_seq;
 
   // Allocate the C encoder before the wrapper so a failure doesn't leak the
   // wrapper through mp_raise_msg's long-jump.
   const char *ur_type_str = ur_get_type(ur_obj->ur);
   const uint8_t *cbor_data = ur_get_cbor(ur_obj->ur);
   size_t cbor_len = ur_get_cbor_len(ur_obj->ur);
+
+  // ur_encoder_new reports validation failures and OOM identically (NULL);
+  // pre-check the one reachable validation case so it raises ValueError
+  // rather than a misleading MemoryError.
+  if (cbor_len < min_fragment_len) {
+    mp_raise_msg(&mp_type_ValueError,
+                 MP_ERROR_TEXT("UR payload is shorter than min_fragment_len"));
+  }
+
   ur_encoder_t *encoder =
       ur_encoder_new(ur_type_str, cbor_data, cbor_len, max_fragment_len,
                      first_seq_num, min_fragment_len);

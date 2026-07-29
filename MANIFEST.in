@@ -1,0 +1,4 @@
+# Headers for the uUR C-extension build. setuptools packs the extension's .c
+# sources into the sdist automatically, but not the headers they include —
+# without these an sdist cannot be compiled.
+recursive-include src *.h

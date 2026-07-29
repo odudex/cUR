@@ -4,7 +4,7 @@
 // BC-UR encoder/decoder on CPython (e.g. Raspberry Pi) exactly as it does on
 // the ESP32 MicroPython firmware:
 //
-//   uUR.UR(type, cbor)                       -> .type, .cbor
+//   uUR.UR(type, cbor)                       -> .type, .cbor, == / hash by value
 //   uUR.URDecoder()                          -> receive_part, estimated_percent_complete,
 //                                               .result, .state, .expected_part_count,
 //                                               .processed_parts_count
@@ -26,6 +26,7 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -37,6 +38,7 @@
 #include "src/ur.h"
 #include "src/ur_decoder.h"
 #include "src/ur_encoder.h"
+#include "src/utils.h" // is_ur_type()
 
 // ---------------------------------------------------------------------------
 // UR
@@ -67,18 +69,41 @@ static PyObject *ur_wrap_copy(const char *type, const uint8_t *cbor,
 }
 
 static int UR_init(uUR_UR *self, PyObject *args, PyObject *kwds) {
-  static char *kwlist[] = {"type", "cbor", NULL};
-  const char *type;
-  Py_buffer cbor;
-  if (!PyArg_ParseTupleAndKeywords(args, kwds, "sy*", kwlist, &type, &cbor)) {
+  // Positional-only, matching the MicroPython constructor (mp_arg_check_num
+  // with takes_kw=false): kwargs accepted here would work on desktop and
+  // raise TypeError on device.
+  if (kwds && PyDict_Size(kwds) != 0) {
+    PyErr_SetString(PyExc_TypeError, "UR() takes no keyword arguments");
     return -1;
   }
-  self->ur = ur_new(type, (const uint8_t *)cbor.buf, (size_t)cbor.len);
+  const char *type;
+  Py_buffer cbor;
+  if (!PyArg_ParseTuple(args, "sy*", &type, &cbor)) {
+    return -1;
+  }
+  // Distinguish bad arguments (ValueError) from allocation failure
+  // (MemoryError): ur_new returns NULL for both.
+  if (!is_ur_type(type)) {
+    PyBuffer_Release(&cbor);
+    PyErr_SetString(PyExc_ValueError,
+                    "invalid UR type (want [a-z0-9-], no leading/trailing '-')");
+    return -1;
+  }
+  if (cbor.len == 0) {
+    PyBuffer_Release(&cbor);
+    PyErr_SetString(PyExc_ValueError, "cbor must not be empty");
+    return -1;
+  }
+  ur_t *ur = ur_new(type, (const uint8_t *)cbor.buf, (size_t)cbor.len);
   PyBuffer_Release(&cbor);
-  if (!self->ur) {
+  if (!ur) {
     PyErr_SetString(PyExc_MemoryError, "Failed to create UR object");
     return -1;
   }
+  // Replace only after success so a re-invoked __init__ neither leaks the old
+  // ur_t nor leaves the object invalid when construction fails.
+  ur_free(self->ur);
+  self->ur = ur;
   return 0;
 }
 
@@ -89,6 +114,22 @@ static void UR_dealloc(uUR_UR *self) {
   }
   Py_TYPE(self)->tp_free((PyObject *)self);
 }
+
+// __del__() -> None: free the native object now (idempotent). Mirrors the
+// MicroPython binding's explicit finalizer; refcounting frees via tp_dealloc
+// anyway, but firmware-portable code calls __del__() directly.
+static PyObject *UR_del(uUR_UR *self, PyObject *ignored) {
+  (void)ignored;
+  ur_free(self->ur);
+  self->ur = NULL;
+  Py_RETURN_NONE;
+}
+
+static PyMethodDef UR_methods[] = {
+    {"__del__", (PyCFunction)UR_del, METH_NOARGS,
+     "__del__() -> None: free the native UR object now (idempotent)."},
+    {NULL},
+};
 
 static PyObject *UR_repr(uUR_UR *self) {
   if (self->ur) {
@@ -105,30 +146,75 @@ static PyObject *UR_get_type(uUR_UR *self, void *closure) {
   return PyUnicode_FromString(ur_get_type(self->ur));
 }
 
-// Mirrors the MicroPython binding: .cbor is a (mutable) bytearray of the raw
-// CBOR payload.
+// .cbor is a snapshot copy of the raw CBOR payload, so it is handed out as
+// immutable bytes: mutating a copy could never write through to the UR, and
+// the reference Python implementation returns bytes too. Same on the
+// MicroPython side.
 static PyObject *UR_get_cbor(uUR_UR *self, void *closure) {
   (void)closure;
   if (!self->ur) {
     Py_RETURN_NONE;
   }
-  return PyByteArray_FromStringAndSize((const char *)ur_get_cbor(self->ur),
-                                       (Py_ssize_t)ur_get_cbor_len(self->ur));
+  return PyBytes_FromStringAndSize((const char *)ur_get_cbor(self->ur),
+                                   (Py_ssize_t)ur_get_cbor_len(self->ur));
 }
 
 static PyGetSetDef UR_getset[] = {
     {"type", (getter)UR_get_type, NULL, "UR type string", NULL},
-    {"cbor", (getter)UR_get_cbor, NULL, "Raw CBOR payload (bytearray)", NULL},
+    {"cbor", (getter)UR_get_cbor, NULL, "Raw CBOR payload (bytes)", NULL},
     {NULL},
 };
+
+// Value equality over (type, cbor) — consumers compare decoded URs against
+// expected ones, and identity comparison would make every such check fail.
+// A default-constructed UR (`UR.__new__(UR)`, no payload) equals only another
+// payload-less UR.
+static PyObject *UR_richcompare(PyObject *a, PyObject *b, int op) {
+  if ((op != Py_EQ && op != Py_NE) || !PyObject_TypeCheck(a, &uUR_URType) ||
+      !PyObject_TypeCheck(b, &uUR_URType)) {
+    Py_RETURN_NOTIMPLEMENTED;
+  }
+  const ur_t *ua = ((const uUR_UR *)a)->ur;
+  const ur_t *ub = ((const uUR_UR *)b)->ur;
+  bool eq;
+  if (!ua || !ub) {
+    eq = (ua == ub);
+  } else {
+    size_t len_a = ur_get_cbor_len(ua);
+    eq = strcmp(ur_get_type(ua), ur_get_type(ub)) == 0 &&
+         len_a == ur_get_cbor_len(ub) &&
+         memcmp(ur_get_cbor(ua), ur_get_cbor(ub), len_a) == 0;
+  }
+  return PyBool_FromLong(op == Py_NE ? !eq : eq);
+}
+
+// Hash over the same (type, cbor) the comparison uses, so equal URs hash
+// equal — without this the inherited identity hash would break dict/set use.
+static Py_hash_t UR_hash(uUR_UR *self) {
+  if (!self->ur) {
+    return 0;
+  }
+  PyObject *key = Py_BuildValue("(sy#)", ur_get_type(self->ur),
+                                (const char *)ur_get_cbor(self->ur),
+                                (Py_ssize_t)ur_get_cbor_len(self->ur));
+  if (!key) {
+    return -1;
+  }
+  Py_hash_t hash = PyObject_Hash(key);
+  Py_DECREF(key);
+  return hash;
+}
 
 static PyTypeObject uUR_URType = {
     PyVarObject_HEAD_INIT(NULL, 0).tp_name = "uUR.UR",
     .tp_basicsize = sizeof(uUR_UR),
     .tp_dealloc = (destructor)UR_dealloc,
     .tp_repr = (reprfunc)UR_repr,
-    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_hash = (hashfunc)UR_hash,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
     .tp_doc = "Uniform Resource: a typed CBOR payload.",
+    .tp_richcompare = UR_richcompare,
+    .tp_methods = UR_methods,
     .tp_getset = UR_getset,
     .tp_init = (initproc)UR_init,
     .tp_new = PyType_GenericNew,
@@ -147,11 +233,15 @@ static int URDecoder_init(uUR_URDecoder *self, PyObject *args, PyObject *kwds) {
   if (!PyArg_ParseTupleAndKeywords(args, kwds, "", kwlist)) {
     return -1;
   }
-  self->decoder = ur_decoder_new();
-  if (!self->decoder) {
+  ur_decoder_t *decoder = ur_decoder_new();
+  if (!decoder) {
     PyErr_SetString(PyExc_MemoryError, "Failed to create URDecoder");
     return -1;
   }
+  // Replace only after success: a re-invoked __init__ (the natural Python
+  // "reset" idiom) frees the old decoder state instead of leaking it.
+  ur_decoder_free(self->decoder);
+  self->decoder = decoder;
   return 0;
 }
 
@@ -161,6 +251,15 @@ static void URDecoder_dealloc(uUR_URDecoder *self) {
     self->decoder = NULL;
   }
   Py_TYPE(self)->tp_free((PyObject *)self);
+}
+
+// __del__() -> None: free the native decoder now (idempotent). Mirrors the
+// MicroPython binding's explicit finalizer.
+static PyObject *URDecoder_del(uUR_URDecoder *self, PyObject *ignored) {
+  (void)ignored;
+  ur_decoder_free(self->decoder);
+  self->decoder = NULL;
+  Py_RETURN_NONE;
 }
 
 static PyObject *URDecoder_repr(uUR_URDecoder *self) {
@@ -182,9 +281,20 @@ static PyObject *URDecoder_receive_part(uUR_URDecoder *self, PyObject *part) {
     PyErr_SetString(PyExc_RuntimeError, "URDecoder is closed");
     return NULL;
   }
-  const char *part_cstr = PyUnicode_AsUTF8(part);
-  if (!part_cstr) {
-    return NULL; // TypeError: part must be str
+  // Accept str or bytes, matching MicroPython's mp_obj_str_get_str: QR
+  // scanner APIs commonly hand back bytes.
+  const char *part_cstr;
+  if (PyUnicode_Check(part)) {
+    part_cstr = PyUnicode_AsUTF8(part);
+    if (!part_cstr) {
+      return NULL;
+    }
+  } else if (PyBytes_Check(part)) {
+    part_cstr = PyBytes_AS_STRING(part);
+  } else {
+    PyErr_Format(PyExc_TypeError, "part must be str or bytes, not %.200s",
+                 Py_TYPE(part)->tp_name);
+    return NULL;
   }
   return PyLong_FromLong(
       (long)ur_decoder_receive_part(self->decoder, part_cstr));
@@ -213,12 +323,15 @@ static PyObject *URDecoder_estimated_percent_complete(uUR_URDecoder *self,
 
 static PyMethodDef URDecoder_methods[] = {
     {"receive_part", (PyCFunction)URDecoder_receive_part, METH_O,
-     "receive_part(part: str) -> int decoder state (a DECODER_* constant)."},
+     "receive_part(part: str | bytes) -> int decoder state (a DECODER_* "
+     "constant)."},
     {"estimated_percent_complete",
      (PyCFunction)URDecoder_estimated_percent_complete,
      METH_VARARGS | METH_KEYWORDS,
      "estimated_percent_complete(weight_mixed_frames=False) -> float in "
      "[0.0, 1.0]."},
+    {"__del__", (PyCFunction)URDecoder_del, METH_NOARGS,
+     "__del__() -> None: free the native decoder now (idempotent)."},
     {NULL},
 };
 
@@ -276,7 +389,7 @@ static PyTypeObject uUR_URDecoderType = {
     .tp_basicsize = sizeof(uUR_URDecoder),
     .tp_dealloc = (destructor)URDecoder_dealloc,
     .tp_repr = (reprfunc)URDecoder_repr,
-    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
     .tp_doc = "Multi-part BC-UR fountain decoder.",
     .tp_methods = URDecoder_methods,
     .tp_getset = URDecoder_getset,
@@ -299,8 +412,9 @@ static PyTypeObject uUR_FountainEncoderType;
 // reference to its parent UREncoder (whose ->encoder it reads at call time), so
 // the parent cannot be freed while the view is alive. Unlike the MicroPython
 // binding it is NOT cached on the parent: a fresh view is returned per access,
-// which avoids a parent<->view reference cycle (no cyclic GC needed) while
-// staying behaviorally identical.
+// which avoids a parent<->view reference cycle (no cyclic GC needed). Behavior
+// matches MicroPython except for wrapper identity: enc.fountain_encoder is not
+// `is`-identical across accesses here, while MP returns the cached object.
 typedef struct {
   PyObject_HEAD PyObject *parent; // uUR_UREncoder, strong ref
 } uUR_FountainEncoder;
@@ -342,9 +456,9 @@ static int UREncoder_init(uUR_UREncoder *self, PyObject *args, PyObject *kwds) {
                            "min_fragment_len", NULL};
   PyObject *ur_obj;
   Py_ssize_t max_fragment_len;
-  unsigned int first_seq_num = 0;
+  long long first_seq_num = 0;
   Py_ssize_t min_fragment_len = 10;
-  if (!PyArg_ParseTupleAndKeywords(args, kwds, "On|In", kwlist, &ur_obj,
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "On|Ln", kwlist, &ur_obj,
                                    &max_fragment_len, &first_seq_num,
                                    &min_fragment_len)) {
     return -1;
@@ -369,14 +483,36 @@ static int UREncoder_init(uUR_UREncoder *self, PyObject *args, PyObject *kwds) {
     return -1;
   }
 
-  self->encoder = ur_encoder_new(
+  // Parsed as 'L' (long long) so out-of-range values raise instead of the 'I'
+  // format's silent modulo-2^32 wrap (first_seq_num=-1 used to become
+  // 4294967295 and fail later, inside next_part).
+  if (first_seq_num < 0 || first_seq_num > (long long)UINT32_MAX) {
+    PyErr_SetString(PyExc_ValueError,
+                    "first_seq_num out of range (0..4294967295)");
+    return -1;
+  }
+
+  // ur_encoder_new reports validation failures and OOM identically (NULL);
+  // pre-check the one reachable validation case so it raises ValueError
+  // rather than a misleading MemoryError.
+  if (ur_get_cbor_len(ur->ur) < (size_t)min_fragment_len) {
+    PyErr_SetString(PyExc_ValueError,
+                    "UR payload is shorter than min_fragment_len");
+    return -1;
+  }
+
+  ur_encoder_t *encoder = ur_encoder_new(
       ur_get_type(ur->ur), ur_get_cbor(ur->ur), ur_get_cbor_len(ur->ur),
       (size_t)max_fragment_len, (uint32_t)first_seq_num,
       (size_t)min_fragment_len);
-  if (!self->encoder) {
+  if (!encoder) {
     PyErr_SetString(PyExc_MemoryError, "Failed to create UREncoder");
     return -1;
   }
+  // Replace only after success so a re-invoked __init__ neither leaks the old
+  // encoder nor leaves the object invalid when construction fails.
+  ur_encoder_free(self->encoder);
+  self->encoder = encoder;
   return 0;
 }
 
@@ -386,6 +522,16 @@ static void UREncoder_dealloc(uUR_UREncoder *self) {
     self->encoder = NULL;
   }
   Py_TYPE(self)->tp_free((PyObject *)self);
+}
+
+// __del__() -> None: free the native encoder now (idempotent). Mirrors the
+// MicroPython binding's explicit finalizer. Live FountainEncoder views report
+// seq_len() == 0 afterwards.
+static PyObject *UREncoder_del(uUR_UREncoder *self, PyObject *ignored) {
+  (void)ignored;
+  ur_encoder_free(self->encoder);
+  self->encoder = NULL;
+  Py_RETURN_NONE;
 }
 
 static PyObject *UREncoder_repr(uUR_UREncoder *self) {
@@ -446,6 +592,8 @@ static PyMethodDef UREncoder_methods[] = {
      "is_complete() -> bool: True once the pure sequence has been emitted."},
     {"is_single_part", (PyCFunction)UREncoder_is_single_part, METH_NOARGS,
      "is_single_part() -> bool: True if the payload fits one part."},
+    {"__del__", (PyCFunction)UREncoder_del, METH_NOARGS,
+     "__del__() -> None: free the native encoder now (idempotent)."},
     {NULL},
 };
 
@@ -476,7 +624,7 @@ static PyTypeObject uUR_UREncoderType = {
     .tp_basicsize = sizeof(uUR_UREncoder),
     .tp_dealloc = (destructor)UREncoder_dealloc,
     .tp_repr = (reprfunc)UREncoder_repr,
-    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
     .tp_doc = "Multi-part BC-UR fountain encoder.",
     .tp_methods = UREncoder_methods,
     .tp_getset = UREncoder_getset,
@@ -687,15 +835,19 @@ static PyObject *build_types_module(void) {
   if (!m) {
     return NULL;
   }
+  // Type-name strings come from the core registry globals (and the account
+  // name macro), not literals, so a registry rename cannot silently diverge
+  // from what decoder results report.
   if (PyModule_AddIntConstant(m, "CRYPTO_PSBT_TAG", CRYPTO_PSBT_TAG) < 0 ||
       PyModule_AddIntConstant(m, "CRYPTO_BIP39_TAG", CRYPTO_BIP39_TAG) < 0 ||
       PyModule_AddIntConstant(m, "CRYPTO_ACCOUNT_TAG", CRYPTO_ACCOUNT_TAG) < 0 ||
       PyModule_AddIntConstant(m, "CRYPTO_OUTPUT_TAG", CRYPTO_OUTPUT_TAG) < 0 ||
-      PyModule_AddStringConstant(m, "CRYPTO_PSBT_TYPE", "crypto-psbt") < 0 ||
-      PyModule_AddStringConstant(m, "CRYPTO_BIP39_TYPE", "crypto-bip39") < 0 ||
-      PyModule_AddStringConstant(m, "CRYPTO_OUTPUT_TYPE", "crypto-output") < 0 ||
-      PyModule_AddStringConstant(m, "CRYPTO_ACCOUNT_TYPE", "crypto-account") <
-          0) {
+      PyModule_AddStringConstant(m, "CRYPTO_PSBT_TYPE", PSBT_TYPE.name) < 0 ||
+      PyModule_AddStringConstant(m, "CRYPTO_BIP39_TYPE", BIP39_TYPE.name) < 0 ||
+      PyModule_AddStringConstant(m, "CRYPTO_OUTPUT_TYPE", OUTPUT_TYPE.name) <
+          0 ||
+      PyModule_AddStringConstant(m, "CRYPTO_ACCOUNT_TYPE",
+                                 CRYPTO_ACCOUNT_TYPE_NAME) < 0) {
     Py_DECREF(m);
     return NULL;
   }
@@ -707,32 +859,33 @@ static PyObject *build_types_module(void) {
 // ---------------------------------------------------------------------------
 
 static int add_decoder_state_constants(PyObject *m) {
-  return (PyModule_AddIntConstant(m, "DECODER_OK", UR_DECODER_OK) == 0 &&
-          PyModule_AddIntConstant(m, "DECODER_PROCESSING",
-                                  UR_DECODER_PROCESSING) == 0 &&
-          PyModule_AddIntConstant(m, "DECODER_NO_RESULT",
-                                  UR_DECODER_NO_RESULT) == 0 &&
-          PyModule_AddIntConstant(m, "DECODER_ERR_INVALID_SCHEME",
-                                  UR_DECODER_ERROR_INVALID_SCHEME) == 0 &&
-          PyModule_AddIntConstant(m, "DECODER_ERR_INVALID_TYPE",
-                                  UR_DECODER_ERROR_INVALID_TYPE) == 0 &&
-          PyModule_AddIntConstant(m, "DECODER_ERR_INVALID_PATH_LENGTH",
-                                  UR_DECODER_ERROR_INVALID_PATH_LENGTH) == 0 &&
-          PyModule_AddIntConstant(
-              m, "DECODER_ERR_INVALID_SEQUENCE_COMPONENT",
-              UR_DECODER_ERROR_INVALID_SEQUENCE_COMPONENT) == 0 &&
-          PyModule_AddIntConstant(m, "DECODER_ERR_INVALID_FRAGMENT",
-                                  UR_DECODER_ERROR_INVALID_FRAGMENT) == 0 &&
-          PyModule_AddIntConstant(m, "DECODER_ERR_INVALID_PART",
-                                  UR_DECODER_ERROR_INVALID_PART) == 0 &&
-          PyModule_AddIntConstant(m, "DECODER_ERR_INVALID_CHECKSUM",
-                                  UR_DECODER_ERROR_INVALID_CHECKSUM) == 0 &&
-          PyModule_AddIntConstant(m, "DECODER_ERR_MEMORY",
-                                  UR_DECODER_ERROR_MEMORY) == 0 &&
-          PyModule_AddIntConstant(m, "DECODER_ERR_NULL_POINTER",
-                                  UR_DECODER_ERROR_NULL_POINTER) == 0)
-             ? 0
-             : -1;
+  // Mirror of ur_decoder_state_t (src/ur_decoder.h). When a state is added to
+  // the enum, add a row here and in the MicroPython uUR.c globals table.
+  static const struct {
+    const char *name;
+    long value;
+  } states[] = {
+      {"DECODER_OK", UR_DECODER_OK},
+      {"DECODER_PROCESSING", UR_DECODER_PROCESSING},
+      {"DECODER_NO_RESULT", UR_DECODER_NO_RESULT},
+      {"DECODER_ERR_INVALID_SCHEME", UR_DECODER_ERROR_INVALID_SCHEME},
+      {"DECODER_ERR_INVALID_TYPE", UR_DECODER_ERROR_INVALID_TYPE},
+      {"DECODER_ERR_INVALID_PATH_LENGTH",
+       UR_DECODER_ERROR_INVALID_PATH_LENGTH},
+      {"DECODER_ERR_INVALID_SEQUENCE_COMPONENT",
+       UR_DECODER_ERROR_INVALID_SEQUENCE_COMPONENT},
+      {"DECODER_ERR_INVALID_FRAGMENT", UR_DECODER_ERROR_INVALID_FRAGMENT},
+      {"DECODER_ERR_INVALID_PART", UR_DECODER_ERROR_INVALID_PART},
+      {"DECODER_ERR_INVALID_CHECKSUM", UR_DECODER_ERROR_INVALID_CHECKSUM},
+      {"DECODER_ERR_MEMORY", UR_DECODER_ERROR_MEMORY},
+      {"DECODER_ERR_NULL_POINTER", UR_DECODER_ERROR_NULL_POINTER},
+  };
+  for (size_t i = 0; i < sizeof(states) / sizeof(states[0]); i++) {
+    if (PyModule_AddIntConstant(m, states[i].name, states[i].value) < 0) {
+      return -1;
+    }
+  }
+  return 0;
 }
 
 static struct PyModuleDef uUR_moduledef = {
@@ -743,6 +896,18 @@ static struct PyModuleDef uUR_moduledef = {
     -1,
     NULL, // no top-level functions; codecs live under uUR.Types
 };
+
+// PyModule_AddObject steals the reference only on success; this helper keeps
+// the incref/steal accounting in one place so a failure mid-way through module
+// init cannot double-release a type already added.
+static int add_type(PyObject *m, const char *name, PyTypeObject *type) {
+  Py_INCREF(type);
+  if (PyModule_AddObject(m, name, (PyObject *)type) < 0) {
+    Py_DECREF(type);
+    return -1;
+  }
+  return 0;
+}
 
 PyMODINIT_FUNC PyInit_uUR(void) {
   if (PyType_Ready(&uUR_URType) < 0 ||
@@ -757,15 +922,9 @@ PyMODINIT_FUNC PyInit_uUR(void) {
     return NULL;
   }
 
-  Py_INCREF(&uUR_URType);
-  Py_INCREF(&uUR_URDecoderType);
-  Py_INCREF(&uUR_UREncoderType);
-  if (PyModule_AddObject(m, "UR", (PyObject *)&uUR_URType) < 0 ||
-      PyModule_AddObject(m, "URDecoder", (PyObject *)&uUR_URDecoderType) < 0 ||
-      PyModule_AddObject(m, "UREncoder", (PyObject *)&uUR_UREncoderType) < 0) {
-    Py_DECREF(&uUR_URType);
-    Py_DECREF(&uUR_URDecoderType);
-    Py_DECREF(&uUR_UREncoderType);
+  if (add_type(m, "UR", &uUR_URType) < 0 ||
+      add_type(m, "URDecoder", &uUR_URDecoderType) < 0 ||
+      add_type(m, "UREncoder", &uUR_UREncoderType) < 0) {
     Py_DECREF(m);
     return NULL;
   }
