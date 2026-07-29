@@ -14,6 +14,11 @@
 // Account tag number (for helper function)
 #define CRYPTO_ACCOUNT_TAG 311
 
+// Account UR type name. Account has no registry_type_t (it is decoded via the
+// output helper), so bindings source the canonical name from here instead of
+// hardcoding a literal.
+#define CRYPTO_ACCOUNT_TYPE_NAME "crypto-account"
+
 // Script expression tags (from BCR-2020-010)
 #define SCRIPT_EXPR_ADDR 307
 #define SCRIPT_EXPR_SH 400

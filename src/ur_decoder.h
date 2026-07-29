@@ -28,7 +28,9 @@ typedef enum {
 
   /* Errors. All values >= UR_DECODER_ERROR_INVALID_SCHEME are errors;
    * anchored at 16 so future non-error states can be added above without
-   * renumbering. Append new errors at the end only. */
+   * renumbering. Append new errors at the end only, and mirror every new
+   * state in the DECODER_* constant tables of both bindings (uUR.c and
+   * python/uUR.c). */
   UR_DECODER_ERROR_INVALID_SCHEME = 16,
   UR_DECODER_ERROR_INVALID_TYPE,
   UR_DECODER_ERROR_INVALID_PATH_LENGTH,
