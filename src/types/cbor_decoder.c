@@ -84,6 +84,12 @@ static cbor_value_t *decode_bytes(urtypes_cbor_decoder_t *decoder,
     return NULL;
 
   size_t slen = (size_t)len;
+
+  // Empty byte string (0x40) is valid CBOR; safe_malloc(0) returns NULL, so
+  // skip the staging buffer instead of misreading the empty case as OOM.
+  if (slen == 0)
+    return cbor_value_new_bytes(NULL, 0);
+
   uint8_t *data = safe_malloc(slen);
   if (!data)
     return NULL;
