@@ -108,6 +108,13 @@ expected during scanning).
 > FPUs are single-precision. Fragment-selection interop math is unchanged
 > and deliberately remains `double`.
 
+> **Constructor validation:** `ur_new()`, `ur_encoder_new()` and
+> `ur_encoder_encode_single()` reject a `type` that is not a valid UR type
+> (`[a-z0-9-]+`, no leading or trailing `-`), and `fountain_encoder_new()`
+> rejects `max_fragment_len < 10`. Calls that used to succeed and then emit
+> parts every decoder rejects — or explode the fragment count — now fail at
+> construction with NULL/false.
+
 Type-specific helpers (`bytes_from_cbor`, `psbt_from_cbor`,
 `output_from_descriptor_string`, etc.) live in `src/types/*.h`.
 
