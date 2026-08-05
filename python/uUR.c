@@ -4,6 +4,7 @@
 // BC-UR encoder/decoder on CPython (e.g. Raspberry Pi) exactly as it does on
 // the ESP32 MicroPython firmware:
 //
+// clang-format off
 //   uUR.UR(type, cbor)                       -> .type, .cbor, == / hash by value
 //   uUR.URDecoder()                          -> receive_part, estimated_percent_complete,
 //                                               .result, .state, .expected_part_count,
@@ -14,6 +15,7 @@
 //   uUR.Types.{bytes,psbt}_{from,to}_cbor, bip39_words_from_cbor,
 //             output_from_cbor, output_from_cbor_account, + CRYPTO_* tag/type constants
 //   uUR.DECODER_*                            -> ur_decoder_state_t mirror constants
+// clang-format on
 //
 // Memory model: cUR allocates output strings/buffers with libc malloc on the
 // host build (bundled src/sha256/sha256.c; no UR_USE_MBEDTLS_SHA256), so this
@@ -85,8 +87,9 @@ static int UR_init(uUR_UR *self, PyObject *args, PyObject *kwds) {
   // (MemoryError): ur_new returns NULL for both.
   if (!is_ur_type(type)) {
     PyBuffer_Release(&cbor);
-    PyErr_SetString(PyExc_ValueError,
-                    "invalid UR type (want [a-z0-9-], no leading/trailing '-')");
+    PyErr_SetString(
+        PyExc_ValueError,
+        "invalid UR type (want [a-z0-9-], no leading/trailing '-')");
     return -1;
   }
   if (cbor.len == 0) {
@@ -274,8 +277,9 @@ static PyObject *URDecoder_repr(uUR_URDecoder *self) {
 
 // receive_part(part) -> int decoder state (one of the module's DECODER_*
 // constants). Decode errors are RETURNED, not raised: junk/misread frames are
-// expected in a QR scan loop. NOTE: DECODER_OK == 0 is falsy in Python — compare
-// the return against the DECODER_* constants, never use it as a boolean.
+// expected in a QR scan loop. NOTE: DECODER_OK == 0 is falsy in Python —
+// compare the return against the DECODER_* constants, never use it as a
+// boolean.
 static PyObject *URDecoder_receive_part(uUR_URDecoder *self, PyObject *part) {
   if (!self->decoder) {
     PyErr_SetString(PyExc_RuntimeError, "URDecoder is closed");
@@ -315,9 +319,9 @@ static PyObject *URDecoder_estimated_percent_complete(uUR_URDecoder *self,
   if (!self->decoder) {
     return PyFloat_FromDouble(0.0);
   }
-  float pct = weight
-                  ? ur_decoder_estimated_percent_complete_weighted(self->decoder)
-                  : ur_decoder_estimated_percent_complete(self->decoder);
+  float pct =
+      weight ? ur_decoder_estimated_percent_complete_weighted(self->decoder)
+             : ur_decoder_estimated_percent_complete(self->decoder);
   return PyFloat_FromDouble((double)pct);
 }
 
@@ -501,10 +505,10 @@ static int UREncoder_init(uUR_UREncoder *self, PyObject *args, PyObject *kwds) {
     return -1;
   }
 
-  ur_encoder_t *encoder = ur_encoder_new(
-      ur_get_type(ur->ur), ur_get_cbor(ur->ur), ur_get_cbor_len(ur->ur),
-      (size_t)max_fragment_len, (uint32_t)first_seq_num,
-      (size_t)min_fragment_len);
+  ur_encoder_t *encoder =
+      ur_encoder_new(ur_get_type(ur->ur), ur_get_cbor(ur->ur),
+                     ur_get_cbor_len(ur->ur), (size_t)max_fragment_len,
+                     (uint32_t)first_seq_num, (size_t)min_fragment_len);
   if (!encoder) {
     PyErr_SetString(PyExc_MemoryError, "Failed to create UREncoder");
     return -1;
@@ -539,8 +543,7 @@ static PyObject *UREncoder_repr(uUR_UREncoder *self) {
     return PyUnicode_FromString("UREncoder(invalid)");
   }
   return PyUnicode_FromFormat(
-      "UREncoder(seq_len=%zu, complete=%s)",
-      ur_encoder_seq_len(self->encoder),
+      "UREncoder(seq_len=%zu, complete=%s)", ur_encoder_seq_len(self->encoder),
       ur_encoder_is_complete(self->encoder) ? "True" : "False");
 }
 
@@ -826,8 +829,8 @@ static PyMethodDef Types_methods[] = {
 };
 
 static struct PyModuleDef Types_moduledef = {
-    PyModuleDef_HEAD_INIT, "uUR.Types",
-    "BC-UR typed CBOR payload codecs.", -1, Types_methods,
+    PyModuleDef_HEAD_INIT, "uUR.Types", "BC-UR typed CBOR payload codecs.", -1,
+    Types_methods,
 };
 
 static PyObject *build_types_module(void) {
@@ -840,7 +843,8 @@ static PyObject *build_types_module(void) {
   // from what decoder results report.
   if (PyModule_AddIntConstant(m, "CRYPTO_PSBT_TAG", CRYPTO_PSBT_TAG) < 0 ||
       PyModule_AddIntConstant(m, "CRYPTO_BIP39_TAG", CRYPTO_BIP39_TAG) < 0 ||
-      PyModule_AddIntConstant(m, "CRYPTO_ACCOUNT_TAG", CRYPTO_ACCOUNT_TAG) < 0 ||
+      PyModule_AddIntConstant(m, "CRYPTO_ACCOUNT_TAG", CRYPTO_ACCOUNT_TAG) <
+          0 ||
       PyModule_AddIntConstant(m, "CRYPTO_OUTPUT_TAG", CRYPTO_OUTPUT_TAG) < 0 ||
       PyModule_AddStringConstant(m, "CRYPTO_PSBT_TYPE", PSBT_TYPE.name) < 0 ||
       PyModule_AddStringConstant(m, "CRYPTO_BIP39_TYPE", BIP39_TYPE.name) < 0 ||
@@ -870,8 +874,7 @@ static int add_decoder_state_constants(PyObject *m) {
       {"DECODER_NO_RESULT", UR_DECODER_NO_RESULT},
       {"DECODER_ERR_INVALID_SCHEME", UR_DECODER_ERROR_INVALID_SCHEME},
       {"DECODER_ERR_INVALID_TYPE", UR_DECODER_ERROR_INVALID_TYPE},
-      {"DECODER_ERR_INVALID_PATH_LENGTH",
-       UR_DECODER_ERROR_INVALID_PATH_LENGTH},
+      {"DECODER_ERR_INVALID_PATH_LENGTH", UR_DECODER_ERROR_INVALID_PATH_LENGTH},
       {"DECODER_ERR_INVALID_SEQUENCE_COMPONENT",
        UR_DECODER_ERROR_INVALID_SEQUENCE_COMPONENT},
       {"DECODER_ERR_INVALID_FRAGMENT", UR_DECODER_ERROR_INVALID_FRAGMENT},
@@ -910,8 +913,7 @@ static int add_type(PyObject *m, const char *name, PyTypeObject *type) {
 }
 
 PyMODINIT_FUNC PyInit_uUR(void) {
-  if (PyType_Ready(&uUR_URType) < 0 ||
-      PyType_Ready(&uUR_URDecoderType) < 0 ||
+  if (PyType_Ready(&uUR_URType) < 0 || PyType_Ready(&uUR_URDecoderType) < 0 ||
       PyType_Ready(&uUR_UREncoderType) < 0 ||
       PyType_Ready(&uUR_FountainEncoderType) < 0) {
     return NULL;

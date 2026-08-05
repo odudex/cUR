@@ -1,6 +1,6 @@
 #!/bin/bash
-# Format all C/H files under src/ and tests/, plus the uUR.c MicroPython
-# wrapper at the repo root. Uses the rules from .clang-format.
+# Format all C/H files under src/, tests/ and python/, plus the uUR.c
+# MicroPython wrapper at the repo root. Uses the rules from .clang-format.
 
 set -e
 
@@ -9,7 +9,7 @@ cd "$SCRIPT_DIR"
 
 echo "Running clang-format..."
 
-find src tests -type f \( -name '*.c' -o -name '*.h' \) \
+find src tests python -type f \( -name '*.c' -o -name '*.h' \) \
     -not -path '*/build/*' -not -path '*/obj/*' \
     -exec clang-format -i {} +
 
