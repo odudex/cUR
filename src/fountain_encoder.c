@@ -522,7 +522,11 @@ bool fountain_encoder_next_part(fountain_encoder_t *encoder,
   encoder->last_part_indexes.count = 0;
   encoder->last_part_indexes.capacity = 0;
 
-  part_indexes_copy(indexes, &encoder->last_part_indexes);
+  if (!part_indexes_copy(indexes, &encoder->last_part_indexes)) {
+    // Best effort: last_part_indexes is only reported through
+    // fountain_encoder_last_part_indexes() for progress/debug purposes. It was
+    // cleared above, so a failure leaves it empty rather than stale.
+  }
 
   // Fill part structure
   part->seq_num = encoder->seq_num;

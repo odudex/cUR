@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "ur_attributes.h"
+
 /**
  * Encode bytes to bytewords minimal string (with CRC32)
  * @param data Data to encode
@@ -12,7 +14,8 @@
  * @param encoded Output encoded string (allocated)
  * @return true on success, false on error
  */
-bool bytewords_encode(const uint8_t *data, size_t data_len, char **encoded);
+UR_WARN_UNUSED_RESULT bool bytewords_encode(const uint8_t *data,
+                                            size_t data_len, char **encoded);
 
 /**
  * Free bytewords result
@@ -27,7 +30,8 @@ void bytewords_free(void *ptr);
  * @param decoded_len Output decoded length
  * @return true on success, false on error
  */
-bool bytewords_decode_raw(const char *encoded, uint8_t **decoded,
-                          size_t *decoded_len);
+UR_WARN_UNUSED_RESULT bool bytewords_decode_raw(const char *encoded,
+                                                uint8_t **decoded,
+                                                size_t *decoded_len);
 
 #endif // BYTEWORDS_H

@@ -7,6 +7,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "ur_attributes.h"
+
 /**
  * UR Encoder - Encodes Uniform Resources into single or multi-part format
  */
@@ -30,8 +32,10 @@ typedef struct ur_encoder {
  * by caller)
  * @return true on success
  */
-bool ur_encoder_encode_single(const char *type, const uint8_t *cbor_data,
-                              size_t cbor_len, char **ur_string_out);
+UR_WARN_UNUSED_RESULT bool ur_encoder_encode_single(const char *type,
+                                                    const uint8_t *cbor_data,
+                                                    size_t cbor_len,
+                                                    char **ur_string_out);
 
 /**
  * Create new UR encoder for multi-part encoding
@@ -43,9 +47,10 @@ bool ur_encoder_encode_single(const char *type, const uint8_t *cbor_data,
  * @param min_fragment_len Minimum fragment length (default 10)
  * @return Pointer to encoder or NULL on error
  */
-ur_encoder_t *ur_encoder_new(const char *type, const uint8_t *cbor_data,
-                             size_t cbor_len, size_t max_fragment_len,
-                             uint32_t first_seq_num, size_t min_fragment_len);
+UR_WARN_UNUSED_RESULT ur_encoder_t *
+ur_encoder_new(const char *type, const uint8_t *cbor_data, size_t cbor_len,
+               size_t max_fragment_len, uint32_t first_seq_num,
+               size_t min_fragment_len);
 
 /**
  * Free UR encoder
@@ -65,14 +70,15 @@ size_t ur_encoder_seq_len(const ur_encoder_t *encoder);
  * @param encoder Pointer to encoder
  * @return true if complete
  */
-bool ur_encoder_is_complete(const ur_encoder_t *encoder);
+UR_WARN_UNUSED_RESULT bool ur_encoder_is_complete(const ur_encoder_t *encoder);
 
 /**
  * Check if encoder is single part
  * @param encoder Pointer to encoder
  * @return true if single part
  */
-bool ur_encoder_is_single_part(const ur_encoder_t *encoder);
+UR_WARN_UNUSED_RESULT bool
+ur_encoder_is_single_part(const ur_encoder_t *encoder);
 
 /**
  * Generate next UR part (sequential retrieval)
@@ -81,6 +87,7 @@ bool ur_encoder_is_single_part(const ur_encoder_t *encoder);
  * freed by caller)
  * @return true on success
  */
-bool ur_encoder_next_part(ur_encoder_t *encoder, char **ur_part_out);
+UR_WARN_UNUSED_RESULT bool ur_encoder_next_part(ur_encoder_t *encoder,
+                                                char **ur_part_out);
 
 #endif // UR_ENCODER_H

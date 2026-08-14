@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "ur_attributes.h"
+
 /* Hard caps on attacker-controlled fragment header fields. The first
  * fragment's seq_len drives O(seq_len) allocations inside the fountain
  * decoder (degree sampler, hash table, part-index bitmap); message_len drives
@@ -95,7 +97,7 @@ typedef struct ur_decoder {
  * Create a new URDecoder instance
  * @return Pointer to URDecoder instance or NULL on error
  */
-ur_decoder_t *ur_decoder_new(void);
+UR_WARN_UNUSED_RESULT ur_decoder_t *ur_decoder_new(void);
 
 /**
  * Free URDecoder instance
@@ -111,8 +113,8 @@ void ur_decoder_free(ur_decoder_t *decoder);
  *         UR_DECODER_ERROR_NULL_POINTER on a NULL decoder; on a terminal
  *         decoder returns the terminal state without processing the part.
  */
-ur_decoder_state_t ur_decoder_receive_part(ur_decoder_t *decoder,
-                                           const char *part_str);
+UR_WARN_UNUSED_RESULT ur_decoder_state_t
+ur_decoder_receive_part(ur_decoder_t *decoder, const char *part_str);
 
 /**
  * Get the current decoder state without feeding a part
@@ -126,7 +128,7 @@ ur_decoder_state_t ur_decoder_get_state(const ur_decoder_t *decoder);
  * @param decoder Pointer to URDecoder instance
  * @return Non-NULL if and only if ur_decoder_get_state() == UR_DECODER_OK
  */
-ur_result_t *ur_decoder_get_result(ur_decoder_t *decoder);
+UR_WARN_UNUSED_RESULT ur_result_t *ur_decoder_get_result(ur_decoder_t *decoder);
 
 /**
  * Get expected part count

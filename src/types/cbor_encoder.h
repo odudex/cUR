@@ -6,6 +6,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "../ur_attributes.h"
+
 // CBOR encoder (prefixed to avoid conflicts with bc-ur)
 typedef struct {
   byte_buffer_t *buffer;
@@ -16,8 +18,9 @@ urtypes_cbor_encoder_t *urtypes_cbor_encoder_new(void);
 void urtypes_cbor_encoder_free(urtypes_cbor_encoder_t *encoder);
 
 // Encode CBOR value
-bool urtypes_cbor_encoder_encode(urtypes_cbor_encoder_t *encoder,
-                                 cbor_value_t *value);
+UR_WARN_UNUSED_RESULT bool
+urtypes_cbor_encoder_encode(urtypes_cbor_encoder_t *encoder,
+                            cbor_value_t *value);
 
 // Get encoded data
 uint8_t *urtypes_cbor_encoder_get_data(urtypes_cbor_encoder_t *encoder,

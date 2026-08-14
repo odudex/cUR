@@ -275,7 +275,7 @@ static void test_fountain_fragment_length_mismatch(void) {
   // which is what drives reduce_part_by_part. The first part fixes the
   // expected fragment length at short_len, so every long_len part must be
   // rejected regardless of its index set.
-  int trials = 0, rejected = 0;
+  int trials = 0, rejected = 0, seeded = 0;
   for (uint32_t seq = 2; seq < 400; seq++) {
     fountain_decoder_t *d = fountain_decoder_new();
 
@@ -286,7 +286,9 @@ static void test_fountain_fragment_length_mismatch(void) {
     simple.checksum = checksum;
     simple.data = calloc(short_len, 1);
     simple.data_len = short_len;
-    fountain_decoder_receive_part(d, &simple); // degree-1 {0}, sets the length
+    // degree-1 {0}, establishes the expected fragment length
+    if (fountain_decoder_receive_part(d, &simple))
+      seeded++;
     fountain_encoder_part_free(&simple);
 
     fountain_encoder_part_t longer = {0};
@@ -306,6 +308,7 @@ static void test_fountain_fragment_length_mismatch(void) {
     fountain_decoder_free(d);
   }
 
+  ASSERT(seeded == trials, "every seed part was accepted");
   ASSERT(rejected == trials,
          "length-mismatched fountain parts are all rejected (no OOB reduce)");
 }

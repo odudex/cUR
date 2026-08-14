@@ -149,7 +149,8 @@ static size_t hash_indexes(const part_indexes_t *indexes) {
 // Hash set operations for lightweight duplicate detection
 
 // Initialize hash set
-static bool hash_set_init(hash_set_t *set, size_t capacity) {
+static UR_WARN_UNUSED_RESULT bool hash_set_init(hash_set_t *set,
+                                                size_t capacity) {
   if (!set || capacity == 0)
     return false;
 
@@ -173,7 +174,8 @@ static void hash_set_free(hash_set_t *set) {
 }
 
 // Check if hash set contains a hash using binary search (sorted array)
-static bool hash_set_contains(const hash_set_t *set, uint32_t hash) {
+static UR_WARN_UNUSED_RESULT bool hash_set_contains(const hash_set_t *set,
+                                                    uint32_t hash) {
   if (!set || !set->hashes || set->count == 0)
     return false;
 
@@ -191,7 +193,7 @@ static bool hash_set_contains(const hash_set_t *set, uint32_t hash) {
 }
 
 // Add hash to set in sorted order (returns false if already exists or on error)
-static bool hash_set_add(hash_set_t *set, uint32_t hash) {
+static UR_WARN_UNUSED_RESULT bool hash_set_add(hash_set_t *set, uint32_t hash) {
   if (!set)
     return false;
 
@@ -237,7 +239,8 @@ static bool hash_set_add(hash_set_t *set, uint32_t hash) {
 }
 
 // Initialize hash table with dynamic capacity
-static bool mixed_hash_init(mixed_parts_hash_t *hash, size_t capacity) {
+static UR_WARN_UNUSED_RESULT bool mixed_hash_init(mixed_parts_hash_t *hash,
+                                                  size_t capacity) {
   if (!hash || capacity == 0)
     return false;
 
@@ -273,8 +276,9 @@ static void mixed_hash_free(mixed_parts_hash_t *hash) {
 }
 
 // Add or update entry in hash table
-static bool mixed_hash_put(mixed_parts_hash_t *hash, const part_indexes_t *key,
-                           const decoder_part_t *value) {
+static UR_WARN_UNUSED_RESULT bool mixed_hash_put(mixed_parts_hash_t *hash,
+                                                 const part_indexes_t *key,
+                                                 const decoder_part_t *value) {
   if (!hash || !hash->buckets || !key || !value || hash->capacity == 0)
     return false;
 
@@ -318,7 +322,8 @@ static bool mixed_hash_put(mixed_parts_hash_t *hash, const part_indexes_t *key,
   return true;
 }
 
-static bool queue_init(part_queue_t *queue, size_t capacity) {
+static UR_WARN_UNUSED_RESULT bool queue_init(part_queue_t *queue,
+                                             size_t capacity) {
   if (!queue || capacity == 0)
     return false;
 
@@ -360,7 +365,8 @@ static void decoder_part_move(decoder_part_t *src, decoder_part_t *dst) {
 
 // Ensure room for at least `need` entries, growing the ring buffer if
 // necessary. Returns false only when already at QUEUE_MAX_CAPACITY or on OOM.
-static bool queue_reserve(part_queue_t *queue, size_t need) {
+static UR_WARN_UNUSED_RESULT bool queue_reserve(part_queue_t *queue,
+                                                size_t need) {
   if (!queue)
     return false;
   if (need <= queue->capacity)
@@ -398,7 +404,8 @@ static bool queue_reserve(part_queue_t *queue, size_t need) {
   return true;
 }
 
-static bool queue_enqueue(part_queue_t *queue, decoder_part_t *part) {
+static UR_WARN_UNUSED_RESULT bool queue_enqueue(part_queue_t *queue,
+                                                decoder_part_t *part) {
   if (!queue || !part)
     return false;
   if (!queue_reserve(queue, queue->count + 1))
@@ -411,7 +418,8 @@ static bool queue_enqueue(part_queue_t *queue, decoder_part_t *part) {
   return true;
 }
 
-static bool queue_dequeue(part_queue_t *queue, decoder_part_t *part) {
+static UR_WARN_UNUSED_RESULT bool queue_dequeue(part_queue_t *queue,
+                                                decoder_part_t *part) {
   if (!queue || !part || queue->count == 0)
     return false;
 
@@ -422,7 +430,7 @@ static bool queue_dequeue(part_queue_t *queue, decoder_part_t *part) {
   return true;
 }
 
-static bool queue_is_empty(const part_queue_t *queue) {
+static UR_WARN_UNUSED_RESULT bool queue_is_empty(const part_queue_t *queue) {
   return !queue || queue->count == 0;
 }
 
@@ -619,7 +627,7 @@ void fountain_decoder_free(fountain_decoder_t *decoder) {
   free(decoder);
 }
 
-static bool create_decoder_part_from_encoder_part(
+static UR_WARN_UNUSED_RESULT bool create_decoder_part_from_encoder_part(
     fountain_encoder_part_t *const encoder_part,
     decoder_part_t *const decoder_part, random_sampler_t *cached_sampler) {
   if (!encoder_part || !decoder_part) {
@@ -651,7 +659,8 @@ typedef enum {
   MIXED_SOURCE_CROSS_REDUCTION
 } mixed_part_source_t;
 
-static bool is_simple_part(const decoder_part_t *const part) {
+static UR_WARN_UNUSED_RESULT bool
+is_simple_part(const decoder_part_t *const part) {
   return part && part->indexes.count == 1;
 }
 
@@ -726,9 +735,10 @@ static bool add_simple_part(fountain_decoder_t *const decoder,
   return true;
 }
 
-static bool reduce_part_by_part(const decoder_part_t *const a,
-                                const decoder_part_t *const b,
-                                decoder_part_t *const result) {
+static UR_WARN_UNUSED_RESULT bool
+reduce_part_by_part(const decoder_part_t *const a,
+                    const decoder_part_t *const b,
+                    decoder_part_t *const result) {
   if (!a || !b || !result)
     return false;
 
@@ -756,9 +766,10 @@ static bool reduce_part_by_part(const decoder_part_t *const a,
   return true;
 }
 
-static bool add_mixed_part(fountain_decoder_t *const decoder,
-                           const decoder_part_t *const part,
-                           const mixed_part_source_t source) {
+static UR_WARN_UNUSED_RESULT bool
+add_mixed_part(fountain_decoder_t *const decoder,
+               const decoder_part_t *const part,
+               const mixed_part_source_t source) {
   if (!decoder || !part || is_simple_part(part) || !decoder->mixed_parts_hash)
     return false;
 
@@ -851,6 +862,22 @@ static void reduce_mixed_by(fountain_decoder_t *const decoder,
         continue;
       }
 
+      // The value carries its own copy of the reduced index set. Build it
+      // before the XOR below, not after: once the data has been mutated there
+      // is no way back, and part_indexes_copy() clears its destination before
+      // it can fail. Copying afterwards therefore left the value describing an
+      // empty set while the key described the real one - an equation that can
+      // never satisfy is_simple_part() and is silently XORed into others.
+      part_indexes_t new_value_indexes = {0};
+      if (!part_indexes_copy(&new_indexes, &new_value_indexes)) {
+        // new_indexes is an automatic struct; only its array is heap.
+        // part_indexes_free() would free the struct itself.
+        free(new_indexes.indexes);
+        prev = entry;
+        entry = next;
+        continue;
+      }
+
       // XOR the data in-place.
       size_t xor_len = entry->value.data_len < part->data_len
                            ? entry->value.data_len
@@ -862,8 +889,7 @@ static void reduce_mixed_by(fountain_decoder_t *const decoder,
       entry->key_hash = hash_indexes(&entry->key);
 
       free(entry->value.indexes.indexes);
-      entry->value.indexes = (part_indexes_t){0};
-      part_indexes_copy(&new_indexes, &entry->value.indexes);
+      entry->value.indexes = new_value_indexes;
 
       if (is_simple_part(&entry->value)) {
 #ifdef DEBUG_STATS
@@ -942,7 +968,8 @@ static void reduce_mixed_by(fountain_decoder_t *const decoder,
 // least one entry left the table, so the caller can drain and try again.
 // Allocation-free apart from the enqueue itself, and each pass strictly
 // shrinks the table, so the retry loop terminates.
-static bool promote_deferred_parts(fountain_decoder_t *const decoder) {
+static UR_WARN_UNUSED_RESULT bool
+promote_deferred_parts(fountain_decoder_t *const decoder) {
   if (!decoder || !decoder->has_deferred_parts || !decoder->mixed_parts_hash)
     return false;
 
@@ -994,9 +1021,10 @@ static bool promote_deferred_parts(fountain_decoder_t *const decoder) {
 }
 
 #ifdef ENABLE_CROSS_REDUCTION
-static bool create_symmetric_diff(const decoder_part_t *const a,
-                                  const decoder_part_t *const b,
-                                  decoder_part_t *const result) {
+static UR_WARN_UNUSED_RESULT bool
+create_symmetric_diff(const decoder_part_t *const a,
+                      const decoder_part_t *const b,
+                      decoder_part_t *const result) {
   if (!a || !b || !result || a->data_len != b->data_len)
     return false;
 
@@ -1355,7 +1383,12 @@ static void process_mixed_part(fountain_decoder_t *const decoder,
       decoder->alloc_failed = true;
   } else {
     reduce_mixed_by(decoder, &reduced_part);
-    add_mixed_part(decoder, &reduced_part, MIXED_SOURCE_FRAGMENT);
+    if (!add_mixed_part(decoder, &reduced_part, MIXED_SOURCE_FRAGMENT)) {
+      // The table is at MAX_MIXED_PARTS, the equation is a duplicate, or the
+      // allocation failed. Dropping it is the documented behaviour of the cap:
+      // the fountain stream keeps supplying parts, so the message still
+      // converges, just from more frames.
+    }
   }
 
   decoder_part_free(&reduced_part);
@@ -1415,9 +1448,11 @@ bool fountain_decoder_receive_part(fountain_decoder_t *decoder,
     // claim ~20 KiB of the 32-bit heap at seq_len 1024 to back a table that can
     // never exceed 256 entries. Best-effort - queue_enqueue() still grows on
     // demand if a message genuinely needs more.
-    (void)queue_reserve(&decoder->queue, part->seq_len < MAX_MIXED_PARTS
-                                             ? part->seq_len
-                                             : MAX_MIXED_PARTS);
+    if (!queue_reserve(&decoder->queue, part->seq_len < MAX_MIXED_PARTS
+                                            ? part->seq_len
+                                            : MAX_MIXED_PARTS)) {
+      // Best effort - queue_enqueue() still grows on demand.
+    }
 
     decoder->expected_seq_len = part->seq_len;
     decoder->expected_checksum = part->checksum;
@@ -1498,14 +1533,20 @@ bool fountain_decoder_receive_part(fountain_decoder_t *decoder,
     return true;
   }
 
-  hash_set_add(&decoder->received_fragments_hashes, fragment_hash);
+  if (!hash_set_add(&decoder->received_fragments_hashes, fragment_hash)) {
+    // Best effort. Losing an entry only costs the cheap duplicate short-circuit
+    // above; a fragment that slips through is filtered again by
+    // received_part_indexes before it can be applied twice.
+  }
 
   if (decoder->last_part_indexes) {
     part_indexes_free(decoder->last_part_indexes);
   }
   decoder->last_part_indexes = part_indexes_new();
-  if (decoder->last_part_indexes) {
-    part_indexes_copy(&decoder_part.indexes, decoder->last_part_indexes);
+  if (decoder->last_part_indexes &&
+      !part_indexes_copy(&decoder_part.indexes, decoder->last_part_indexes)) {
+    // Best effort: this only feeds the weighted progress estimate, which
+    // degrades to the unweighted one rather than misreporting.
   }
 
   if (!queue_enqueue(&decoder->queue, &decoder_part)) {

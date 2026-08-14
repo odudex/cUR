@@ -7,6 +7,8 @@
 #include <stdint.h>
 #include <stdlib.h> // For free()
 
+#include "../ur_attributes.h"
+
 // Byte buffer utilities
 typedef struct {
   uint8_t *data;
@@ -17,7 +19,8 @@ typedef struct {
 byte_buffer_t *byte_buffer_new(void);
 byte_buffer_t *byte_buffer_new_with_capacity(size_t capacity);
 void byte_buffer_free(byte_buffer_t *buf);
-bool byte_buffer_append(byte_buffer_t *buf, const uint8_t *data, size_t len);
+UR_WARN_UNUSED_RESULT bool byte_buffer_append(byte_buffer_t *buf,
+                                              const uint8_t *data, size_t len);
 uint8_t *byte_buffer_get_data(byte_buffer_t *buf);
 size_t byte_buffer_get_len(byte_buffer_t *buf);
 

@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "ur_attributes.h"
+
 typedef struct {
   char *type;
   uint8_t *cbor;
@@ -19,7 +21,8 @@ typedef struct {
  * @return Pointer to UR object or NULL on error (invalid type, empty cbor,
  *         or allocation failure)
  */
-ur_t *ur_new(const char *type, const uint8_t *cbor, size_t cbor_len);
+UR_WARN_UNUSED_RESULT ur_t *ur_new(const char *type, const uint8_t *cbor,
+                                   size_t cbor_len);
 
 /**
  * Free UR object
@@ -55,6 +58,6 @@ size_t ur_get_cbor_len(const ur_t *ur);
  * @return Pointer to UR object or NULL on error
  */
 struct ur_result;
-ur_t *ur_from_result(const struct ur_result *result);
+UR_WARN_UNUSED_RESULT ur_t *ur_from_result(const struct ur_result *result);
 
 #endif // UR_H

@@ -8,6 +8,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "ur_attributes.h"
+
 // Opaque decoder type
 typedef struct fountain_decoder fountain_decoder_t;
 
@@ -25,7 +27,7 @@ typedef struct {
  * Create a new fountain decoder
  * @return Pointer to fountain decoder or NULL on error
  */
-fountain_decoder_t *fountain_decoder_new(void);
+UR_WARN_UNUSED_RESULT fountain_decoder_t *fountain_decoder_new(void);
 
 /**
  * Free fountain decoder
@@ -39,8 +41,9 @@ void fountain_decoder_free(fountain_decoder_t *decoder);
  * @param part Pointer to encoder part
  * @return true on success, false on error
  */
-bool fountain_decoder_receive_part(fountain_decoder_t *decoder,
-                                   fountain_encoder_part_t *part);
+UR_WARN_UNUSED_RESULT bool
+fountain_decoder_receive_part(fountain_decoder_t *decoder,
+                              fountain_encoder_part_t *part);
 
 /**
  * Check if decoding is complete
@@ -50,16 +53,19 @@ bool fountain_decoder_receive_part(fountain_decoder_t *decoder,
 // Whether the last fountain_decoder_receive_part() dropped a recovered
 // fragment because the work queue could not be extended. Distinguishes an
 // allocation failure from a malformed part when receive_part() returns false.
-bool fountain_decoder_had_alloc_failure(const fountain_decoder_t *decoder);
+UR_WARN_UNUSED_RESULT bool
+fountain_decoder_had_alloc_failure(const fountain_decoder_t *decoder);
 
-bool fountain_decoder_is_complete(fountain_decoder_t *decoder);
+UR_WARN_UNUSED_RESULT bool
+fountain_decoder_is_complete(fountain_decoder_t *decoder);
 
 /**
  * Check if decoding was successful
  * @param decoder Pointer to fountain decoder
  * @return true if successful, false otherwise
  */
-bool fountain_decoder_is_success(fountain_decoder_t *decoder);
+UR_WARN_UNUSED_RESULT bool
+fountain_decoder_is_success(fountain_decoder_t *decoder);
 
 /**
  * Get expected part count
