@@ -13,6 +13,14 @@ registry_type_t KEYPATH_TYPE = {.name = "crypto-keypath",
 keypath_data_t *keypath_new(path_component_t *components,
                             size_t component_count,
                             const uint8_t *source_fingerprint, int depth) {
+  // A positive count with no component array is contradictory: consumers such
+  // as keypath_to_string() guard on component_count and then index
+  // components[], so accepting it would store a NULL-dereference waiting to
+  // happen. Reject rather than silently normalise, so the caller learns its
+  // arguments were wrong.
+  if (component_count > 0 && !components)
+    return NULL;
+
   keypath_data_t *keypath = safe_malloc(sizeof(keypath_data_t));
   if (!keypath)
     return NULL;
@@ -21,7 +29,7 @@ keypath_data_t *keypath_new(path_component_t *components,
   keypath->depth = depth;
 
   // Copy components
-  if (component_count > 0 && components) {
+  if (component_count > 0) {
     keypath->components =
         safe_malloc(component_count * sizeof(path_component_t));
     if (!keypath->components) {

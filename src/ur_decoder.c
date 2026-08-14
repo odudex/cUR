@@ -18,19 +18,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Hard caps on attacker-controlled fragment header fields. The first
-// fragment's seq_len drives O(seq_len) allocations inside the fountain
-// decoder (degree sampler, hash table, part-index bitmap); message_len
-// drives the final reassembly buffer. Reject anything larger than what a
-// real Bitcoin UR would ever need, to keep a malicious QR from exhausting
-// embedded heap. Both can be overridden at compile time by integrators
-// with different limits.
-#ifndef UR_MAX_SEQ_LEN
-#define UR_MAX_SEQ_LEN 1024u
-#endif
-#ifndef UR_MAX_MESSAGE_LEN
-#define UR_MAX_MESSAGE_LEN (256u * 1024u)
-#endif
+// UR_MAX_SEQ_LEN / UR_MAX_MESSAGE_LEN are declared in ur_decoder.h so that
+// encoders can check against the same limits this decoder enforces.
 
 static fountain_encoder_part_t *
 create_fountain_part_from_cbor(uint8_t *cbor_data, size_t cbor_len,
@@ -336,10 +325,14 @@ ur_decoder_state_t ur_decoder_receive_part(ur_decoder_t *decoder,
     decoder->state = UR_DECODER_ERROR_INVALID_SEQUENCE_COMPONENT;
     goto cleanup;
   }
-  if (seq_len == 0 || seq_len > UR_MAX_SEQ_LEN) {
+  if (seq_len == 0) {
     decoder->state = UR_DECODER_ERROR_INVALID_SEQUENCE_COMPONENT;
     goto cleanup;
   }
+  // Over-policy sequence length. Noted rather than acted on here: the terminal
+  // decision is deferred until the frame has been shown to be well formed, at
+  // the bottom of this function.
+  const bool over_max_seq_len = seq_len > UR_MAX_SEQ_LEN;
 
   size_t cbor_len;
   if (!bytewords_decode_raw(components[1], &cbor_data, &cbor_len)) {
@@ -374,10 +367,9 @@ ur_decoder_state_t ur_decoder_receive_part(ur_decoder_t *decoder,
     }
   }
 
-  // Fragment body must agree with URI path (spec requires it) and fall
-  // within the sanity caps.
+  // Fragment body must agree with URI path (spec requires it).
   if (cbor_seq_num != seq_num || cbor_seq_len != seq_len ||
-      cbor_message_len == 0 || cbor_message_len > UR_MAX_MESSAGE_LEN) {
+      cbor_message_len == 0) {
     decoder->state = UR_DECODER_ERROR_INVALID_FRAGMENT;
     goto cleanup;
   }
@@ -397,6 +389,33 @@ ur_decoder_state_t ur_decoder_receive_part(ur_decoder_t *decoder,
   // double-free on the create_fountain_part_from_cbor failure path.
   if (fragment_len == 0) {
     decoder->state = UR_DECODER_ERROR_INVALID_FRAGMENT;
+    goto cleanup;
+  }
+
+  // Every fragment of a message carries the same padded length,
+  // ceil(message_len / seq_len). Without this check a frame may declare a
+  // message far larger than its fragments can supply: reassembly allocates
+  // message_len uninitialised bytes, copies in only what arrived, and then
+  // CRCs the whole buffer - reading heap that was never written. A one-byte
+  // fragment claiming message_len=262144 is enough to trigger it.
+  //
+  // Computed with division and modulo rather than (message_len + seq_len - 1)
+  // so it cannot overflow regardless of the caps above.
+  const size_t expected_fragment_len =
+      cbor_message_len / seq_len + (cbor_message_len % seq_len ? 1 : 0);
+  if (fragment_len != expected_fragment_len) {
+    decoder->state = UR_DECODER_ERROR_INVALID_FRAGMENT;
+    goto cleanup;
+  }
+
+  // Policy limits are applied last, now that this is known to be a well-formed
+  // fragment whose body agrees with its path. UR_DECODER_ERROR_UNSUPPORTED_SIZE
+  // is terminal and sticky, so deciding any earlier would condemn the whole
+  // scan on the strength of a path component alone: "ur:bytes/1-1025/notbyte"
+  // is a misread frame, not an oversized message, and must stay transient so
+  // the next frame still gets a chance.
+  if (over_max_seq_len || cbor_message_len > UR_MAX_MESSAGE_LEN) {
+    decoder->state = UR_DECODER_ERROR_UNSUPPORTED_SIZE;
     goto cleanup;
   }
 
@@ -425,7 +444,13 @@ ur_decoder_state_t ur_decoder_receive_part(ur_decoder_t *decoder,
   free_fountain_part(part);
 
   if (!success) {
-    decoder->state = UR_DECODER_ERROR_INVALID_PART;
+    // Separate a malformed part from a transient allocation failure: both are
+    // non-terminal, but only the latter means a well-formed fragment was
+    // dropped, which is worth surfacing distinctly.
+    decoder->state =
+        fountain_decoder_had_alloc_failure(decoder->fountain_decoder)
+            ? UR_DECODER_ERROR_MEMORY
+            : UR_DECODER_ERROR_INVALID_PART;
     goto cleanup;
   }
 

@@ -334,23 +334,45 @@ char *hd_key_bip32_key(hd_key_data_t *hd_key, bool include_derivation_path) {
             hd_key->origin->source_fingerprint[2],
             hd_key->origin->source_fingerprint[3]);
 
+    // Failing to render the origin path must be fatal, not skipped:
+    // keypath_to_string() returns NULL on allocation failure, which used to
+    // reach strlen(NULL), and dropping the derivation silently would emit a
+    // descriptor that means something different from the key it describes.
     char *path = keypath_to_string(hd_key->origin);
+    if (!path) {
+      free(xpub);
+      return NULL;
+    }
     derivation = safe_malloc(strlen(fp_hex) + strlen(path) + 4); // [fp/path]
     if (derivation) {
       sprintf(derivation, "[%s/%s]", fp_hex, path);
     }
     free(path);
+    if (!derivation) {
+      free(xpub);
+      return NULL;
+    }
   }
 
   char *child_derivation = NULL;
   if (hd_key->children && hd_key->children->component_count > 0) {
-    // Format: /path
+    // Format: /path  (fatal on failure, as above)
     char *child_path = keypath_to_string(hd_key->children);
+    if (!child_path) {
+      free(xpub);
+      free(derivation);
+      return NULL;
+    }
     child_derivation = safe_malloc(strlen(child_path) + 2); // /path
     if (child_derivation) {
       sprintf(child_derivation, "/%s", child_path);
     }
     free(child_path);
+    if (!child_derivation) {
+      free(xpub);
+      free(derivation);
+      return NULL;
+    }
   }
 
   // Concatenate: derivation + xpub + child_derivation

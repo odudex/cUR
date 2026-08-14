@@ -681,6 +681,8 @@ static char *descriptor_checksum(const char *descriptor) {
   return checksum;
 }
 
+static char *output_descriptor_finish(char *descriptor, bool include_checksum);
+
 // Generate output descriptor string
 char *output_descriptor(output_data_t *output, bool include_checksum) {
   if (!output)
@@ -690,75 +692,127 @@ char *output_descriptor(output_data_t *output, bool include_checksum) {
   if (!buf)
     return NULL;
 
+    // Every append can fail, on allocation failure or at byte_buffer's size
+    // cap. Ignoring that produced a silently truncated descriptor - and if the
+    // terminating NUL was the append that failed, safe_strdup() below would run
+    // strlen() off the end of the buffer. A descriptor that is wrong is worse
+    // than no descriptor at all, so any failure aborts the whole thing.
+#define APPEND_STR(s)                                                          \
+  do {                                                                         \
+    const char *s_ = (s);                                                      \
+    if (!byte_buffer_append(buf, (const uint8_t *)s_, strlen(s_)))             \
+      goto fail;                                                               \
+  } while (0)
+#define APPEND_CH(c)                                                           \
+  do {                                                                         \
+    if (!byte_buffer_append_byte(buf, (c)))                                    \
+      goto fail;                                                               \
+  } while (0)
+
   // Write script expressions (opening)
   for (size_t i = 0; i < output->script_expression_count; i++) {
-    const char *expr = output->script_expressions[i]->expression;
-    byte_buffer_append(buf, (const uint8_t *)expr, strlen(expr));
-    byte_buffer_append_byte(buf, '(');
+    APPEND_STR(output->script_expressions[i]->expression);
+    APPEND_CH('(');
   }
 
   // Write threshold for multisig
   if (output->key_type == KEY_TYPE_MULTI) {
     char threshold_str[16];
-    sprintf(threshold_str, "%" PRIu32 ",",
-            output->crypto_key.multi_key->threshold);
-    byte_buffer_append(buf, (const uint8_t *)threshold_str,
-                       strlen(threshold_str));
+    snprintf(threshold_str, sizeof(threshold_str), "%" PRIu32 ",",
+             output->crypto_key.multi_key->threshold);
+    APPEND_STR(threshold_str);
   }
 
-  // Write keys
+  // Write keys. A key that cannot be rendered must abort the descriptor:
+  // skipping it would emit a multisig missing a cosigner.
   if (output->key_type == KEY_TYPE_HD) {
     char *key_str = hd_key_descriptor_key(output->crypto_key.hd_key);
-    if (key_str) {
-      byte_buffer_append(buf, (const uint8_t *)key_str, strlen(key_str));
-      free(key_str);
-    }
+    if (!key_str)
+      goto fail;
+    bool ok =
+        byte_buffer_append(buf, (const uint8_t *)key_str, strlen(key_str));
+    free(key_str);
+    if (!ok)
+      goto fail;
   } else if (output->key_type == KEY_TYPE_MULTI) {
     multi_key_data_t *mk = output->crypto_key.multi_key;
 
     // Write HD keys
     for (size_t i = 0; i < mk->hd_key_count; i++) {
       char *key_str = hd_key_descriptor_key(mk->hd_keys[i]);
-      if (key_str) {
-        byte_buffer_append(buf, (const uint8_t *)key_str, strlen(key_str));
-        free(key_str);
-      }
+      if (!key_str)
+        goto fail;
+      bool ok =
+          byte_buffer_append(buf, (const uint8_t *)key_str, strlen(key_str));
+      free(key_str);
+      if (!ok)
+        goto fail;
       if (i < mk->hd_key_count - 1) {
-        byte_buffer_append_byte(buf, ',');
+        APPEND_CH(',');
       }
     }
   }
 
   // Write script expressions (closing)
   for (size_t i = 0; i < output->script_expression_count; i++) {
-    byte_buffer_append_byte(buf, ')');
+    APPEND_CH(')');
   }
 
-  byte_buffer_append_byte(buf, '\0');
+  APPEND_CH('\0');
 
-  char *descriptor = safe_strdup((char *)byte_buffer_get_data(buf));
+#undef APPEND_STR
+#undef APPEND_CH
+
+  {
+    // Only safe now that the terminator is known to have been appended.
+    const uint8_t *raw = byte_buffer_get_data(buf);
+    if (!raw)
+      goto fail;
+    char *descriptor = safe_strdup((const char *)raw);
+    byte_buffer_free(buf);
+    buf = NULL;
+
+    if (!descriptor)
+      return NULL;
+    return output_descriptor_finish(descriptor, include_checksum);
+  }
+
+fail:
   byte_buffer_free(buf);
+  return NULL;
+}
 
+// Appends "#<checksum>" when requested. Takes ownership of `descriptor`.
+static char *output_descriptor_finish(char *descriptor, bool include_checksum) {
   if (!descriptor)
     return NULL;
 
-  if (include_checksum) {
-    char *checksum = descriptor_checksum(descriptor);
-    if (checksum) {
-      size_t desc_len = strlen(descriptor);
-      char *result =
-          safe_malloc(desc_len + 1 + 8 + 1); // descriptor + # + checksum + null
-      if (result) {
-        sprintf(result, "%s#%s", descriptor, checksum);
-        free(descriptor);
-        free(checksum);
-        return result;
-      }
-      free(checksum);
-    }
+  if (!include_checksum)
+    return descriptor;
+
+  // A caller that asked for a checksum must not quietly receive one without.
+  // The two are different descriptors, and the unchecksummed form would be
+  // accepted downstream as though it had been verified - a semantic downgrade
+  // driven by an allocation failure. Fail the call instead.
+  char *checksum = descriptor_checksum(descriptor);
+  if (!checksum) {
+    free(descriptor);
+    return NULL;
   }
 
-  return descriptor;
+  // Size from the actual checksum rather than assuming 8 characters.
+  size_t total = strlen(descriptor) + 1 + strlen(checksum) + 1;
+  char *result = safe_malloc(total);
+  if (!result) {
+    free(checksum);
+    free(descriptor);
+    return NULL;
+  }
+
+  snprintf(result, total, "%s#%s", descriptor, checksum);
+  free(descriptor);
+  free(checksum);
+  return result;
 }
 
 // Helper function to extract first output descriptor from Account CBOR

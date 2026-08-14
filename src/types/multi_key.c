@@ -90,7 +90,12 @@ multi_key_data_t *multi_key_from_data_item(cbor_value_t *data_item) {
       cbor_value_get_type(threshold_val) != CBOR_TYPE_UNSIGNED_INT) {
     return NULL;
   }
-  uint32_t threshold = (uint32_t)cbor_value_get_uint(threshold_val);
+  // Validate at full width before narrowing. A uint64 threshold of 2^32 would
+  // otherwise truncate to 0 and render as multi(0,...).
+  uint64_t threshold_raw = cbor_value_get_uint(threshold_val);
+  if (threshold_raw == 0 || threshold_raw > UINT32_MAX)
+    return NULL;
+  uint32_t threshold = (uint32_t)threshold_raw;
 
   multi_key_data_t *multi_key = multi_key_new(threshold);
   if (!multi_key)
@@ -104,32 +109,56 @@ multi_key_data_t *multi_key_from_data_item(cbor_value_t *data_item) {
   }
 
   size_t key_count = cbor_value_get_array_size(keys_val);
+  if (key_count == 0) {
+    multi_key_free(multi_key);
+    return NULL;
+  }
+
+  // Every declared key must parse and be stored. Skipping unparseable or
+  // unsupported entries used to yield a policy with fewer cosigners than the
+  // CBOR declared - a descriptor that looks valid but does not describe the
+  // multisig it came from. Fail the whole decode instead.
   for (size_t i = 0; i < key_count; i++) {
     cbor_value_t *key_item = cbor_value_get_array_item(keys_val, i);
-    if (!key_item)
-      continue;
-
-    // Check if this is a tagged item
-    if (cbor_value_get_type(key_item) != CBOR_TYPE_TAG)
-      continue;
+    if (!key_item || cbor_value_get_type(key_item) != CBOR_TYPE_TAG)
+      goto fail;
 
     uint64_t tag = cbor_value_get_tag(key_item);
     cbor_value_t *key_content = cbor_value_get_tag_content(key_item);
 
-    if (tag == CRYPTO_HDKEY_TAG) {
-      // HDKey - unwrap the tag to get the map content
-      registry_item_t *item = hd_key_from_data_item(key_content);
-      if (item) {
-        hd_key_data_t *hd_key = hd_key_from_registry_item(item);
-        if (hd_key) {
-          item->data = NULL; // Transfer ownership
-          multi_key_add_hd_key(multi_key, hd_key);
-        }
-        free(item);
-      }
+    // Only HDKey cosigners are supported; anything else (e.g. a bare EC key)
+    // cannot be represented, so decoding must fail rather than drop it.
+    if (tag != CRYPTO_HDKEY_TAG)
+      goto fail;
+
+    registry_item_t *item = hd_key_from_data_item(key_content);
+    if (!item)
+      goto fail;
+
+    hd_key_data_t *hd_key = hd_key_from_registry_item(item);
+    if (!hd_key) {
+      free(item);
+      goto fail;
     }
-    // Other key types (e.g., EC keys) are ignored
+
+    item->data = NULL; // Transfer ownership
+    free(item);
+
+    // add takes ownership only on success, so release the key ourselves if the
+    // array could not grow - otherwise it leaks.
+    if (!multi_key_add_hd_key(multi_key, hd_key)) {
+      hd_key_free(hd_key);
+      goto fail;
+    }
   }
 
+  // A threshold greater than the number of cosigners can never be satisfied.
+  if (multi_key->hd_key_count != key_count || threshold > key_count)
+    goto fail;
+
   return multi_key;
+
+fail:
+  multi_key_free(multi_key);
+  return NULL;
 }

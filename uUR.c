@@ -990,6 +990,8 @@ static const mp_rom_map_elem_t bc_ur_globals_table[] = {
      MP_ROM_INT(UR_DECODER_ERROR_MEMORY)},
     {MP_ROM_QSTR(MP_QSTR_DECODER_ERR_NULL_POINTER),
      MP_ROM_INT(UR_DECODER_ERROR_NULL_POINTER)},
+    {MP_ROM_QSTR(MP_QSTR_DECODER_ERR_UNSUPPORTED_SIZE),
+     MP_ROM_INT(UR_DECODER_ERROR_UNSUPPORTED_SIZE)},
 };
 static MP_DEFINE_CONST_DICT(bc_ur_globals, bc_ur_globals_table);
 

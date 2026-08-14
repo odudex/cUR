@@ -397,6 +397,199 @@ static void test_empty_bytes_cbor_roundtrip(void) {
   free(cbor);
 }
 
+// --- helpers for hand-crafting multipart UR strings ---------------------
+
+static void cbor_put_uint(uint8_t *buf, size_t *len, uint64_t v) {
+  if (v < 24) {
+    buf[(*len)++] = (uint8_t)v;
+  } else if (v <= 0xff) {
+    buf[(*len)++] = 0x18;
+    buf[(*len)++] = (uint8_t)v;
+  } else if (v <= 0xffff) {
+    buf[(*len)++] = 0x19;
+    buf[(*len)++] = (uint8_t)(v >> 8);
+    buf[(*len)++] = (uint8_t)v;
+  } else {
+    buf[(*len)++] = 0x1a;
+    buf[(*len)++] = (uint8_t)(v >> 24);
+    buf[(*len)++] = (uint8_t)(v >> 16);
+    buf[(*len)++] = (uint8_t)(v >> 8);
+    buf[(*len)++] = (uint8_t)v;
+  }
+}
+
+// Build "ur:bytes/<seq_num>-<seq_len>/<bytewords>" carrying the given header
+// fields and a zero-filled fragment of fragment_len bytes. Caller frees.
+static char *make_multipart_ur(uint32_t seq_num, size_t seq_len,
+                               size_t message_len, uint32_t checksum,
+                               size_t fragment_len) {
+  uint8_t *cbor = malloc(fragment_len + 64);
+  if (!cbor)
+    return NULL;
+  size_t n = 0;
+  cbor[n++] = 0x85; // array(5)
+  cbor_put_uint(cbor, &n, seq_num);
+  cbor_put_uint(cbor, &n, seq_len);
+  cbor_put_uint(cbor, &n, message_len);
+  cbor_put_uint(cbor, &n, checksum);
+  if (fragment_len < 24) {
+    cbor[n++] = (uint8_t)(0x40 | fragment_len);
+  } else if (fragment_len <= 0xff) {
+    cbor[n++] = 0x58;
+    cbor[n++] = (uint8_t)fragment_len;
+  } else if (fragment_len <= 0xffff) {
+    cbor[n++] = 0x59;
+    cbor[n++] = (uint8_t)(fragment_len >> 8);
+    cbor[n++] = (uint8_t)fragment_len;
+  } else {
+    // 4-byte length. The 0x59 form above tops out at 65535, and silently
+    // truncating past that made the declared length disagree with the bytes
+    // actually appended - a malformed vector masquerading as an over-size one.
+    cbor[n++] = 0x5a;
+    cbor[n++] = (uint8_t)(fragment_len >> 24);
+    cbor[n++] = (uint8_t)(fragment_len >> 16);
+    cbor[n++] = (uint8_t)(fragment_len >> 8);
+    cbor[n++] = (uint8_t)fragment_len;
+  }
+  memset(cbor + n, 0, fragment_len);
+  n += fragment_len;
+
+  char *bw = NULL;
+  bool ok = bytewords_encode(cbor, n, &bw);
+  free(cbor);
+  if (!ok || !bw)
+    return NULL;
+
+  size_t out_len = strlen(bw) + 64;
+  char *out = malloc(out_len);
+  if (out)
+    snprintf(out, out_len, "ur:bytes/%u-%zu/%s", seq_num, seq_len, bw);
+  free(bw);
+  return out;
+}
+
+static ur_decoder_state_t feed_one(const char *ur) {
+  ur_decoder_t *d = ur_decoder_new();
+  ur_decoder_state_t s = ur_decoder_receive_part(d, ur);
+  ur_decoder_free(d);
+  return s;
+}
+
+// Regression for the uninitialised-heap read at fountain reassembly. Nothing
+// tied a fragment's length to the declared message_len, so a frame could claim
+// a message far larger than its fragments supply; reassembly then allocated
+// message_len uninitialised bytes, filled in only what arrived, and CRC'd the
+// whole buffer. Under ASan/UBSan this also exercises the rejection paths.
+static void test_multipart_geometry(void) {
+  printf("\n=== multipart_geometry ===\n");
+  const uint32_t crc = 0x11223344u;
+
+  // The reported case: one tiny fragment claiming a 256 KiB message. Rejected
+  // outright, and in particular never reaches the 256 KiB alloc + CRC.
+  char *ur = make_multipart_ur(1, 1, 262144, crc, 1);
+  ASSERT(ur != NULL, "built the oversized-geometry fragment");
+  if (ur) {
+    ur_decoder_state_t s = feed_one(ur);
+    ASSERT(s != UR_DECODER_OK, "1-byte fragment claiming 256KiB is not OK");
+    ASSERT(ur_decoder_state_is_error(s),
+           "1-byte fragment claiming 256KiB is rejected");
+    free(ur);
+  }
+
+  // A smaller mismatch that would still under-fill the reassembly buffer.
+  ur = make_multipart_ur(1, 2, 100000, crc, 1);
+  if (ur) {
+    ASSERT(ur_decoder_state_is_error(feed_one(ur)),
+           "fragment far shorter than ceil(message_len/seq_len) is rejected");
+    free(ur);
+  }
+
+  // Correct geometry must still be accepted: ceil(10/2) == 5.
+  ur = make_multipart_ur(1, 2, 10, crc, 5);
+  if (ur) {
+    ASSERT(feed_one(ur) == UR_DECODER_PROCESSING,
+           "correct geometry (ceil(10/2)==5) is accepted");
+    free(ur);
+  }
+
+  // Off by one in either direction is not.
+  ur = make_multipart_ur(1, 2, 10, crc, 4);
+  if (ur) {
+    ASSERT(ur_decoder_state_is_error(feed_one(ur)),
+           "fragment one byte short of the padded length is rejected");
+    free(ur);
+  }
+  ur = make_multipart_ur(1, 2, 10, crc, 6);
+  if (ur) {
+    ASSERT(ur_decoder_state_is_error(feed_one(ur)),
+           "fragment one byte over the padded length is rejected");
+    free(ur);
+  }
+
+  // Rounding up must be honoured: ceil(11/2) == 6, not 5.
+  ur = make_multipart_ur(1, 2, 11, crc, 6);
+  if (ur) {
+    ASSERT(feed_one(ur) == UR_DECODER_PROCESSING,
+           "correct geometry with rounding (ceil(11/2)==6) is accepted");
+    free(ur);
+  }
+}
+
+// A message beyond the configured caps can never complete, however long the
+// caller keeps scanning, so it must be reported as terminal rather than as the
+// same transient error a misread frame produces.
+static void test_unsupported_size_is_terminal(void) {
+  printf("\n=== unsupported_size_is_terminal ===\n");
+  const uint32_t crc = 0x11223344u;
+
+  char *ur = make_multipart_ur(1, 2000, 20000, crc, 10);
+  ASSERT(ur != NULL, "built the over-cap seq_len fragment");
+  if (ur) {
+    ur_decoder_t *d = ur_decoder_new();
+    ur_decoder_state_t s = ur_decoder_receive_part(d, ur);
+    ASSERT(s == UR_DECODER_ERROR_UNSUPPORTED_SIZE,
+           "seq_len over the cap reports UNSUPPORTED_SIZE");
+    ASSERT(ur_decoder_state_is_terminal(s), "UNSUPPORTED_SIZE is terminal");
+    ASSERT(ur_decoder_state_is_error(s), "UNSUPPORTED_SIZE is an error");
+    // Sticky: further parts must not clear it.
+    ASSERT(ur_decoder_receive_part(d, VALID_FRAGMENT) ==
+               UR_DECODER_ERROR_UNSUPPORTED_SIZE,
+           "UNSUPPORTED_SIZE survives a subsequent valid part");
+    ur_decoder_free(d);
+    free(ur);
+  }
+
+  // Over-size message_len, with geometry that is otherwise self-consistent.
+  ur = make_multipart_ur(1, 2, 300000, crc, 150000);
+  if (ur) {
+    ASSERT(feed_one(ur) == UR_DECODER_ERROR_UNSUPPORTED_SIZE,
+           "message_len over the cap reports UNSUPPORTED_SIZE");
+    free(ur);
+  }
+
+  // A genuinely malformed frame must stay transient, so callers can keep
+  // scanning through misreads.
+  ASSERT(!ur_decoder_state_is_terminal(feed_one("ur:bytes/1-2/notbytewords")),
+         "a malformed fragment stays transient");
+
+  // ...including when its path happens to declare an over-cap sequence length.
+  // The terminal decision must rest on a frame that was actually decoded, not
+  // on a path component: a misread of an ordinary frame can corrupt the digits
+  // just as easily as the body, and a terminal state is sticky.
+  ASSERT(
+      !ur_decoder_state_is_terminal(feed_one("ur:bytes/1-1025/notbytewords")),
+      "over-cap seq_len with an undecodable body stays transient");
+
+  // Same for a well-formed body whose geometry does not add up: malformed
+  // wins over over-size, because only one of the two is a reason to stop.
+  char *bad = make_multipart_ur(1, 2000, 20000, crc, 9);
+  if (bad) {
+    ASSERT(!ur_decoder_state_is_terminal(feed_one(bad)),
+           "over-cap seq_len with bad geometry stays transient");
+    free(bad);
+  }
+}
+
 int main(void) {
   printf("=== UR Negative-Path Tests ===\n");
   test_null_and_empty();
@@ -412,6 +605,8 @@ int main(void) {
   test_fountain_fragment_floor();
   test_fountain_seq_num_no_wrap();
   test_empty_bytes_cbor_roundtrip();
+  test_multipart_geometry();
+  test_unsupported_size_is_terminal();
 
   printf("\n=== Summary ===\n");
   printf("Tests passed: %d/%d\n", asserts - failures, asserts);
