@@ -46,6 +46,7 @@ struct fountain_decoder {
   size_t processed_parts_count;
   fountain_decoder_result_t *result;
   part_indexes_t *expected_part_indexes;
+  size_t expected_seq_len;
   size_t expected_fragment_len;
   size_t expected_message_len;
   uint32_t expected_checksum;
@@ -75,6 +76,13 @@ struct fountain_decoder {
   uint32_t last_fragment_seq_num;
   bool has_received_fragment;
 
+  // A recovered fragment was left in mixed_parts_hash because the work queue
+  // could not take it; promote_deferred_parts() retries once the queue drains.
+  bool has_deferred_parts;
+  // A recovered fragment was dropped outright because the queue could not be
+  // extended. Cleared at the start of each receive_part().
+  bool alloc_failed;
+
 #ifdef DEBUG_STATS
   // Statistics for resource tracking
   size_t maximum_mixed_parts;
@@ -87,7 +95,17 @@ struct fountain_decoder {
 };
 
 // Configuration constants
+#ifndef QUEUE_INITIAL_CAPACITY
 #define QUEUE_INITIAL_CAPACITY 8
+#endif
+// Upper bound on the work queue. A single simple pivot can resolve many cached
+// mixed equations at once, so a fixed capacity silently discarded recovered
+// fragments and could stall an otherwise-sufficient animation. The queue now
+// grows on demand, but stays bounded so a hostile stream cannot drive unbounded
+// allocation. Matches the decoder's UR_MAX_SEQ_LEN policy cap.
+#ifndef QUEUE_MAX_CAPACITY
+#define QUEUE_MAX_CAPACITY 1024u
+#endif
 #define SIMPLE_PARTS_INITIAL_CAPACITY 4
 #define INDEXES_INITIAL_CAPACITY 4
 #define HASH_MIN_CAPACITY 64
@@ -340,8 +358,50 @@ static void decoder_part_move(decoder_part_t *src, decoder_part_t *dst) {
   *src = (decoder_part_t){0};
 }
 
+// Ensure room for at least `need` entries, growing the ring buffer if
+// necessary. Returns false only when already at QUEUE_MAX_CAPACITY or on OOM.
+static bool queue_reserve(part_queue_t *queue, size_t need) {
+  if (!queue)
+    return false;
+  if (need <= queue->capacity)
+    return true;
+  if (queue->capacity >= QUEUE_MAX_CAPACITY)
+    return false;
+
+  size_t new_capacity = queue->capacity ? queue->capacity * 2 : 1;
+  while (new_capacity < need)
+    new_capacity *= 2;
+  if (new_capacity > QUEUE_MAX_CAPACITY)
+    new_capacity = QUEUE_MAX_CAPACITY;
+  if (need > new_capacity)
+    return false;
+
+  // Copy into a fresh buffer in logical order rather than realloc()ing in
+  // place. realloc preserves raw indices, which is wrong for a ring buffer
+  // whose contents have wrapped: the head segment would be left sitting before
+  // the tail instead of after it. Re-seating the elements at front = 0 is
+  // correct for every capacity and wrap state, and costs one memcpy of at most
+  // QUEUE_MAX_CAPACITY entries a handful of times per message. Entries are
+  // plain structs owning heap pointers, so copying the bytes moves ownership.
+  decoder_part_t *parts = safe_malloc(new_capacity * sizeof(decoder_part_t));
+  if (!parts)
+    return false;
+
+  for (size_t i = 0; i < queue->count; i++)
+    parts[i] = queue->parts[(queue->front + i) % queue->capacity];
+
+  free(queue->parts);
+  queue->parts = parts;
+  queue->front = 0;
+  queue->rear = queue->count % new_capacity;
+  queue->capacity = new_capacity;
+  return true;
+}
+
 static bool queue_enqueue(part_queue_t *queue, decoder_part_t *part) {
-  if (!queue || !part || queue->count >= queue->capacity)
+  if (!queue || !part)
+    return false;
+  if (!queue_reserve(queue, queue->count + 1))
     return false;
 
   decoder_part_move(part, &queue->parts[queue->rear]);
@@ -752,6 +812,7 @@ static void fountain_decoder_clear_initialization(fountain_decoder_t *decoder) {
   hash_set_free(&decoder->received_fragments_hashes);
   random_sampler_free(&decoder->degree_sampler);
 
+  decoder->expected_seq_len = 0;
   decoder->expected_fragment_len = 0;
   decoder->expected_message_len = 0;
   decoder->expected_checksum = 0;
@@ -810,8 +871,19 @@ static void reduce_mixed_by(fountain_decoder_t *const decoder,
 #endif
         size_t fragment_idx = get_part_index(&entry->value);
         if (!part_indexes_contains(&decoder->received_part_indexes,
-                                   fragment_idx)) {
-          queue_enqueue(&decoder->queue, &entry->value);
+                                   fragment_idx) &&
+            !queue_enqueue(&decoder->queue, &entry->value)) {
+          // The queue grows on demand, so this only fails at
+          // QUEUE_MAX_CAPACITY or on OOM. Freeing here would discard a
+          // fragment already reconstructed from equations that have since
+          // been consumed - the sender may never send another frame carrying
+          // it. Leave the equation where it is instead: retaining costs no
+          // allocation, which is what makes it viable on the OOM path.
+          // promote_deferred_parts() collects it once the queue has drained.
+          decoder->has_deferred_parts = true;
+          prev = entry;
+          entry = next;
+          continue;
         }
 
         // Unlink from this bucket and free.
@@ -863,6 +935,62 @@ static void reduce_mixed_by(fountain_decoder_t *const decoder,
     decoder->maximum_mixed_parts = hash->count;
   }
 #endif
+}
+
+// Collect equations that reduced to a single fragment but could not be handed
+// to the work queue at the time (see reduce_mixed_by()). Returns true if at
+// least one entry left the table, so the caller can drain and try again.
+// Allocation-free apart from the enqueue itself, and each pass strictly
+// shrinks the table, so the retry loop terminates.
+static bool promote_deferred_parts(fountain_decoder_t *const decoder) {
+  if (!decoder || !decoder->has_deferred_parts || !decoder->mixed_parts_hash)
+    return false;
+
+  mixed_parts_hash_t *hash = decoder->mixed_parts_hash;
+  bool promoted = false;
+  bool still_deferred = false;
+
+  for (size_t i = 0; i < hash->capacity; i++) {
+    hash_entry_t *entry = hash->buckets[i];
+    hash_entry_t *prev = NULL;
+
+    while (entry) {
+      hash_entry_t *next = entry->next;
+
+      if (!is_simple_part(&entry->value)) {
+        prev = entry;
+        entry = next;
+        continue;
+      }
+
+      // Already-received fragments fall through to the unlink below: dropping
+      // a duplicate is not a loss.
+      size_t fragment_idx = get_part_index(&entry->value);
+      if (!part_indexes_contains(&decoder->received_part_indexes,
+                                 fragment_idx) &&
+          !queue_enqueue(&decoder->queue, &entry->value)) {
+        still_deferred = true;
+        prev = entry;
+        entry = next;
+        continue;
+      }
+
+      if (prev) {
+        prev->next = next;
+      } else {
+        hash->buckets[i] = next;
+      }
+      decoder_part_free(&entry->value);
+      free(entry->key.indexes);
+      free(entry);
+      hash->count--;
+      promoted = true;
+      entry = next;
+    }
+  }
+
+  decoder->has_deferred_parts = still_deferred;
+  return promoted;
 }
 
 #ifdef ENABLE_CROSS_REDUCTION
@@ -961,8 +1089,12 @@ static void reduce_mixed_against_mixed(fountain_decoder_t *const decoder) {
                 size_t fragment_idx = get_part_index(&new_part);
                 if (!part_indexes_contains(&decoder->received_part_indexes,
                                            fragment_idx)) {
-                  queue_enqueue(&decoder->queue, &new_part);
-                  made_progress = true;
+                  // Only claim progress if the fragment was actually queued;
+                  // a full queue or OOM means nothing was handed on.
+                  if (queue_enqueue(&decoder->queue, &new_part))
+                    made_progress = true;
+                  else
+                    decoder->alloc_failed = true;
                 }
                 decoder_part_free(&new_part);
                 break;
@@ -1035,7 +1167,12 @@ static void gaussian_reduce_with_new_part(fountain_decoder_t *const decoder,
             size_t fragment_idx = get_part_index(&reduced);
             if (!part_indexes_contains(&decoder->received_part_indexes,
                                        fragment_idx)) {
-              queue_enqueue(&decoder->queue, &reduced);
+              // Unlike reduce_mixed_by() there is nowhere to retain this -
+              // the entry it came from has already been unlinked and freed -
+              // so report the loss rather than returning success on a decode
+              // that silently dropped data.
+              if (!queue_enqueue(&decoder->queue, &reduced))
+                decoder->alloc_failed = true;
             }
           } else {
             // Add reduced mixed part back
@@ -1124,6 +1261,17 @@ static void process_simple_part(fountain_decoder_t *const decoder,
         offset += copy_len;
       }
 
+      // The buffer is deliberately allocated uninitialised, so every byte must
+      // have been written before it is read. Callers validate the fragment
+      // geometry up front, but this is the invariant that actually matters and
+      // it is asserted here independently: if the join ever falls short, bail
+      // out rather than CRC (and potentially return) uninitialised heap.
+      // NOTE: relaxing this check means switching to a zeroing allocator.
+      if (offset != decoder->expected_message_len) {
+        free(message);
+        return;
+      }
+
       uint32_t checksum =
           crc32_calculate(message, decoder->expected_message_len);
 
@@ -1201,7 +1349,10 @@ static void process_mixed_part(fountain_decoder_t *const decoder,
   }
 
   if (is_simple_part(&reduced_part)) {
-    queue_enqueue(&decoder->queue, &reduced_part);
+    // Locally derived from the incoming fragment, so there is no table entry
+    // to fall back on - report the loss. See reduce_mixed_by().
+    if (!queue_enqueue(&decoder->queue, &reduced_part))
+      decoder->alloc_failed = true;
   } else {
     reduce_mixed_by(decoder, &reduced_part);
     add_mixed_part(decoder, &reduced_part, MIXED_SOURCE_FRAGMENT);
@@ -1256,6 +1407,19 @@ bool fountain_decoder_receive_part(fountain_decoder_t *decoder,
       }
     }
 
+    // A single simple pivot can resolve many cached mixed equations at once,
+    // so size the work queue up front rather than growing it a step at a time.
+    // Bounded by MAX_MIXED_PARTS, not QUEUE_MAX_CAPACITY: what the queue has to
+    // absorb in one burst is the equations held in the mixed table, and that is
+    // where the cap actually bites. Reserving seq_len entries instead would
+    // claim ~20 KiB of the 32-bit heap at seq_len 1024 to back a table that can
+    // never exceed 256 entries. Best-effort - queue_enqueue() still grows on
+    // demand if a message genuinely needs more.
+    (void)queue_reserve(&decoder->queue, part->seq_len < MAX_MIXED_PARTS
+                                             ? part->seq_len
+                                             : MAX_MIXED_PARTS);
+
+    decoder->expected_seq_len = part->seq_len;
     decoder->expected_checksum = part->checksum;
     decoder->expected_fragment_len = part->data_len;
     decoder->expected_message_len = part->message_len;
@@ -1302,15 +1466,25 @@ bool fountain_decoder_receive_part(fountain_decoder_t *decoder,
     }
   }
 
-  // Every part of a message carries the same padded fragment length
-  // (ceil(message_len / seq_len), last fragment zero-padded by the encoder).
-  // A part whose length disagrees is malformed; accepting it would let the XOR
-  // reduction (reduce_part_by_part / create_symmetric_diff / reduce_mixed_by)
-  // read past a shorter part's buffer. The first part sets the expected length
-  // above, so it always passes this check.
-  if (part->data_len != decoder->expected_fragment_len) {
+  // Every part of a message must agree on all four header fields. The first
+  // part establishes them above (so it always passes), and each later part is
+  // checked against them here.
+  //
+  // Fragment length matters for memory safety: accepting a shorter part would
+  // let the XOR reduction (reduce_part_by_part / create_symmetric_diff /
+  // reduce_mixed_by) read past its buffer. The other three matter for
+  // integrity: a later part's own seq_len and checksum drive fragment
+  // selection, so a frame from a different message - an interleaved animation
+  // of the same UR type, or a crafted one - would otherwise be mixed into this
+  // message's equations, corrupting or permanently stranding reassembly.
+  if (part->data_len != decoder->expected_fragment_len ||
+      part->seq_len != decoder->expected_seq_len ||
+      part->message_len != decoder->expected_message_len ||
+      part->checksum != decoder->expected_checksum) {
     return false;
   }
+
+  decoder->alloc_failed = false;
 
   decoder_part_t decoder_part;
   if (!create_decoder_part_from_encoder_part(part, &decoder_part,
@@ -1344,13 +1518,34 @@ bool fountain_decoder_receive_part(fountain_decoder_t *decoder,
     process_queue_item(decoder);
   }
 
+  // Fragments that could not be queued mid-reduction were retained in the
+  // equation table rather than dropped. The queue has drained now, so hand
+  // them over and drain again; anything still not fitting stays retained for
+  // the next frame.
+  while (decoder->has_deferred_parts &&
+         !fountain_decoder_is_complete(decoder) &&
+         promote_deferred_parts(decoder)) {
+    while (!fountain_decoder_is_complete(decoder) &&
+           !queue_is_empty(&decoder->queue)) {
+      process_queue_item(decoder);
+    }
+  }
+
   decoder->processed_parts_count++;
   decoder->last_fragment_seq_num = part->seq_num;
   decoder->has_received_fragment = true;
 
   decoder_part_free(&decoder_part);
 
-  return true;
+  // A recovered fragment was dropped because the queue could not be extended.
+  // Report it rather than returning success on a decode that silently lost
+  // data - the caller maps this to a non-terminal memory error, so scanning
+  // continues and the fountain animation can resupply the fragment.
+  return !decoder->alloc_failed;
+}
+
+bool fountain_decoder_had_alloc_failure(const fountain_decoder_t *decoder) {
+  return decoder && decoder->alloc_failed;
 }
 
 bool fountain_decoder_is_complete(fountain_decoder_t *decoder) {

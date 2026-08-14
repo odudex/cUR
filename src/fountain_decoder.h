@@ -47,6 +47,11 @@ bool fountain_decoder_receive_part(fountain_decoder_t *decoder,
  * @param decoder Pointer to fountain decoder
  * @return true if complete, false otherwise
  */
+// Whether the last fountain_decoder_receive_part() dropped a recovered
+// fragment because the work queue could not be extended. Distinguishes an
+// allocation failure from a malformed part when receive_part() returns false.
+bool fountain_decoder_had_alloc_failure(const fountain_decoder_t *decoder);
+
 bool fountain_decoder_is_complete(fountain_decoder_t *decoder);
 
 /**

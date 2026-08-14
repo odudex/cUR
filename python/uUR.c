@@ -882,6 +882,7 @@ static int add_decoder_state_constants(PyObject *m) {
       {"DECODER_ERR_INVALID_CHECKSUM", UR_DECODER_ERROR_INVALID_CHECKSUM},
       {"DECODER_ERR_MEMORY", UR_DECODER_ERROR_MEMORY},
       {"DECODER_ERR_NULL_POINTER", UR_DECODER_ERROR_NULL_POINTER},
+      {"DECODER_ERR_UNSUPPORTED_SIZE", UR_DECODER_ERROR_UNSUPPORTED_SIZE},
   };
   for (size_t i = 0; i < sizeof(states) / sizeof(states[0]); i++) {
     if (PyModule_AddIntConstant(m, states[i].name, states[i].value) < 0) {

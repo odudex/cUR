@@ -5,12 +5,30 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* Hard caps on attacker-controlled fragment header fields. The first
+ * fragment's seq_len drives O(seq_len) allocations inside the fountain
+ * decoder (degree sampler, hash table, part-index bitmap); message_len drives
+ * the final reassembly buffer. Reject anything larger than what a real Bitcoin
+ * UR would ever need, to keep a malicious QR from exhausting embedded heap.
+ * Both can be overridden at compile time by integrators with different limits.
+ *
+ * Exposed here, rather than kept private to ur_decoder.c, so that an encoder
+ * can refuse to produce a stream this decoder would reject - a message over
+ * these limits yields UR_DECODER_ERROR_UNSUPPORTED_SIZE. */
+#ifndef UR_MAX_SEQ_LEN
+#define UR_MAX_SEQ_LEN 1024u
+#endif
+#ifndef UR_MAX_MESSAGE_LEN
+#define UR_MAX_MESSAGE_LEN (256u * 1024u)
+#endif
+
 /**
  * Decoder state machine. ur_decoder_receive_part() returns the state after
  * processing a part; ur_decoder_get_state() polls it without feeding.
  *
  * Terminal states (UR_DECODER_OK, UR_DECODER_NO_RESULT,
- * UR_DECODER_ERROR_INVALID_CHECKSUM) are permanent: once reached, every
+ * UR_DECODER_ERROR_INVALID_CHECKSUM, UR_DECODER_ERROR_UNSUPPORTED_SIZE) are
+ * permanent: once reached, every
  * subsequent receive_part() call returns the terminal state without
  * processing the part. All other error states are transient: the offending
  * part was rejected, the state sticks until the next receive_part() call
@@ -39,7 +57,12 @@ typedef enum {
   UR_DECODER_ERROR_INVALID_PART,
   UR_DECODER_ERROR_INVALID_CHECKSUM, /* terminal */
   UR_DECODER_ERROR_MEMORY,
-  UR_DECODER_ERROR_NULL_POINTER
+  UR_DECODER_ERROR_NULL_POINTER,
+  /* terminal: the message is well-formed but declares a sequence length or
+   * total size beyond this build's configured limits. Unlike a misread frame
+   * this can never succeed, however long the caller keeps scanning, so it is
+   * terminal and callers should report it rather than continue. */
+  UR_DECODER_ERROR_UNSUPPORTED_SIZE
 } ur_decoder_state_t;
 
 static inline bool ur_decoder_state_is_error(ur_decoder_state_t s) {
@@ -48,7 +71,8 @@ static inline bool ur_decoder_state_is_error(ur_decoder_state_t s) {
 
 static inline bool ur_decoder_state_is_terminal(ur_decoder_state_t s) {
   return s == UR_DECODER_OK || s == UR_DECODER_NO_RESULT ||
-         s == UR_DECODER_ERROR_INVALID_CHECKSUM;
+         s == UR_DECODER_ERROR_INVALID_CHECKSUM ||
+         s == UR_DECODER_ERROR_UNSUPPORTED_SIZE;
 }
 
 typedef struct ur_decoder ur_decoder_t;

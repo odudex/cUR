@@ -63,7 +63,24 @@ static bool read_argument(urtypes_cbor_decoder_t *decoder, uint8_t additional,
     *out = ((uint64_t)bytes[0] << 24) | ((uint64_t)bytes[1] << 16) |
            ((uint64_t)bytes[2] << 8) | bytes[3];
     return true;
+  } else if (additional == 27) {
+    // The 8-byte form. Previously rejected, which meant integers and tags
+    // above UINT32_MAX that this library's own encoder emits could not be
+    // read back. Callers that use the argument as a length or element count
+    // bound-check it against CBOR_MAX_ITEM_LEN / CBOR_MAX_ITEMS while it is
+    // still uint64_t, before any narrowing, so widening the range here cannot
+    // turn an oversized value into a small one.
+    uint8_t bytes[8];
+    if (!read_bytes(decoder, bytes, 8))
+      return false;
+    uint64_t v = 0;
+    for (int i = 0; i < 8; i++)
+      v = (v << 8) | bytes[i];
+    *out = v;
+    return true;
   }
+  // 28..30 are reserved and 31 is the indefinite-length marker, which this
+  // decoder does not support.
   return false;
 }
 
@@ -204,7 +221,14 @@ static cbor_value_t *decode_tag(urtypes_cbor_decoder_t *decoder,
   if (!content)
     return NULL;
 
-  return cbor_value_new_tag(tag, content);
+  // cbor_value_new_tag() only takes ownership of content on success, so on
+  // allocation failure the decoded subtree must be released here - otherwise
+  // everything beneath the tag leaks. Matches decode_map()/decode_array().
+  cbor_value_t *tagged = cbor_value_new_tag(tag, content);
+  if (!tagged)
+    cbor_value_free(content);
+
+  return tagged;
 }
 
 static cbor_value_t *decode_simple(uint8_t additional) {

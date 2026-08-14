@@ -217,14 +217,25 @@ bool fragment_array_init(fragment_array_t *arr, size_t capacity) {
   if (!arr || capacity == 0)
     return false;
 
-  arr->fragments = (uint8_t **)calloc(capacity, sizeof(uint8_t *));
-  arr->fragment_lens = (size_t *)calloc(capacity, sizeof(size_t));
-  if (!arr->fragments || !arr->fragment_lens) {
-    free(arr->fragments);
-    free(arr->fragment_lens);
+  // Allocate through temporaries and commit only once both succeed. Storing
+  // the pointers first and freeing them on the error path left them dangling
+  // in *arr, so a caller pairing init with fragment_array_free() - the obvious
+  // usage for an exported function - would free them a second time.
+  uint8_t **fragments = (uint8_t **)calloc(capacity, sizeof(uint8_t *));
+  size_t *fragment_lens = (size_t *)calloc(capacity, sizeof(size_t));
+  if (!fragments || !fragment_lens) {
+    free(fragments);
+    free(fragment_lens);
+    // Leave the struct inert so cleanup after a failed init is a no-op.
+    arr->fragments = NULL;
+    arr->fragment_lens = NULL;
+    arr->count = 0;
+    arr->capacity = 0;
     return false;
   }
 
+  arr->fragments = fragments;
+  arr->fragment_lens = fragment_lens;
   arr->count = 0;
   arr->capacity = capacity;
   return true;
