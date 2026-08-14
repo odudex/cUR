@@ -5,6 +5,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "../ur_attributes.h"
+
 // CBOR value types (subset used by Bitcoin UR types)
 typedef enum {
   CBOR_TYPE_UNSIGNED_INT,
@@ -56,8 +58,10 @@ cbor_value_t *cbor_value_new_tag(uint64_t tag, cbor_value_t *content);
 cbor_value_t *cbor_value_new_bool(bool val);
 
 // CBOR value manipulation
-bool cbor_array_append(cbor_value_t *array, cbor_value_t *item);
-bool cbor_map_set(cbor_value_t *map, cbor_value_t *key, cbor_value_t *value);
+UR_WARN_UNUSED_RESULT bool cbor_array_append(cbor_value_t *array,
+                                             cbor_value_t *item);
+UR_WARN_UNUSED_RESULT bool cbor_map_set(cbor_value_t *map, cbor_value_t *key,
+                                        cbor_value_t *value);
 cbor_value_t *cbor_map_get(cbor_value_t *map, cbor_value_t *key);
 cbor_value_t *cbor_map_get_int(cbor_value_t *map, int64_t key);
 

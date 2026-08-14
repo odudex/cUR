@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "ur_attributes.h"
+
 // Part indexes set (simplified as dynamic array for C)
 typedef struct {
   size_t *indexes;
@@ -30,14 +32,17 @@ typedef struct {
 } decoder_part_t;
 
 // Helper functions for part indexes
-part_indexes_t *part_indexes_new(void);
+UR_WARN_UNUSED_RESULT part_indexes_t *part_indexes_new(void);
 void part_indexes_free(part_indexes_t *indexes);
-bool part_indexes_add(part_indexes_t *indexes, size_t index);
-bool part_indexes_contains(const part_indexes_t *indexes, size_t index);
+UR_WARN_UNUSED_RESULT bool part_indexes_add(part_indexes_t *indexes,
+                                            size_t index);
+UR_WARN_UNUSED_RESULT bool part_indexes_contains(const part_indexes_t *indexes,
+                                                 size_t index);
 void part_indexes_clear(part_indexes_t *indexes);
 
 // Part operations
 void decoder_part_free(decoder_part_t *part);
-bool decoder_part_copy(const decoder_part_t *src, decoder_part_t *dst);
+UR_WARN_UNUSED_RESULT bool decoder_part_copy(const decoder_part_t *src,
+                                             decoder_part_t *dst);
 
 #endif // FOUNTAIN_TYPES_H

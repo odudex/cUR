@@ -60,22 +60,54 @@ cbor_value_t *multi_key_to_data_item(multi_key_data_t *multi_key) {
   if (!map)
     return NULL;
 
-  cbor_map_set(map, cbor_value_new_unsigned_int(1),
-               cbor_value_new_unsigned_int(multi_key->threshold));
+  cbor_value_t *threshold_key = cbor_value_new_unsigned_int(1);
+  cbor_value_t *threshold = cbor_value_new_unsigned_int(multi_key->threshold);
+  if (!threshold_key || !threshold ||
+      !cbor_map_set(map, threshold_key, threshold)) {
+    cbor_value_free(threshold_key);
+    cbor_value_free(threshold);
+    cbor_value_free(map);
+    return NULL;
+  }
 
   cbor_value_t *arr = cbor_value_new_array();
   if (!arr) {
     cbor_value_free(map);
     return NULL;
   }
+
+  // Every cosigner must encode. Skipping one silently would emit the original
+  // threshold over fewer keys - a different and weaker multisig that still
+  // looks well formed to whoever receives it.
   for (size_t i = 0; i < multi_key->hd_key_count; i++) {
     cbor_value_t *m = hd_key_to_data_item(multi_key->hd_keys[i]);
-    if (m)
-      cbor_array_append(arr, cbor_value_new_tag(CRYPTO_HDKEY_TAG, m));
+    if (!m)
+      goto fail_arr;
+
+    cbor_value_t *tagged = cbor_value_new_tag(CRYPTO_HDKEY_TAG, m);
+    if (!tagged) {
+      cbor_value_free(m);
+      goto fail_arr;
+    }
+
+    if (!cbor_array_append(arr, tagged)) {
+      cbor_value_free(tagged);
+      goto fail_arr;
+    }
   }
-  cbor_map_set(map, cbor_value_new_unsigned_int(2), arr);
+
+  cbor_value_t *keys_key = cbor_value_new_unsigned_int(2);
+  if (!keys_key || !cbor_map_set(map, keys_key, arr)) {
+    cbor_value_free(keys_key);
+    goto fail_arr;
+  }
 
   return map;
+
+fail_arr:
+  cbor_value_free(arr);
+  cbor_value_free(map);
+  return NULL;
 }
 
 // Parse MultiKey from CBOR data item

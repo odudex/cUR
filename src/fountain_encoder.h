@@ -7,6 +7,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "ur_attributes.h"
+
 /**
  * Fountain Encoder for Luby Transform rateless coding
  * https://en.wikipedia.org/wiki/Luby_transform_code
@@ -55,9 +57,10 @@ size_t fountain_encoder_find_nominal_fragment_length(size_t message_len,
  * @param fragments Output fragment array (allocated by function)
  * @return true on success
  */
-bool fountain_encoder_partition_message(const uint8_t *message,
-                                        size_t message_len, size_t fragment_len,
-                                        fragment_array_t *fragments);
+UR_WARN_UNUSED_RESULT bool
+fountain_encoder_partition_message(const uint8_t *message, size_t message_len,
+                                   size_t fragment_len,
+                                   fragment_array_t *fragments);
 
 /**
  * Create new fountain encoder
@@ -69,11 +72,10 @@ bool fountain_encoder_partition_message(const uint8_t *message,
  * @param min_fragment_len Minimum fragment length (default 10)
  * @return Pointer to encoder or NULL on error
  */
-fountain_encoder_t *fountain_encoder_new(const uint8_t *message,
-                                         size_t message_len,
-                                         size_t max_fragment_len,
-                                         uint32_t first_seq_num,
-                                         size_t min_fragment_len);
+UR_WARN_UNUSED_RESULT fountain_encoder_t *
+fountain_encoder_new(const uint8_t *message, size_t message_len,
+                     size_t max_fragment_len, uint32_t first_seq_num,
+                     size_t min_fragment_len);
 
 /**
  * Free fountain encoder
@@ -93,7 +95,8 @@ size_t fountain_encoder_seq_len(const fountain_encoder_t *encoder);
  * @param encoder Pointer to encoder
  * @return true if single part
  */
-bool fountain_encoder_is_single_part(const fountain_encoder_t *encoder);
+UR_WARN_UNUSED_RESULT bool
+fountain_encoder_is_single_part(const fountain_encoder_t *encoder);
 
 /**
  * Generate next part
@@ -101,8 +104,9 @@ bool fountain_encoder_is_single_part(const fountain_encoder_t *encoder);
  * @param part Output part (allocated by caller)
  * @return true on success; false once seq_num would wrap past UINT32_MAX
  */
-bool fountain_encoder_next_part(fountain_encoder_t *encoder,
-                                fountain_encoder_part_t *part);
+UR_WARN_UNUSED_RESULT bool
+fountain_encoder_next_part(fountain_encoder_t *encoder,
+                           fountain_encoder_part_t *part);
 
 /**
  * Encode part to CBOR
@@ -111,8 +115,9 @@ bool fountain_encoder_next_part(fountain_encoder_t *encoder,
  * @param cbor_len Output CBOR length
  * @return true on success
  */
-bool fountain_encoder_part_to_cbor(const fountain_encoder_part_t *part,
-                                   uint8_t **cbor_out, size_t *cbor_len);
+UR_WARN_UNUSED_RESULT bool
+fountain_encoder_part_to_cbor(const fountain_encoder_part_t *part,
+                              uint8_t **cbor_out, size_t *cbor_len);
 
 /**
  * Free encoder part data
@@ -121,8 +126,10 @@ bool fountain_encoder_part_to_cbor(const fountain_encoder_part_t *part,
 void fountain_encoder_part_free(fountain_encoder_part_t *part);
 
 // Fragment array operations
-bool fragment_array_init(fragment_array_t *arr, size_t capacity);
+UR_WARN_UNUSED_RESULT bool fragment_array_init(fragment_array_t *arr,
+                                               size_t capacity);
 void fragment_array_free(fragment_array_t *arr);
-bool fragment_array_add(fragment_array_t *arr, const uint8_t *data, size_t len);
+UR_WARN_UNUSED_RESULT bool fragment_array_add(fragment_array_t *arr,
+                                              const uint8_t *data, size_t len);
 
 #endif // FOUNTAIN_ENCODER_H

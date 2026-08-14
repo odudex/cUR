@@ -1,4 +1,5 @@
 #include "hd_key.h"
+#include "../ur_attributes.h"
 #include "byte_buffer.h"
 #include "cbor_decoder.h"
 #include <stdio.h>
@@ -157,6 +158,34 @@ registry_item_t *hd_key_from_data_item(cbor_value_t *data_item) {
   return hd_key_to_registry_item(hd_key);
 }
 
+// Set map[key] = value. Frees `value` if the key allocation or the insert
+// fails, so the caller can pass a freshly built value inline. cbor_map_set()
+// takes ownership of both only on success.
+static UR_WARN_UNUSED_RESULT bool map_set_owned(cbor_value_t *map, uint64_t key,
+                                                cbor_value_t *value) {
+  cbor_value_t *k = cbor_value_new_unsigned_int(key);
+  if (!k || !value || !cbor_map_set(map, k, value)) {
+    cbor_value_free(k);
+    cbor_value_free(value);
+    return false;
+  }
+  return true;
+}
+
+// Wrap `content` in a tag and store it. Takes ownership of `content`.
+static UR_WARN_UNUSED_RESULT bool map_set_tagged(cbor_value_t *map,
+                                                 uint64_t key, uint64_t tag,
+                                                 cbor_value_t *content) {
+  if (!content)
+    return false;
+  cbor_value_t *tagged = cbor_value_new_tag(tag, content);
+  if (!tagged) {
+    cbor_value_free(content);
+    return false;
+  }
+  return map_set_owned(map, key, tagged);
+}
+
 cbor_value_t *hd_key_to_data_item(hd_key_data_t *hd_key) {
   if (!hd_key)
     return NULL;
@@ -165,47 +194,50 @@ cbor_value_t *hd_key_to_data_item(hd_key_data_t *hd_key) {
   if (!map)
     return NULL;
 
-  if (hd_key->master)
-    cbor_map_set(map, cbor_value_new_unsigned_int(1),
-                 cbor_value_new_bool(true));
+  // Every field is mandatory once present: a key emitted without its origin
+  // keypath, chain code or parent fingerprint is a different key, so a failed
+  // insert abandons the whole item rather than shipping a partial one.
+  if (hd_key->master && !map_set_owned(map, 1, cbor_value_new_bool(true)))
+    goto fail;
 
-  if (hd_key->private_key && hd_key->private_key_len > 0)
-    cbor_map_set(
-        map, cbor_value_new_unsigned_int(2),
-        cbor_value_new_bytes(hd_key->private_key, hd_key->private_key_len));
+  if (hd_key->private_key && hd_key->private_key_len > 0 &&
+      !map_set_owned(
+          map, 2,
+          cbor_value_new_bytes(hd_key->private_key, hd_key->private_key_len)))
+    goto fail;
 
-  if (hd_key->key && hd_key->key_len > 0)
-    cbor_map_set(map, cbor_value_new_unsigned_int(3),
-                 cbor_value_new_bytes(hd_key->key, hd_key->key_len));
+  if (hd_key->key && hd_key->key_len > 0 &&
+      !map_set_owned(map, 3,
+                     cbor_value_new_bytes(hd_key->key, hd_key->key_len)))
+    goto fail;
 
-  if (hd_key->chain_code)
-    cbor_map_set(map, cbor_value_new_unsigned_int(4),
-                 cbor_value_new_bytes(hd_key->chain_code, 32));
+  if (hd_key->chain_code &&
+      !map_set_owned(map, 4, cbor_value_new_bytes(hd_key->chain_code, 32)))
+    goto fail;
 
-  if (hd_key->origin) {
-    cbor_value_t *m = keypath_to_data_item(hd_key->origin);
-    if (m)
-      cbor_map_set(map, cbor_value_new_unsigned_int(6),
-                   cbor_value_new_tag(CRYPTO_KEYPATH_TAG, m));
-  }
+  if (hd_key->origin && !map_set_tagged(map, 6, CRYPTO_KEYPATH_TAG,
+                                        keypath_to_data_item(hd_key->origin)))
+    goto fail;
 
-  if (hd_key->children) {
-    cbor_value_t *m = keypath_to_data_item(hd_key->children);
-    if (m)
-      cbor_map_set(map, cbor_value_new_unsigned_int(7),
-                   cbor_value_new_tag(CRYPTO_KEYPATH_TAG, m));
-  }
+  if (hd_key->children &&
+      !map_set_tagged(map, 7, CRYPTO_KEYPATH_TAG,
+                      keypath_to_data_item(hd_key->children)))
+    goto fail;
 
   if (hd_key->parent_fingerprint) {
     uint32_t fp = ((uint32_t)hd_key->parent_fingerprint[0] << 24) |
                   ((uint32_t)hd_key->parent_fingerprint[1] << 16) |
                   ((uint32_t)hd_key->parent_fingerprint[2] << 8) |
                   ((uint32_t)hd_key->parent_fingerprint[3]);
-    cbor_map_set(map, cbor_value_new_unsigned_int(8),
-                 cbor_value_new_unsigned_int(fp));
+    if (!map_set_owned(map, 8, cbor_value_new_unsigned_int(fp)))
+      goto fail;
   }
 
   return map;
+
+fail:
+  cbor_value_free(map);
+  return NULL;
 }
 
 // Registry item interface

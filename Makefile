@@ -1,7 +1,7 @@
 # Root Makefile for UR C implementation testing
 
 CC = gcc
-CFLAGS = -Wall -Wextra -std=c99 -g
+CFLAGS = -Wall -Wextra -Werror=unused-result -std=c99 -g
 # Library objects only: catches accidental float→double promotion in the
 # float-typed progress code (test files stay exempt — printf varargs
 # promote floats by design).

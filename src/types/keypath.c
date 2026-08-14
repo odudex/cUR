@@ -174,29 +174,67 @@ cbor_value_t *keypath_to_data_item(keypath_data_t *keypath) {
       cbor_value_free(map);
       return NULL;
     }
+    // A path that cannot be encoded in full must not be encoded at all: a
+    // silently shortened derivation path describes a different key. Every
+    // append is checked, and any failure abandons the whole map.
     for (size_t i = 0; i < keypath->component_count; i++) {
-      cbor_array_append(
-          arr, keypath->components[i].wildcard
-                   ? cbor_value_new_array()
-                   : cbor_value_new_unsigned_int(keypath->components[i].index));
-      cbor_array_append(arr,
-                        cbor_value_new_bool(keypath->components[i].hardened));
+      cbor_value_t *index =
+          keypath->components[i].wildcard
+              ? cbor_value_new_array()
+              : cbor_value_new_unsigned_int(keypath->components[i].index);
+      if (!index || !cbor_array_append(arr, index)) {
+        cbor_value_free(index);
+        goto fail_arr;
+      }
+
+      cbor_value_t *hardened =
+          cbor_value_new_bool(keypath->components[i].hardened);
+      if (!hardened || !cbor_array_append(arr, hardened)) {
+        cbor_value_free(hardened);
+        goto fail_arr;
+      }
     }
-    cbor_map_set(map, cbor_value_new_unsigned_int(1), arr);
+
+    // cbor_map_set() takes ownership of both only when it succeeds.
+    cbor_value_t *components_key = cbor_value_new_unsigned_int(1);
+    if (!components_key || !cbor_map_set(map, components_key, arr)) {
+      cbor_value_free(components_key);
+      goto fail_arr;
+    }
+    goto components_done;
+
+  fail_arr:
+    cbor_value_free(arr);
+    cbor_value_free(map);
+    return NULL;
   }
+components_done:
 
   if (keypath->source_fingerprint) {
     uint32_t fp = ((uint32_t)keypath->source_fingerprint[0] << 24) |
                   ((uint32_t)keypath->source_fingerprint[1] << 16) |
                   ((uint32_t)keypath->source_fingerprint[2] << 8) |
                   ((uint32_t)keypath->source_fingerprint[3]);
-    cbor_map_set(map, cbor_value_new_unsigned_int(2),
-                 cbor_value_new_unsigned_int(fp));
+    cbor_value_t *key = cbor_value_new_unsigned_int(2);
+    cbor_value_t *value = cbor_value_new_unsigned_int(fp);
+    if (!key || !value || !cbor_map_set(map, key, value)) {
+      cbor_value_free(key);
+      cbor_value_free(value);
+      cbor_value_free(map);
+      return NULL;
+    }
   }
 
-  if (keypath->depth >= 0)
-    cbor_map_set(map, cbor_value_new_unsigned_int(3),
-                 cbor_value_new_unsigned_int((uint64_t)keypath->depth));
+  if (keypath->depth >= 0) {
+    cbor_value_t *key = cbor_value_new_unsigned_int(3);
+    cbor_value_t *value = cbor_value_new_unsigned_int((uint64_t)keypath->depth);
+    if (!key || !value || !cbor_map_set(map, key, value)) {
+      cbor_value_free(key);
+      cbor_value_free(value);
+      cbor_value_free(map);
+      return NULL;
+    }
+  }
 
   return map;
 }

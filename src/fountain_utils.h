@@ -10,6 +10,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "ur_attributes.h"
+
 /**
  * Simple PRNG for fountain coding (Xoshiro256**)
  */
@@ -58,8 +60,8 @@ double prng_next_double(prng_state_t *prng);
  * @param count Number of probabilities
  * @return true on success
  */
-bool random_sampler_init(random_sampler_t *sampler, double *probs,
-                         size_t count);
+UR_WARN_UNUSED_RESULT bool random_sampler_init(random_sampler_t *sampler,
+                                               double *probs, size_t count);
 
 /**
  * Free random sampler resources
@@ -83,8 +85,9 @@ int random_sampler_next(random_sampler_t *sampler, prng_state_t *rng);
  * @param result Output part indexes
  * @return true on success
  */
-bool choose_fragments(uint32_t seq_num, size_t seq_len, uint32_t checksum,
-                      part_indexes_t *result);
+UR_WARN_UNUSED_RESULT bool choose_fragments(uint32_t seq_num, size_t seq_len,
+                                            uint32_t checksum,
+                                            part_indexes_t *result);
 
 /**
  * Choose fragments with a pre-initialized degree sampler (avoids repeated
@@ -96,9 +99,10 @@ bool choose_fragments(uint32_t seq_num, size_t seq_len, uint32_t checksum,
  * @param cached_sampler Pre-initialized sampler (or NULL to create one)
  * @return true on success
  */
-bool choose_fragments_cached(uint32_t seq_num, size_t seq_len,
-                             uint32_t checksum, part_indexes_t *result,
-                             random_sampler_t *cached_sampler);
+UR_WARN_UNUSED_RESULT bool
+choose_fragments_cached(uint32_t seq_num, size_t seq_len, uint32_t checksum,
+                        part_indexes_t *result,
+                        random_sampler_t *cached_sampler);
 
 /**
  * Check if part_indexes_a is strict subset of part_indexes_b
@@ -106,8 +110,8 @@ bool choose_fragments_cached(uint32_t seq_num, size_t seq_len,
  * @param b Second set
  * @return true if a is strict subset of b
  */
-bool part_indexes_is_strict_subset(const part_indexes_t *a,
-                                   const part_indexes_t *b);
+UR_WARN_UNUSED_RESULT bool
+part_indexes_is_strict_subset(const part_indexes_t *a, const part_indexes_t *b);
 
 /**
  * Set difference: result = a - b
@@ -116,8 +120,9 @@ bool part_indexes_is_strict_subset(const part_indexes_t *a,
  * @param result Output set (a - b)
  * @return true on success
  */
-bool part_indexes_difference(const part_indexes_t *a, const part_indexes_t *b,
-                             part_indexes_t *result);
+UR_WARN_UNUSED_RESULT bool part_indexes_difference(const part_indexes_t *a,
+                                                   const part_indexes_t *b,
+                                                   part_indexes_t *result);
 
 /**
  * Check if two part_indexes are equal
@@ -125,7 +130,8 @@ bool part_indexes_difference(const part_indexes_t *a, const part_indexes_t *b,
  * @param b Second set
  * @return true if equal
  */
-bool part_indexes_equal(const part_indexes_t *a, const part_indexes_t *b);
+UR_WARN_UNUSED_RESULT bool part_indexes_equal(const part_indexes_t *a,
+                                              const part_indexes_t *b);
 
 /**
  * Copy part_indexes
@@ -133,7 +139,8 @@ bool part_indexes_equal(const part_indexes_t *a, const part_indexes_t *b);
  * @param dst Destination
  * @return true on success
  */
-bool part_indexes_copy(const part_indexes_t *src, part_indexes_t *dst);
+UR_WARN_UNUSED_RESULT bool part_indexes_copy(const part_indexes_t *src,
+                                             part_indexes_t *dst);
 
 #ifdef ENABLE_CROSS_REDUCTION
 /**
@@ -142,8 +149,9 @@ bool part_indexes_copy(const part_indexes_t *src, part_indexes_t *dst);
  * @param b Second set
  * @return true if they share any indexes
  */
-bool part_indexes_have_intersection(const part_indexes_t *a,
-                                    const part_indexes_t *b);
+UR_WARN_UNUSED_RESULT bool
+part_indexes_have_intersection(const part_indexes_t *a,
+                               const part_indexes_t *b);
 
 /**
  * Calculate symmetric difference between two part_indexes sets
@@ -152,9 +160,8 @@ bool part_indexes_have_intersection(const part_indexes_t *a,
  * @param result Output set (A ⊕ B)
  * @return true on success
  */
-bool part_indexes_symmetric_difference(const part_indexes_t *a,
-                                       const part_indexes_t *b,
-                                       part_indexes_t *result);
+UR_WARN_UNUSED_RESULT bool part_indexes_symmetric_difference(
+    const part_indexes_t *a, const part_indexes_t *b, part_indexes_t *result);
 #endif // ENABLE_CROSS_REDUCTION
 
 /**
@@ -166,7 +173,9 @@ bool part_indexes_symmetric_difference(const part_indexes_t *a,
  * @param result Output buffer (allocated by caller)
  * @return true on success
  */
-bool join_fragments(uint8_t **fragments, size_t *fragment_lens,
-                    size_t fragment_count, size_t message_len, uint8_t *result);
+UR_WARN_UNUSED_RESULT bool join_fragments(uint8_t **fragments,
+                                          size_t *fragment_lens,
+                                          size_t fragment_count,
+                                          size_t message_len, uint8_t *result);
 
 #endif // FOUNTAIN_UTILS_H

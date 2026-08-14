@@ -6,6 +6,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#include "ur_attributes.h"
+
 // String manipulation utilities
 
 /**
@@ -14,7 +16,7 @@
  * @param prefix Prefix to look for
  * @return true if str has prefix, false otherwise
  */
-bool str_has_prefix(const char *str, const char *prefix);
+UR_WARN_UNUSED_RESULT bool str_has_prefix(const char *str, const char *prefix);
 
 /**
  * Convert string to lowercase (in-place)
@@ -38,7 +40,7 @@ size_t str_split(const char *str, char delimiter, char **parts,
  * @param type Type string to validate
  * @return true if valid UR type, false otherwise
  */
-bool is_ur_type(const char *type);
+UR_WARN_UNUSED_RESULT bool is_ur_type(const char *type);
 
 /**
  * Parse UR string into components
@@ -48,8 +50,9 @@ bool is_ur_type(const char *type);
  * @param component_count Output component count
  * @return true on success, false on error
  */
-bool parse_ur_string(const char *ur_str, char **type, char ***components,
-                     size_t *component_count);
+UR_WARN_UNUSED_RESULT bool parse_ur_string(const char *ur_str, char **type,
+                                           char ***components,
+                                           size_t *component_count);
 
 /**
  * Parse sequence component (e.g., "1-5" -> seq_num=1, seq_len=5)
@@ -58,8 +61,9 @@ bool parse_ur_string(const char *ur_str, char **type, char ***components,
  * @param seq_len Output sequence length
  * @return true on success, false on error
  */
-bool parse_sequence_component(const char *seq_str, uint32_t *seq_num,
-                              size_t *seq_len);
+UR_WARN_UNUSED_RESULT bool parse_sequence_component(const char *seq_str,
+                                                    uint32_t *seq_num,
+                                                    size_t *seq_len);
 
 /**
  * Free string array
@@ -75,7 +79,7 @@ void free_string_array(char **strings, size_t count);
  * @param size Size to allocate
  * @return Allocated memory or NULL on error
  */
-void *safe_malloc(size_t size);
+UR_WARN_UNUSED_RESULT void *safe_malloc(size_t size);
 
 /**
  * Safe malloc without zero initialization (for data buffers that will be
@@ -83,7 +87,7 @@ void *safe_malloc(size_t size);
  * @param size Size to allocate
  * @return Allocated memory or NULL on error
  */
-void *safe_malloc_uninit(size_t size);
+UR_WARN_UNUSED_RESULT void *safe_malloc_uninit(size_t size);
 
 /**
  * Wrapped realloc — a hook point for platform allocators, not a safer
@@ -104,14 +108,14 @@ void *safe_malloc_uninit(size_t size);
  * @param size New size (must be > 0; passing 0 is implementation-defined)
  * @return New pointer on success, NULL on failure (old pointer unchanged)
  */
-void *safe_realloc(void *ptr, size_t size);
+UR_WARN_UNUSED_RESULT void *safe_realloc(void *ptr, size_t size);
 
 /**
  * Safe string duplication
  * @param str String to duplicate
  * @return Duplicated string or NULL on error
  */
-char *safe_strdup(const char *str);
+UR_WARN_UNUSED_RESULT char *safe_strdup(const char *str);
 
 /**
  * Free a pointer and null it out. Expands the argument once; pass a
