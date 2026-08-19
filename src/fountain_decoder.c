@@ -17,6 +17,9 @@
 #include "fountain_utils.h"
 #include "utils.h"
 #include "xor_internal.h"
+#ifdef DEBUG_STATS
+#include <stdio.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 
@@ -71,6 +74,11 @@ struct fountain_decoder {
 
   // Cached degree sampler (avoids repeated allocation per fountain fragment)
   random_sampler_t degree_sampler;
+
+  // Equation elimination can reduce the mixed-frame coverage score even as
+  // the decoder gains information. Keep the public weighted estimate
+  // monotonic, as documented, by remembering its high-water mark.
+  float maximum_weighted_progress;
 
   // Duplicate detection: store last fragment sequence number
   uint32_t last_fragment_seq_num;
@@ -321,6 +329,109 @@ static UR_WARN_UNUSED_RESULT bool mixed_hash_put(mixed_parts_hash_t *hash,
 
   return true;
 }
+
+#ifdef ENABLE_CROSS_REDUCTION
+static UR_WARN_UNUSED_RESULT bool
+mixed_hash_contains(const mixed_parts_hash_t *hash, const part_indexes_t *key) {
+  if (!hash || !hash->buckets || !key || hash->capacity == 0)
+    return false;
+
+  size_t key_hash = hash_indexes(key);
+  size_t bucket = key_hash % hash->capacity;
+  for (hash_entry_t *entry = hash->buckets[bucket]; entry;
+       entry = entry->next) {
+    if (entry->key_hash == key_hash && part_indexes_equal(&entry->key, key))
+      return true;
+  }
+  return false;
+}
+
+static UR_WARN_UNUSED_RESULT bool
+mixed_hash_remove_entry(mixed_parts_hash_t *hash, hash_entry_t *target) {
+  if (!hash || !hash->buckets || !target || hash->capacity == 0)
+    return false;
+
+  size_t bucket = target->key_hash % hash->capacity;
+  hash_entry_t *entry = hash->buckets[bucket];
+  hash_entry_t *prev = NULL;
+
+  while (entry) {
+    if (entry == target) {
+      if (prev)
+        prev->next = entry->next;
+      else
+        hash->buckets[bucket] = entry->next;
+
+      decoder_part_free(&entry->value);
+      safe_free(entry->key.indexes);
+      free(entry);
+      hash->count--;
+      return true;
+    }
+    prev = entry;
+    entry = entry->next;
+  }
+
+  return false;
+}
+
+// Replace one stored equation with an equivalent, simpler equation while its
+// other parent remains in the table. Because old = replacement XOR parent,
+// this preserves the equation system's rank without growing the bounded mixed
+// table. If the replacement already exists, the victim is redundant and can
+// simply be removed. Allocations are completed before the victim is mutated.
+static UR_WARN_UNUSED_RESULT bool
+mixed_hash_replace_entry(mixed_parts_hash_t *hash, hash_entry_t *victim,
+                         const decoder_part_t *replacement,
+                         bool *stored_new_equation) {
+  if (!hash || !victim || !replacement || !stored_new_equation)
+    return false;
+
+  *stored_new_equation = false;
+
+  if (mixed_hash_contains(hash, &replacement->indexes))
+    return mixed_hash_remove_entry(hash, victim);
+
+  part_indexes_t new_key = {0};
+  decoder_part_t new_value = {0};
+  if (!part_indexes_copy(&replacement->indexes, &new_key))
+    return false;
+  if (!decoder_part_copy(replacement, &new_value)) {
+    safe_free(new_key.indexes);
+    return false;
+  }
+
+  size_t old_bucket = victim->key_hash % hash->capacity;
+  hash_entry_t *entry = hash->buckets[old_bucket];
+  hash_entry_t *prev = NULL;
+  while (entry && entry != victim) {
+    prev = entry;
+    entry = entry->next;
+  }
+  if (!entry) {
+    safe_free(new_key.indexes);
+    decoder_part_free(&new_value);
+    return false;
+  }
+
+  if (prev)
+    prev->next = victim->next;
+  else
+    hash->buckets[old_bucket] = victim->next;
+
+  decoder_part_free(&victim->value);
+  safe_free(victim->key.indexes);
+  victim->key = new_key;
+  victim->value = new_value;
+  victim->key_hash = hash_indexes(&victim->key);
+
+  size_t new_bucket = victim->key_hash % hash->capacity;
+  victim->next = hash->buckets[new_bucket];
+  hash->buckets[new_bucket] = victim;
+  *stored_new_equation = true;
+  return true;
+}
+#endif
 
 static UR_WARN_UNUSED_RESULT bool queue_init(part_queue_t *queue,
                                              size_t capacity) {
@@ -670,8 +781,9 @@ static size_t get_part_index(const decoder_part_t *const part) {
   return part->indexes.indexes[0];
 }
 
-static bool add_simple_part(fountain_decoder_t *const decoder,
-                            const decoder_part_t *const part) {
+static UR_WARN_UNUSED_RESULT bool
+add_simple_part(fountain_decoder_t *const decoder,
+                const decoder_part_t *const part) {
   if (!decoder || !part || !is_simple_part(part))
     return false;
 
@@ -1099,36 +1211,53 @@ static void reduce_mixed_against_mixed(fountain_decoder_t *const decoder) {
           if (create_symmetric_diff(&entries[i]->value, &entries[j]->value,
                                     &new_part)) {
 
-            bool is_simpler = new_part.indexes.count < entries[i]->key.count ||
-                              new_part.indexes.count < entries[j]->key.count;
+            // Replacing a parent with its XOR against the other parent is a
+            // reversible row operation. Prefer the larger eligible parent so
+            // the table becomes strictly simpler without accumulating extra
+            // equations and crowding out future fountain parts.
+            hash_entry_t *victim = NULL;
+            if (new_part.indexes.count < entries[i]->key.count)
+              victim = entries[i];
+            if (new_part.indexes.count < entries[j]->key.count &&
+                (!victim || entries[j]->key.count > victim->key.count))
+              victim = entries[j];
 
-            if (!is_simpler) {
+            if (!victim) {
               decoder_part_free(&new_part);
               continue;
             }
 
-            // Hash table automatically checks for duplicates in add_mixed_part
             if (new_part.indexes.count > 0) {
               if (is_simple_part(&new_part)) {
-#ifdef DEBUG_STATS
-                decoder->mixed_parts_useful++; // Cross-reduction led to simple
-                                               // part!
-#endif
                 size_t fragment_idx = get_part_index(&new_part);
                 if (!part_indexes_contains(&decoder->received_part_indexes,
                                            fragment_idx)) {
-                  // Only claim progress if the fragment was actually queued;
-                  // a full queue or OOM means nothing was handed on.
-                  if (queue_enqueue(&decoder->queue, &new_part))
+                  // Queue the recovered fragment before removing its parent:
+                  // an allocation failure must leave the equation system
+                  // intact so a later fountain part can retry the reduction.
+                  if (queue_enqueue(&decoder->queue, &new_part) &&
+                      mixed_hash_remove_entry(decoder->mixed_parts_hash,
+                                              victim)) {
+#ifdef DEBUG_STATS
+                    decoder->mixed_parts_useful++;
+#endif
                     made_progress = true;
-                  else
+                  } else {
                     decoder->alloc_failed = true;
+                  }
                 }
                 decoder_part_free(&new_part);
                 break;
               } else {
-                if (add_mixed_part(decoder, &new_part,
-                                   MIXED_SOURCE_CROSS_REDUCTION)) {
+                bool stored_new_equation = false;
+                if (mixed_hash_replace_entry(decoder->mixed_parts_hash, victim,
+                                             &new_part, &stored_new_equation)) {
+#ifdef DEBUG_STATS
+                  if (stored_new_equation)
+                    decoder->mixed_from_cross_reduction++;
+#else
+                  (void)stored_new_equation;
+#endif
                   made_progress = true;
                   gaussian_reduce_with_new_part(decoder, &new_part);
                 }
@@ -1203,13 +1332,31 @@ static void gaussian_reduce_with_new_part(fountain_decoder_t *const decoder,
                 decoder->alloc_failed = true;
             }
           } else {
-            // Add reduced mixed part back
-            add_mixed_part(decoder, &reduced, MIXED_SOURCE_REDUCTION);
+            // Replacing an equation is lossless if the reduced equation is
+            // already present. Any other insertion failure means the original
+            // equation was removed without a replacement, so surface it to
+            // the caller as the same transient allocation failure used for a
+            // dropped recovered fragment.
+            if (add_mixed_part(decoder, &reduced, MIXED_SOURCE_REDUCTION)) {
+              // The insertion goes to the head of the reduced equation's
+              // bucket, which may be the bucket this walk is in the middle
+              // of. With prev still NULL the next unlink below would assign
+              // buckets[b] and orphan the equation just stored - leaking it
+              // and leaving count above the number of reachable entries,
+              // which reduce_mixed_against_mixed() then reads as NULL slots.
+              // Re-anchor prev on the new head when that happened.
+              if (!prev && decoder->mixed_parts_hash->buckets[b] != next) {
+                prev = decoder->mixed_parts_hash->buckets[b];
+              }
+            } else if (!mixed_hash_contains(decoder->mixed_parts_hash,
+                                            &reduced.indexes)) {
+              decoder->alloc_failed = true;
+            }
           }
           decoder_part_free(&reduced);
 
-          // Don't update prev - it still points to the previous valid entry
-          // (or is NULL if we removed the head)
+          // prev still points at the previous valid entry (or at the new head
+          // re-anchored above; NULL if we removed the head and added nothing)
           entry = next;
           continue;
         }
@@ -1388,6 +1535,16 @@ static void process_mixed_part(fountain_decoder_t *const decoder,
       // allocation failed. Dropping it is the documented behaviour of the cap:
       // the fountain stream keeps supplying parts, so the message still
       // converges, just from more frames.
+#ifdef ENABLE_CROSS_REDUCTION
+    } else {
+      // A newly stored mixed equation may combine with equations already in
+      // the table even when neither is a subset of the other. The ordinary
+      // reduce_mixed_by() path cannot discover those relationships, so run
+      // the bounded mixed-against-mixed pass while the new information is
+      // available. Parts recovered here are queued and consumed by the outer
+      // receive loop.
+      reduce_mixed_against_mixed(decoder);
+#endif
     }
   }
 
@@ -1624,7 +1781,8 @@ float fountain_decoder_estimated_percent_complete(fountain_decoder_t *decoder) {
 // only present inside mixed (XOR'd) frames. Each mixed frame contributes
 // 1/(frames mixed) to every index it covers; each index's total contribution
 // is capped at 0.75 so a not-yet-decoded fragment never counts as much as a
-// decoded one (and so the reported percentage cannot decrease mid-decode).
+// decoded one. The stored high-water mark keeps the estimate monotonic when
+// equation elimination changes the mixed-frame coverage.
 // Backward-compatible addition — the reference estimate above is unchanged.
 float fountain_decoder_estimated_percent_complete_weighted(
     fountain_decoder_t *decoder) {
@@ -1670,7 +1828,11 @@ float fountain_decoder_estimated_percent_complete_weighted(
   // estimate): keeps rounded displays below 100% and bounds the result even
   // if a stale mixed entry or mismatched stream breaks the invariant that
   // mixed keys exclude received indexes.
-  return progress > 0.99f ? 0.99f : progress;
+  if (progress > 0.99f)
+    progress = 0.99f;
+  if (progress > decoder->maximum_weighted_progress)
+    decoder->maximum_weighted_progress = progress;
+  return decoder->maximum_weighted_progress;
 }
 
 uint8_t *fountain_decoder_result_message(fountain_decoder_t *decoder) {
