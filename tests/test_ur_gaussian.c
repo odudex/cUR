@@ -41,6 +41,7 @@ static int failures;
 #define MAX_FRAGMENT_LEN 40
 #define PAYLOAD_LEN 500
 #define MAX_PARTS 400
+#define SUBSET_ONLY_FOUNTAIN_PARTS 17
 
 // Deterministic, non-repeating payload so a mis-assembled message cannot
 // coincidentally compare equal.
@@ -153,6 +154,12 @@ int main(void) {
                       &used_fountain),
          "decodes from fountain parts alone");
   printf("  [parts consumed: %zu]\n", used_fountain);
+  ASSERT(used_fountain <= SUBSET_ONLY_FOUNTAIN_PARTS,
+         "fountain-only decode does not regress its fragment count");
+#ifdef ENABLE_CROSS_REDUCTION
+  ASSERT(used_fountain < SUBSET_ONLY_FOUNTAIN_PARTS,
+         "cross reduction needs fewer fragments than subset-only reduction");
+#endif
 
   // Mixed parts first, then the pure ones. Equations pile up unresolved, and
   // then a single pure part resolves a batch of them at once - the case where
