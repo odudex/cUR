@@ -16,8 +16,9 @@ typedef struct {
   size_t capacity;
 } byte_buffer_t;
 
-byte_buffer_t *byte_buffer_new(void);
-byte_buffer_t *byte_buffer_new_with_capacity(size_t capacity);
+UR_WARN_UNUSED_RESULT byte_buffer_t *byte_buffer_new(void);
+UR_WARN_UNUSED_RESULT byte_buffer_t *
+byte_buffer_new_with_capacity(size_t capacity);
 void byte_buffer_free(byte_buffer_t *buf);
 UR_WARN_UNUSED_RESULT bool byte_buffer_append(byte_buffer_t *buf,
                                               const uint8_t *data, size_t len);
@@ -26,12 +27,13 @@ size_t byte_buffer_get_len(byte_buffer_t *buf);
 
 // Inlined here so toolchains that don't enable LTO (notably the K210
 // MaixPy build) don't pay the call overhead on the CBOR hot path.
-static inline bool byte_buffer_append_byte(byte_buffer_t *buf, uint8_t byte) {
+static inline UR_WARN_UNUSED_RESULT bool
+byte_buffer_append_byte(byte_buffer_t *buf, uint8_t byte) {
   return byte_buffer_append(buf, &byte, 1);
 }
 
 // Base58 encoding utilities
-char *base58_encode(const uint8_t *data, size_t len);
-char *base58check_encode(const uint8_t *data, size_t len);
+UR_WARN_UNUSED_RESULT char *base58_encode(const uint8_t *data, size_t len);
+UR_WARN_UNUSED_RESULT char *base58check_encode(const uint8_t *data, size_t len);
 
 #endif // URTYPES_BYTE_BUFFER_H

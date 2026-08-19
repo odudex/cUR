@@ -57,28 +57,34 @@ typedef struct {
 extern registry_type_t OUTPUT_TYPE;
 
 // Create and destroy Output
-output_data_t *output_new(void);
+UR_WARN_UNUSED_RESULT output_data_t *output_new(void);
 void output_free(output_data_t *output);
 
 // Registry item interface for Output
-registry_item_t *output_to_registry_item(output_data_t *output);
+UR_WARN_UNUSED_RESULT registry_item_t *
+output_to_registry_item(output_data_t *output);
 output_data_t *output_from_registry_item(registry_item_t *item);
 
 // CBOR conversion functions
-registry_item_t *output_from_data_item(cbor_value_t *data_item);
-output_data_t *output_from_cbor(const uint8_t *cbor_data, size_t len);
-cbor_value_t *output_to_data_item(output_data_t *output);
-uint8_t *output_to_cbor(output_data_t *output, size_t *out_len);
+UR_WARN_UNUSED_RESULT registry_item_t *
+output_from_data_item(cbor_value_t *data_item);
+UR_WARN_UNUSED_RESULT output_data_t *output_from_cbor(const uint8_t *cbor_data,
+                                                      size_t len);
+UR_WARN_UNUSED_RESULT cbor_value_t *output_to_data_item(output_data_t *output);
+UR_WARN_UNUSED_RESULT uint8_t *output_to_cbor(output_data_t *output,
+                                              size_t *out_len);
 
 // Parse descriptor string into output_data_t
-output_data_t *output_from_descriptor_string(const char *descriptor);
+UR_WARN_UNUSED_RESULT output_data_t *
+output_from_descriptor_string(const char *descriptor);
 
 // Generate output descriptor string
-char *output_descriptor(output_data_t *output, bool include_checksum);
+UR_WARN_UNUSED_RESULT char *output_descriptor(output_data_t *output,
+                                              bool include_checksum);
 
 // Helper function to extract first output descriptor from Account CBOR
-char *output_descriptor_from_cbor_account(const uint8_t *account_cbor,
-                                          size_t len);
+UR_WARN_UNUSED_RESULT char *
+output_descriptor_from_cbor_account(const uint8_t *account_cbor, size_t len);
 
 // Script expression helpers
 const script_expression_t *get_script_expression_by_tag(uint64_t tag);

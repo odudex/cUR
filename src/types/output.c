@@ -230,7 +230,8 @@ static const int8_t BASE58_MAP[128] = {
     -1, -1, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, -1, 44, 45, 46, 47, 48,
     49, 50, 51, 52, 53, 54, 55, 56, 57, -1, -1, -1, -1, -1};
 
-static uint8_t *base58check_decode(const char *str, size_t *out_len) {
+static UR_WARN_UNUSED_RESULT uint8_t *base58check_decode(const char *str,
+                                                         size_t *out_len) {
   if (!str || !out_len)
     return NULL;
   size_t str_len = strlen(str);
@@ -313,7 +314,8 @@ static int hex_val(char c) {
   return -1;
 }
 
-static bool append_decimal_digit_u32(uint32_t *value, uint32_t digit) {
+static UR_WARN_UNUSED_RESULT bool append_decimal_digit_u32(uint32_t *value,
+                                                           uint32_t digit) {
   if (!value || digit > 9)
     return false;
   if (*value > (UINT32_MAX - digit) / 10)
@@ -322,9 +324,9 @@ static bool append_decimal_digit_u32(uint32_t *value, uint32_t digit) {
   return true;
 }
 
-static bool parse_keypath_components(const char *path, size_t len,
-                                     path_component_t **out_components,
-                                     size_t *out_count) {
+static UR_WARN_UNUSED_RESULT bool
+parse_keypath_components(const char *path, size_t len,
+                         path_component_t **out_components, size_t *out_count) {
   if (!path || len == 0 || !out_components || !out_count)
     return false;
 
@@ -379,7 +381,8 @@ static bool parse_keypath_components(const char *path, size_t len,
 }
 
 // Parse "[fingerprint/path]xpub/children" into hd_key_data_t
-static hd_key_data_t *parse_hd_key_from_string(const char *str, size_t len) {
+static UR_WARN_UNUSED_RESULT hd_key_data_t *
+parse_hd_key_from_string(const char *str, size_t len) {
   if (!str || len == 0)
     return NULL;
 
@@ -635,7 +638,7 @@ static const char INPUT_CHARSET[] = "0123456789()[],'/"
                                     "!^_|~ijklmnopqrstuvwxyzABCDEFGH`#\"\\ ";
 static const char CHECKSUM_CHARSET[] = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
 
-static char *descriptor_checksum(const char *descriptor) {
+static UR_WARN_UNUSED_RESULT char *descriptor_checksum(const char *descriptor) {
   if (!descriptor)
     return NULL;
 
@@ -681,7 +684,8 @@ static char *descriptor_checksum(const char *descriptor) {
   return checksum;
 }
 
-static char *output_descriptor_finish(char *descriptor, bool include_checksum);
+static UR_WARN_UNUSED_RESULT char *
+output_descriptor_finish(char *descriptor, bool include_checksum);
 
 // Generate output descriptor string
 char *output_descriptor(output_data_t *output, bool include_checksum) {
@@ -783,7 +787,8 @@ fail:
 }
 
 // Appends "#<checksum>" when requested. Takes ownership of `descriptor`.
-static char *output_descriptor_finish(char *descriptor, bool include_checksum) {
+static UR_WARN_UNUSED_RESULT char *
+output_descriptor_finish(char *descriptor, bool include_checksum) {
   if (!descriptor)
     return NULL;
 

@@ -12,8 +12,46 @@ defined), so there is no OpenSSL/mbedTLS dependency.
 from __future__ import annotations
 
 import glob
+import os
+import tempfile
 
 from setuptools import Extension, setup
+from setuptools.command.build_ext import build_ext
+
+WARN_UNUSED_RESULT_FLAG = "-Werror=unused-result"
+
+
+def _accepts_flag(compiler, flag: str) -> bool:
+    """Whether `compiler` compiles a trivial file with `flag`.
+
+    Probed rather than inferred from compiler_type: that reports "unix" for
+    Intel oneAPI, NVIDIA HPC and Cray as well, where the flag is unrecognised
+    and would fail the whole build instead of just losing the check. A failed
+    probe prints the compiler's own error - that is the probe working, not a
+    build problem. Mirrors the CMAKE_C_COMPILER_ID gate in CMakeLists.txt.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        source = os.path.join(tmpdir, "flag_probe.c")
+        with open(source, "w", encoding="utf-8") as handle:
+            handle.write("int main(void) { return 0; }\n")
+        try:
+            compiler.compile([source], output_dir=tmpdir, extra_postargs=[flag])
+        except Exception:
+            return False
+    return True
+
+
+class WarnUnusedResultBuildExt(build_ext):
+    """Make ignored annotated results fatal where the compiler supports it."""
+
+    def build_extensions(self) -> None:
+        if _accepts_flag(self.compiler, WARN_UNUSED_RESULT_FLAG):
+            for extension in self.extensions:
+                extension.extra_compile_args = [
+                    *(extension.extra_compile_args or []),
+                    WARN_UNUSED_RESULT_FLAG,
+                ]
+        super().build_extensions()
 
 # Source paths MUST be relative to this setup.py directory — setuptools' PEP 517
 # wheel build rejects absolute paths. glob runs with cwd == the project root
@@ -37,4 +75,7 @@ uur_ext = Extension(
     # Bundled SHA-256 (host): do NOT define UR_USE_MBEDTLS_SHA256.
 )
 
-setup(ext_modules=[uur_ext])
+setup(
+    ext_modules=[uur_ext],
+    cmdclass={"build_ext": WarnUnusedResultBuildExt},
+)

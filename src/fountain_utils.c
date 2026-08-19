@@ -219,9 +219,10 @@ static size_t choose_degree(size_t seq_len, prng_state_t *prng,
   return degree;
 }
 
-static bool choose_fragments_internal(uint32_t seq_num, size_t seq_len,
-                                      uint32_t checksum, part_indexes_t *result,
-                                      random_sampler_t *cached_sampler) {
+static UR_WARN_UNUSED_RESULT bool
+choose_fragments_internal(uint32_t seq_num, size_t seq_len, uint32_t checksum,
+                          part_indexes_t *result,
+                          random_sampler_t *cached_sampler) {
   if (!result || seq_len == 0)
     return false;
 
@@ -311,7 +312,8 @@ bool part_indexes_is_strict_subset(const part_indexes_t *a,
   return i == a->count;
 }
 
-static bool part_indexes_append_sorted(part_indexes_t *indexes, size_t value) {
+static UR_WARN_UNUSED_RESULT bool
+part_indexes_append_sorted(part_indexes_t *indexes, size_t value) {
   if (indexes->count >= indexes->capacity) {
     size_t new_capacity = indexes->capacity == 0 ? 4 : indexes->capacity * 2;
     size_t *new_idx =

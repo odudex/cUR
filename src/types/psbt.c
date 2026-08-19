@@ -70,8 +70,9 @@ uint8_t *psbt_to_cbor(psbt_data_t *psbt, size_t *out_len) {
   return registry_item_to_cbor(&item, out_len);
 }
 
-static bool read_cbor_byte_string(const uint8_t *cbor_data, size_t len,
-                                  const uint8_t **data, size_t *data_len) {
+static UR_WARN_UNUSED_RESULT bool
+read_cbor_byte_string(const uint8_t *cbor_data, size_t len,
+                      const uint8_t **data, size_t *data_len) {
   if (!cbor_data || len == 0 || !data || !data_len)
     return false;
 

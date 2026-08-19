@@ -14,7 +14,7 @@ typedef struct {
 } urtypes_cbor_encoder_t;
 
 // Create and destroy encoder
-urtypes_cbor_encoder_t *urtypes_cbor_encoder_new(void);
+UR_WARN_UNUSED_RESULT urtypes_cbor_encoder_t *urtypes_cbor_encoder_new(void);
 void urtypes_cbor_encoder_free(urtypes_cbor_encoder_t *encoder);
 
 // Encode CBOR value
@@ -23,8 +23,8 @@ urtypes_cbor_encoder_encode(urtypes_cbor_encoder_t *encoder,
                             cbor_value_t *value);
 
 // Get encoded data
-uint8_t *urtypes_cbor_encoder_get_data(urtypes_cbor_encoder_t *encoder,
-                                       size_t *out_len);
+UR_WARN_UNUSED_RESULT uint8_t *
+urtypes_cbor_encoder_get_data(urtypes_cbor_encoder_t *encoder, size_t *out_len);
 
 // Wrapper macros
 #define cbor_encoder_t urtypes_cbor_encoder_t
@@ -34,6 +34,7 @@ uint8_t *urtypes_cbor_encoder_get_data(urtypes_cbor_encoder_t *encoder,
 #define cbor_encoder_get_data urtypes_cbor_encoder_get_data
 
 // Convenience function to encode a value to bytes
-uint8_t *cbor_encode(cbor_value_t *value, size_t *out_len);
+UR_WARN_UNUSED_RESULT uint8_t *cbor_encode(cbor_value_t *value,
+                                           size_t *out_len);
 
 #endif // URTYPES_CBOR_ENCODER_H

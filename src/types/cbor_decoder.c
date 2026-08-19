@@ -19,18 +19,19 @@
 #define CBOR_MAX_ITEMS 1024u             // array/map element count
 #define CBOR_MAX_DEPTH 16                // nesting depth
 
-static cbor_value_t *decode_value(urtypes_cbor_decoder_t *decoder,
-                                  unsigned depth);
+static UR_WARN_UNUSED_RESULT cbor_value_t *
+decode_value(urtypes_cbor_decoder_t *decoder, unsigned depth);
 
-static bool read_byte(urtypes_cbor_decoder_t *decoder, uint8_t *out) {
+static UR_WARN_UNUSED_RESULT bool read_byte(urtypes_cbor_decoder_t *decoder,
+                                            uint8_t *out) {
   if (decoder->offset >= decoder->len)
     return false;
   *out = decoder->data[decoder->offset++];
   return true;
 }
 
-static bool read_bytes(urtypes_cbor_decoder_t *decoder, uint8_t *out,
-                       size_t count) {
+static UR_WARN_UNUSED_RESULT bool read_bytes(urtypes_cbor_decoder_t *decoder,
+                                             uint8_t *out, size_t count) {
   // Compare remaining-to-read instead of offset+count so the sum can't wrap.
   if (count > decoder->len - decoder->offset)
     return false;
@@ -39,8 +40,9 @@ static bool read_bytes(urtypes_cbor_decoder_t *decoder, uint8_t *out,
   return true;
 }
 
-static bool read_argument(urtypes_cbor_decoder_t *decoder, uint8_t additional,
-                          uint64_t *out) {
+static UR_WARN_UNUSED_RESULT bool read_argument(urtypes_cbor_decoder_t *decoder,
+                                                uint8_t additional,
+                                                uint64_t *out) {
   if (additional < 24) {
     *out = additional;
     return true;
@@ -84,16 +86,16 @@ static bool read_argument(urtypes_cbor_decoder_t *decoder, uint8_t additional,
   return false;
 }
 
-static cbor_value_t *decode_unsigned_int(urtypes_cbor_decoder_t *decoder,
-                                         uint8_t additional) {
+static UR_WARN_UNUSED_RESULT cbor_value_t *
+decode_unsigned_int(urtypes_cbor_decoder_t *decoder, uint8_t additional) {
   uint64_t value;
   if (!read_argument(decoder, additional, &value))
     return NULL;
   return cbor_value_new_unsigned_int(value);
 }
 
-static cbor_value_t *decode_bytes(urtypes_cbor_decoder_t *decoder,
-                                  uint8_t additional) {
+static UR_WARN_UNUSED_RESULT cbor_value_t *
+decode_bytes(urtypes_cbor_decoder_t *decoder, uint8_t additional) {
   uint64_t len;
   if (!read_argument(decoder, additional, &len))
     return NULL;
@@ -121,8 +123,8 @@ static cbor_value_t *decode_bytes(urtypes_cbor_decoder_t *decoder,
   return value;
 }
 
-static cbor_value_t *decode_string(urtypes_cbor_decoder_t *decoder,
-                                   uint8_t additional) {
+static UR_WARN_UNUSED_RESULT cbor_value_t *
+decode_string(urtypes_cbor_decoder_t *decoder, uint8_t additional) {
   uint64_t len;
   if (!read_argument(decoder, additional, &len))
     return NULL;
@@ -145,8 +147,9 @@ static cbor_value_t *decode_string(urtypes_cbor_decoder_t *decoder,
   return value;
 }
 
-static cbor_value_t *decode_array(urtypes_cbor_decoder_t *decoder,
-                                  uint8_t additional, unsigned depth) {
+static UR_WARN_UNUSED_RESULT cbor_value_t *
+decode_array(urtypes_cbor_decoder_t *decoder, uint8_t additional,
+             unsigned depth) {
   uint64_t count;
   if (!read_argument(decoder, additional, &count))
     return NULL;
@@ -174,8 +177,9 @@ static cbor_value_t *decode_array(urtypes_cbor_decoder_t *decoder,
   return array;
 }
 
-static cbor_value_t *decode_map(urtypes_cbor_decoder_t *decoder,
-                                uint8_t additional, unsigned depth) {
+static UR_WARN_UNUSED_RESULT cbor_value_t *
+decode_map(urtypes_cbor_decoder_t *decoder, uint8_t additional,
+           unsigned depth) {
   uint64_t count;
   if (!read_argument(decoder, additional, &count))
     return NULL;
@@ -211,8 +215,9 @@ static cbor_value_t *decode_map(urtypes_cbor_decoder_t *decoder,
   return map;
 }
 
-static cbor_value_t *decode_tag(urtypes_cbor_decoder_t *decoder,
-                                uint8_t additional, unsigned depth) {
+static UR_WARN_UNUSED_RESULT cbor_value_t *
+decode_tag(urtypes_cbor_decoder_t *decoder, uint8_t additional,
+           unsigned depth) {
   uint64_t tag;
   if (!read_argument(decoder, additional, &tag))
     return NULL;
@@ -231,7 +236,7 @@ static cbor_value_t *decode_tag(urtypes_cbor_decoder_t *decoder,
   return tagged;
 }
 
-static cbor_value_t *decode_simple(uint8_t additional) {
+static UR_WARN_UNUSED_RESULT cbor_value_t *decode_simple(uint8_t additional) {
   // Only booleans are used in Bitcoin UR types
   if (additional == 20) {
     return cbor_value_new_bool(false);
@@ -241,8 +246,8 @@ static cbor_value_t *decode_simple(uint8_t additional) {
   return NULL;
 }
 
-static cbor_value_t *decode_value(urtypes_cbor_decoder_t *decoder,
-                                  unsigned depth) {
+static UR_WARN_UNUSED_RESULT cbor_value_t *
+decode_value(urtypes_cbor_decoder_t *decoder, unsigned depth) {
   if (depth > CBOR_MAX_DEPTH)
     return NULL;
 

@@ -2,8 +2,8 @@
 #include <string.h>
 
 // Encode CBOR head (major type + argument value)
-static bool encode_head(byte_buffer_t *buf, uint8_t major_type,
-                        uint64_t value) {
+static UR_WARN_UNUSED_RESULT bool
+encode_head(byte_buffer_t *buf, uint8_t major_type, uint64_t value) {
   uint8_t mt = major_type << 5;
   if (value < 24) {
     uint8_t byte = mt | (uint8_t)value;
@@ -32,7 +32,8 @@ static bool encode_head(byte_buffer_t *buf, uint8_t major_type,
   }
 }
 
-static bool encode_value(byte_buffer_t *buf, cbor_value_t *value) {
+static UR_WARN_UNUSED_RESULT bool encode_value(byte_buffer_t *buf,
+                                               cbor_value_t *value) {
   if (!value)
     return false;
 
