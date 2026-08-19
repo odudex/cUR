@@ -45,7 +45,9 @@ if(ESP_PLATFORM)
     # Ignoring a UR_WARN_UNUSED_RESULT return is a build error, not a warning.
     # The functions carrying it report failure that way and nothing else -
     # several defects found by review were a single discarded bool.
-    target_compile_options(${COMPONENT_LIB} PRIVATE -Werror=unused-result)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(${COMPONENT_LIB} PRIVATE -Werror=unused-result)
+    endif()
 
     # Route sha256_compat.h to the mbedTLS PSA API (hardware-accelerated on
     # ESP32P4). PC builds omit this flag and use the bundled src/sha256/sha256.c.
@@ -69,7 +71,9 @@ else()
     option(UR_CRC32_SLICE_BY_8 "CRC32: use slice-by-8 (faster, +8 KB flash)" OFF)
     add_library(ur STATIC ${UR_SRCS} "src/sha256/sha256.c")
     set_target_properties(ur PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    target_compile_options(ur PRIVATE -Werror=unused-result)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(ur PRIVATE -Werror=unused-result)
+    endif()
     target_include_directories(ur PUBLIC "src")
     if(UR_CRC32_SLICE_BY_8)
         target_compile_definitions(ur PUBLIC UR_CRC32_SLICE_BY_8)

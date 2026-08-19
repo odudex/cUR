@@ -21,8 +21,9 @@
 #include <string.h>
 
 // Helper: Encode URI with scheme and path components
-static char *encode_uri(const char *scheme, const char **path_components,
-                        size_t component_count) {
+static UR_WARN_UNUSED_RESULT char *encode_uri(const char *scheme,
+                                              const char **path_components,
+                                              size_t component_count) {
   if (!scheme || !path_components || component_count == 0) {
     return NULL;
   }
@@ -59,7 +60,8 @@ static char *encode_uri(const char *scheme, const char **path_components,
 }
 
 // Helper: Encode UR with path components
-static char *encode_ur(const char **path_components, size_t component_count) {
+static UR_WARN_UNUSED_RESULT char *encode_ur(const char **path_components,
+                                             size_t component_count) {
   return encode_uri("ur", path_components, component_count);
 }
 
@@ -157,8 +159,9 @@ bool ur_encoder_is_single_part(const ur_encoder_t *encoder) {
 }
 
 // Helper: Encode multi-part UR
-static bool encode_part(const char *type, const fountain_encoder_part_t *part,
-                        char **ur_part_out) {
+static UR_WARN_UNUSED_RESULT bool
+encode_part(const char *type, const fountain_encoder_part_t *part,
+            char **ur_part_out) {
   if (!type || !part || !ur_part_out) {
     return false;
   }

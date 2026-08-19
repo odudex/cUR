@@ -55,8 +55,8 @@ static size_t cbor_lite_get_byte_length(uint64_t value) {
 
 #define CBOR_ENCODER_MAX_CAPACITY (1024 * 1024) /* 1MB ceiling */
 
-static bool cbor_lite_ensure_capacity(cbor_lite_encoder_t *enc,
-                                      size_t additional) {
+static UR_WARN_UNUSED_RESULT bool
+cbor_lite_ensure_capacity(cbor_lite_encoder_t *enc, size_t additional) {
   if (!enc)
     return false;
 
@@ -82,15 +82,17 @@ static bool cbor_lite_ensure_capacity(cbor_lite_encoder_t *enc,
   return true;
 }
 
-static bool cbor_lite_append_byte(cbor_lite_encoder_t *enc, uint8_t byte) {
+static UR_WARN_UNUSED_RESULT bool
+cbor_lite_append_byte(cbor_lite_encoder_t *enc, uint8_t byte) {
   if (!cbor_lite_ensure_capacity(enc, 1))
     return false;
   enc->buffer[enc->size++] = byte;
   return true;
 }
 
-static bool cbor_lite_encode_tag_and_value(cbor_lite_encoder_t *enc,
-                                           uint8_t major_type, uint64_t value) {
+static UR_WARN_UNUSED_RESULT bool
+cbor_lite_encode_tag_and_value(cbor_lite_encoder_t *enc, uint8_t major_type,
+                               uint64_t value) {
   size_t length = cbor_lite_get_byte_length(value);
 
   if (length == 0) {
@@ -136,8 +138,8 @@ static bool cbor_lite_encode_tag_and_value(cbor_lite_encoder_t *enc,
   return true;
 }
 
-static bool cbor_lite_encoder_init(cbor_lite_encoder_t *enc,
-                                   size_t initial_capacity) {
+static UR_WARN_UNUSED_RESULT bool
+cbor_lite_encoder_init(cbor_lite_encoder_t *enc, size_t initial_capacity) {
   if (!enc)
     return false;
 
@@ -163,8 +165,8 @@ static void cbor_lite_encoder_free(cbor_lite_encoder_t *enc) {
 
 // Takes ownership of the encoder's buffer. After this call the encoder is
 // drained and only needs cbor_lite_encoder_free for consistency.
-static uint8_t *cbor_lite_encoder_get_buffer(cbor_lite_encoder_t *enc,
-                                             size_t *size_out) {
+static UR_WARN_UNUSED_RESULT uint8_t *
+cbor_lite_encoder_get_buffer(cbor_lite_encoder_t *enc, size_t *size_out) {
   if (!enc || !size_out || enc->size == 0)
     return NULL;
 
@@ -183,18 +185,19 @@ static uint8_t *cbor_lite_encoder_get_buffer(cbor_lite_encoder_t *enc,
   return result;
 }
 
-static bool cbor_lite_encode_unsigned(cbor_lite_encoder_t *enc,
-                                      uint64_t value) {
+static UR_WARN_UNUSED_RESULT bool
+cbor_lite_encode_unsigned(cbor_lite_encoder_t *enc, uint64_t value) {
   return cbor_lite_encode_tag_and_value(enc, CBOR_MAJOR_UNSIGNED, value);
 }
 
-static bool cbor_lite_encode_array_start(cbor_lite_encoder_t *enc,
-                                         size_t count) {
+static UR_WARN_UNUSED_RESULT bool
+cbor_lite_encode_array_start(cbor_lite_encoder_t *enc, size_t count) {
   return cbor_lite_encode_tag_and_value(enc, CBOR_MAJOR_ARRAY, count);
 }
 
-static bool cbor_lite_encode_bytes(cbor_lite_encoder_t *enc,
-                                   const uint8_t *data, size_t len) {
+static UR_WARN_UNUSED_RESULT bool
+cbor_lite_encode_bytes(cbor_lite_encoder_t *enc, const uint8_t *data,
+                       size_t len) {
   if (!enc || !data)
     return false;
 
@@ -434,9 +437,9 @@ bool fountain_encoder_is_single_part(const fountain_encoder_t *encoder) {
 }
 
 // XOR mix fragments
-static bool mix_fragments(const fountain_encoder_t *encoder,
-                          const part_indexes_t *indexes, uint8_t **result_out,
-                          size_t *result_len) {
+static UR_WARN_UNUSED_RESULT bool
+mix_fragments(const fountain_encoder_t *encoder, const part_indexes_t *indexes,
+              uint8_t **result_out, size_t *result_len) {
   if (!encoder || !indexes || !result_out || !result_len) {
     return false;
   }

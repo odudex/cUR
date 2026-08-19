@@ -45,9 +45,8 @@ typedef struct fountain_encoder {
  * @param max_fragment_len Maximum fragment length
  * @return Optimal fragment length, or 0 on error
  */
-size_t fountain_encoder_find_nominal_fragment_length(size_t message_len,
-                                                     size_t min_fragment_len,
-                                                     size_t max_fragment_len);
+UR_WARN_UNUSED_RESULT size_t fountain_encoder_find_nominal_fragment_length(
+    size_t message_len, size_t min_fragment_len, size_t max_fragment_len);
 
 /**
  * Partition message into fragments

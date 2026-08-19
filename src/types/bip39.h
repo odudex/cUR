@@ -19,18 +19,22 @@ typedef struct {
 extern registry_type_t BIP39_TYPE;
 
 // Create and destroy BIP39
-bip39_data_t *bip39_new(char **words, size_t word_count, const char *lang);
+UR_WARN_UNUSED_RESULT bip39_data_t *bip39_new(char **words, size_t word_count,
+                                              const char *lang);
 void bip39_free(bip39_data_t *bip39);
 
 // Registry item interface for BIP39
-registry_item_t *bip39_to_registry_item(bip39_data_t *bip39);
+UR_WARN_UNUSED_RESULT registry_item_t *
+bip39_to_registry_item(bip39_data_t *bip39);
 bip39_data_t *bip39_from_registry_item(registry_item_t *item);
 
 // CBOR conversion functions (decode only)
-registry_item_t *bip39_from_data_item(cbor_value_t *data_item);
+UR_WARN_UNUSED_RESULT registry_item_t *
+bip39_from_data_item(cbor_value_t *data_item);
 
 // Convenience functions
-bip39_data_t *bip39_from_cbor(const uint8_t *cbor_data, size_t len);
+UR_WARN_UNUSED_RESULT bip39_data_t *bip39_from_cbor(const uint8_t *cbor_data,
+                                                    size_t len);
 
 // Accessors
 char **bip39_get_words(bip39_data_t *bip39, size_t *out_count);

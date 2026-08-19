@@ -29,21 +29,24 @@ typedef struct {
 extern registry_type_t HDKEY_TYPE;
 
 // Create and destroy HDKey
-hd_key_data_t *hd_key_new(void);
+UR_WARN_UNUSED_RESULT hd_key_data_t *hd_key_new(void);
 void hd_key_free(hd_key_data_t *hd_key);
 
 // Registry item interface for HDKey
-registry_item_t *hd_key_to_registry_item(hd_key_data_t *hd_key);
+UR_WARN_UNUSED_RESULT registry_item_t *
+hd_key_to_registry_item(hd_key_data_t *hd_key);
 hd_key_data_t *hd_key_from_registry_item(registry_item_t *item);
 
 // CBOR conversion functions
-registry_item_t *hd_key_from_data_item(cbor_value_t *data_item);
-cbor_value_t *hd_key_to_data_item(hd_key_data_t *hd_key);
+UR_WARN_UNUSED_RESULT registry_item_t *
+hd_key_from_data_item(cbor_value_t *data_item);
+UR_WARN_UNUSED_RESULT cbor_value_t *hd_key_to_data_item(hd_key_data_t *hd_key);
 
 // Generate BIP32 extended key with derivation paths (xpub format)
-char *hd_key_bip32_key(hd_key_data_t *hd_key, bool include_derivation_path);
+UR_WARN_UNUSED_RESULT char *hd_key_bip32_key(hd_key_data_t *hd_key,
+                                             bool include_derivation_path);
 
 // Generate descriptor key string (includes full derivation info)
-char *hd_key_descriptor_key(hd_key_data_t *hd_key);
+UR_WARN_UNUSED_RESULT char *hd_key_descriptor_key(hd_key_data_t *hd_key);
 
 #endif // URTYPES_HD_KEY_H

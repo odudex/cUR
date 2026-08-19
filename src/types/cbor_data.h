@@ -49,13 +49,15 @@ struct cbor_value {
 };
 
 // CBOR value creation functions
-cbor_value_t *cbor_value_new_unsigned_int(uint64_t val);
-cbor_value_t *cbor_value_new_bytes(const uint8_t *data, size_t len);
-cbor_value_t *cbor_value_new_string(const char *str);
-cbor_value_t *cbor_value_new_array(void);
-cbor_value_t *cbor_value_new_map(void);
-cbor_value_t *cbor_value_new_tag(uint64_t tag, cbor_value_t *content);
-cbor_value_t *cbor_value_new_bool(bool val);
+UR_WARN_UNUSED_RESULT cbor_value_t *cbor_value_new_unsigned_int(uint64_t val);
+UR_WARN_UNUSED_RESULT cbor_value_t *cbor_value_new_bytes(const uint8_t *data,
+                                                         size_t len);
+UR_WARN_UNUSED_RESULT cbor_value_t *cbor_value_new_string(const char *str);
+UR_WARN_UNUSED_RESULT cbor_value_t *cbor_value_new_array(void);
+UR_WARN_UNUSED_RESULT cbor_value_t *cbor_value_new_map(void);
+UR_WARN_UNUSED_RESULT cbor_value_t *cbor_value_new_tag(uint64_t tag,
+                                                       cbor_value_t *content);
+UR_WARN_UNUSED_RESULT cbor_value_t *cbor_value_new_bool(bool val);
 
 // CBOR value manipulation
 UR_WARN_UNUSED_RESULT bool cbor_array_append(cbor_value_t *array,
