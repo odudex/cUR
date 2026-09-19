@@ -46,7 +46,7 @@ jobs:
         include:
           - idf: v5.5.4
             target: esp32
-          - idf: v6.0.2
+          - idf: v6.1
             target: esp32p4
     steps:
       - uses: actions/checkout@v4
