@@ -696,11 +696,11 @@ char *output_descriptor(output_data_t *output, bool include_checksum) {
   if (!buf)
     return NULL;
 
-    // Every append can fail, on allocation failure or at byte_buffer's size
-    // cap. Ignoring that produced a silently truncated descriptor - and if the
-    // terminating NUL was the append that failed, safe_strdup() below would run
-    // strlen() off the end of the buffer. A descriptor that is wrong is worse
-    // than no descriptor at all, so any failure aborts the whole thing.
+// Every append can fail, on allocation failure or at byte_buffer's size
+// cap. Ignoring that produced a silently truncated descriptor - and if the
+// terminating NUL was the append that failed, safe_strdup() below would run
+// strlen() off the end of the buffer. A descriptor that is wrong is worse
+// than no descriptor at all, so any failure aborts the whole thing.
 #define APPEND_STR(s)                                                          \
   do {                                                                         \
     const char *s_ = (s);                                                      \
