@@ -44,24 +44,23 @@ typedef struct {
 
 // Fountain decoder structure
 struct fountain_decoder {
-  part_indexes_t received_part_indexes;
-  part_indexes_t *last_part_indexes;
   size_t processed_parts_count;
   fountain_decoder_result_t *result;
-  part_indexes_t *expected_part_indexes;
+
+  // Header fields fixed by the first accepted part.
   size_t expected_seq_len;
   size_t expected_fragment_len;
   size_t expected_message_len;
   uint32_t expected_checksum;
 
-  // Simple parts storage (key: single index, value: data)
-  struct {
-    size_t *keys;
-    decoder_part_t *values;
-    size_t *value_lens;
-    size_t count;
-    size_t capacity;
-  } simple_parts;
+  // Recovered fragments, indexed by fragment number: NULL until recovered,
+  // then an expected_fragment_len buffer. Allocated with the first part, so
+  // it doubles as the "initialised" flag.
+  uint8_t **fragments;
+  size_t received_count;
+
+  // Work buffer for fragment selection, expected_seq_len entries.
+  size_t *choose_scratch;
 
   // Hash-based mixed parts storage
   mixed_parts_hash_t *mixed_parts_hash;
@@ -88,7 +87,8 @@ struct fountain_decoder {
   // could not take it; promote_deferred_parts() retries once the queue drains.
   bool has_deferred_parts;
   // A recovered fragment was dropped outright because the queue could not be
-  // extended. Cleared at the start of each receive_part().
+  // extended, or the message could not be assembled for lack of memory.
+  // Cleared at the start of each receive_part().
   bool alloc_failed;
 
 #ifdef DEBUG_STATS
@@ -114,7 +114,6 @@ struct fountain_decoder {
 #ifndef QUEUE_MAX_CAPACITY
 #define QUEUE_MAX_CAPACITY 1024u
 #endif
-#define SIMPLE_PARTS_INITIAL_CAPACITY 4
 #define INDEXES_INITIAL_CAPACITY 4
 #define HASH_MIN_CAPACITY 64
 #define HASH_CAPACITY_MULTIPLIER 1
@@ -127,9 +126,9 @@ struct fountain_decoder {
 #define FNV1A_OFFSET_BASIS 2166136261u
 #define FNV1A_PRIME 16777619u
 
-// Hash table for mixed parts - key is the set of indexes
+// Hash table for mixed parts, keyed by the equation's own index set
+// (value.indexes), which is kept sorted.
 typedef struct hash_entry {
-  part_indexes_t key;
   decoder_part_t value;
   size_t key_hash; // Cached hash for fast collision filtering
   struct hash_entry *next;
@@ -238,9 +237,8 @@ static UR_WARN_UNUSED_RESULT bool hash_set_add(hash_set_t *set, uint32_t hash) {
   }
 
   // Shift elements to maintain sorted order
-  for (size_t i = set->count; i > lo; i--) {
-    set->hashes[i] = set->hashes[i - 1];
-  }
+  memmove(set->hashes + lo + 1, set->hashes + lo,
+          (set->count - lo) * sizeof(uint32_t));
   set->hashes[lo] = hash;
   set->count++;
   return true;
@@ -252,13 +250,19 @@ static UR_WARN_UNUSED_RESULT bool mixed_hash_init(mixed_parts_hash_t *hash,
   if (!hash || capacity == 0)
     return false;
 
-  hash->buckets = calloc(capacity, sizeof(hash_entry_t *));
+  // safe_malloc zero-fills, so every bucket starts empty.
+  hash->buckets = safe_malloc(capacity * sizeof(hash_entry_t *));
   if (!hash->buckets)
     return false;
 
   hash->count = 0;
   hash->capacity = capacity;
   return true;
+}
+
+static void hash_entry_free(hash_entry_t *entry) {
+  decoder_part_free(&entry->value);
+  free(entry);
 }
 
 // Free hash table
@@ -270,11 +274,7 @@ static void mixed_hash_free(mixed_parts_hash_t *hash) {
     hash_entry_t *entry = hash->buckets[i];
     while (entry) {
       hash_entry_t *next = entry->next;
-      decoder_part_free(&entry->value);
-      if (entry->key.indexes) {
-        free(entry->key.indexes);
-      }
-      free(entry);
+      hash_entry_free(entry);
       entry = next;
     }
   }
@@ -283,50 +283,41 @@ static void mixed_hash_free(mixed_parts_hash_t *hash) {
   hash->count = 0;
 }
 
-// Add or update entry in hash table
-static UR_WARN_UNUSED_RESULT bool mixed_hash_put(mixed_parts_hash_t *hash,
-                                                 const part_indexes_t *key,
-                                                 const decoder_part_t *value) {
-  if (!hash || !hash->buckets || !key || !value || hash->capacity == 0)
+static hash_entry_t *mixed_hash_find(const mixed_parts_hash_t *hash,
+                                     const part_indexes_t *key,
+                                     size_t key_hash) {
+  for (hash_entry_t *entry = hash->buckets[key_hash % hash->capacity]; entry;
+       entry = entry->next) {
+    if (entry->key_hash == key_hash &&
+        part_indexes_equal(&entry->value.indexes, key))
+      return entry;
+  }
+  return NULL;
+}
+
+// Move *part into the table. Fails, leaving *part with the caller, if the
+// same equation is already stored or the entry cannot be allocated.
+static UR_WARN_UNUSED_RESULT bool mixed_hash_insert(mixed_parts_hash_t *hash,
+                                                    decoder_part_t *part) {
+  if (!hash || !hash->buckets || !part || hash->capacity == 0)
     return false;
 
-  size_t key_hash = hash_indexes(key);
+  size_t key_hash = hash_indexes(&part->indexes);
+  if (mixed_hash_find(hash, &part->indexes, key_hash))
+    return false;
+
+  hash_entry_t *entry = safe_malloc(sizeof(hash_entry_t));
+  if (!entry)
+    return false;
+
+  entry->value = *part;
+  *part = (decoder_part_t){0};
+  entry->key_hash = key_hash;
+
   size_t bucket = key_hash % hash->capacity;
-
-  // Check if already exists
-  hash_entry_t *entry = hash->buckets[bucket];
-  while (entry) {
-    // Fast path: compare cached hash first
-    if (entry->key_hash == key_hash && part_indexes_equal(&entry->key, key)) {
-      // Already exists, don't add duplicate
-      return false;
-    }
-    entry = entry->next;
-  }
-
-  hash_entry_t *new_entry = calloc(1, sizeof(hash_entry_t));
-  if (!new_entry)
-    return false;
-
-  new_entry->key_hash = key_hash; // Cache the hash
-
-  if (!part_indexes_copy(key, &new_entry->key)) {
-    free(new_entry);
-    return false;
-  }
-
-  if (!decoder_part_copy(value, &new_entry->value)) {
-    if (new_entry->key.indexes) {
-      free(new_entry->key.indexes);
-    }
-    free(new_entry);
-    return false;
-  }
-
-  new_entry->next = hash->buckets[bucket];
-  hash->buckets[bucket] = new_entry;
+  entry->next = hash->buckets[bucket];
+  hash->buckets[bucket] = entry;
   hash->count++;
-
   return true;
 }
 
@@ -335,15 +326,7 @@ static UR_WARN_UNUSED_RESULT bool
 mixed_hash_contains(const mixed_parts_hash_t *hash, const part_indexes_t *key) {
   if (!hash || !hash->buckets || !key || hash->capacity == 0)
     return false;
-
-  size_t key_hash = hash_indexes(key);
-  size_t bucket = key_hash % hash->capacity;
-  for (hash_entry_t *entry = hash->buckets[bucket]; entry;
-       entry = entry->next) {
-    if (entry->key_hash == key_hash && part_indexes_equal(&entry->key, key))
-      return true;
-  }
-  return false;
+  return mixed_hash_find(hash, key, hash_indexes(key)) != NULL;
 }
 
 static UR_WARN_UNUSED_RESULT bool
@@ -362,9 +345,7 @@ mixed_hash_remove_entry(mixed_parts_hash_t *hash, hash_entry_t *target) {
       else
         hash->buckets[bucket] = entry->next;
 
-      decoder_part_free(&entry->value);
-      safe_free(entry->key.indexes);
-      free(entry);
+      hash_entry_free(entry);
       hash->count--;
       return true;
     }
@@ -392,14 +373,9 @@ mixed_hash_replace_entry(mixed_parts_hash_t *hash, hash_entry_t *victim,
   if (mixed_hash_contains(hash, &replacement->indexes))
     return mixed_hash_remove_entry(hash, victim);
 
-  part_indexes_t new_key = {0};
   decoder_part_t new_value = {0};
-  if (!part_indexes_copy(&replacement->indexes, &new_key))
+  if (!decoder_part_copy(replacement, &new_value))
     return false;
-  if (!decoder_part_copy(replacement, &new_value)) {
-    safe_free(new_key.indexes);
-    return false;
-  }
 
   size_t old_bucket = victim->key_hash % hash->capacity;
   hash_entry_t *entry = hash->buckets[old_bucket];
@@ -409,7 +385,6 @@ mixed_hash_replace_entry(mixed_parts_hash_t *hash, hash_entry_t *victim,
     entry = entry->next;
   }
   if (!entry) {
-    safe_free(new_key.indexes);
     decoder_part_free(&new_value);
     return false;
   }
@@ -420,10 +395,8 @@ mixed_hash_replace_entry(mixed_parts_hash_t *hash, hash_entry_t *victim,
     hash->buckets[old_bucket] = victim->next;
 
   decoder_part_free(&victim->value);
-  safe_free(victim->key.indexes);
-  victim->key = new_key;
   victim->value = new_value;
-  victim->key_hash = hash_indexes(&victim->key);
+  victim->key_hash = hash_indexes(&victim->value.indexes);
 
   size_t new_bucket = victim->key_hash % hash->capacity;
   victim->next = hash->buckets[new_bucket];
@@ -640,9 +613,8 @@ bool part_indexes_add(part_indexes_t *indexes, size_t index) {
   }
 
   // Shift elements to make room for new index
-  for (size_t i = indexes->count; i > left; i--) {
-    indexes->indexes[i] = indexes->indexes[i - 1];
-  }
+  memmove(indexes->indexes + left + 1, indexes->indexes + left,
+          (indexes->count - left) * sizeof(size_t));
   indexes->indexes[left] = index;
   indexes->count++;
   return true;
@@ -674,6 +646,24 @@ void part_indexes_clear(part_indexes_t *indexes) {
   }
 }
 
+// Remove every element of `sub` from `set`, in place. Both are sorted; the
+// callers only pass a `sub` that is a subset of `set`.
+static void part_indexes_subtract(part_indexes_t *set,
+                                  const part_indexes_t *sub) {
+  size_t kept = 0, j = 0;
+  for (size_t i = 0; i < set->count; i++) {
+    size_t index = set->indexes[i];
+    while (j < sub->count && sub->indexes[j] < index)
+      j++;
+    if (j < sub->count && sub->indexes[j] == index) {
+      j++;
+      continue;
+    }
+    set->indexes[kept++] = index;
+  }
+  set->count = kept;
+}
+
 fountain_decoder_t *fountain_decoder_new(void) {
   fountain_decoder_t *decoder = safe_malloc(sizeof(fountain_decoder_t));
   if (!decoder)
@@ -687,39 +677,26 @@ fountain_decoder_t *fountain_decoder_new(void) {
   return decoder;
 }
 
+static void free_fragments(fountain_decoder_t *decoder) {
+  if (decoder->fragments) {
+    for (size_t i = 0; i < decoder->expected_seq_len; i++)
+      free(decoder->fragments[i]);
+    safe_free(decoder->fragments);
+  }
+  decoder->received_count = 0;
+}
+
 void fountain_decoder_free(fountain_decoder_t *decoder) {
   if (!decoder)
     return;
 
-  if (decoder->received_part_indexes.indexes) {
-    free(decoder->received_part_indexes.indexes);
-  }
-
-  if (decoder->last_part_indexes) {
-    part_indexes_free(decoder->last_part_indexes);
-  }
-
-  if (decoder->expected_part_indexes) {
-    part_indexes_free(decoder->expected_part_indexes);
-  }
-
   if (decoder->result) {
-    if (decoder->result->data) {
-      free(decoder->result->data);
-    }
+    free(decoder->result->data);
     free(decoder->result);
   }
 
-  if (decoder->simple_parts.keys)
-    free(decoder->simple_parts.keys);
-  if (decoder->simple_parts.value_lens)
-    free(decoder->simple_parts.value_lens);
-  if (decoder->simple_parts.values) {
-    for (size_t i = 0; i < decoder->simple_parts.count; i++) {
-      decoder_part_free(&decoder->simple_parts.values[i]);
-    }
-    free(decoder->simple_parts.values);
-  }
+  free_fragments(decoder);
+  free(decoder->choose_scratch);
 
   // Free hash table for mixed parts
   if (decoder->mixed_parts_hash) {
@@ -739,17 +716,20 @@ void fountain_decoder_free(fountain_decoder_t *decoder) {
 }
 
 static UR_WARN_UNUSED_RESULT bool create_decoder_part_from_encoder_part(
+    fountain_decoder_t *const decoder,
     fountain_encoder_part_t *const encoder_part,
-    decoder_part_t *const decoder_part, random_sampler_t *cached_sampler) {
+    decoder_part_t *const decoder_part) {
   if (!encoder_part || !decoder_part) {
     return false;
   }
 
   *decoder_part = (decoder_part_t){0};
 
-  if (!choose_fragments_cached(encoder_part->seq_num, encoder_part->seq_len,
-                               encoder_part->checksum, &decoder_part->indexes,
-                               cached_sampler)) {
+  if (!choose_fragments_with_scratch(
+          encoder_part->seq_num, encoder_part->seq_len, encoder_part->checksum,
+          &decoder_part->indexes, &decoder->degree_sampler,
+          decoder->choose_scratch)) {
+    decoder_part_free(decoder_part);
     return false;
   }
 
@@ -782,105 +762,81 @@ static size_t get_part_index(const decoder_part_t *const part) {
 }
 
 static UR_WARN_UNUSED_RESULT bool
-add_simple_part(fountain_decoder_t *const decoder,
-                const decoder_part_t *const part) {
-  if (!decoder || !part || !is_simple_part(part))
-    return false;
+is_received(const fountain_decoder_t *const decoder, size_t index) {
+  return index < decoder->expected_seq_len && decoder->fragments[index];
+}
 
+// Take a recovered fragment's buffer into the fragment table. Fails, leaving
+// the buffer with `part`, if that fragment is already known.
+static UR_WARN_UNUSED_RESULT bool store_fragment(fountain_decoder_t *decoder,
+                                                 decoder_part_t *part) {
   size_t index = get_part_index(part);
-
-  for (size_t i = 0; i < decoder->simple_parts.count; i++) {
-    if (decoder->simple_parts.keys[i] == index) {
-      return true;
-    }
-  }
-
-  if (decoder->simple_parts.count >= decoder->simple_parts.capacity) {
-    size_t new_capacity = decoder->simple_parts.capacity == 0
-                              ? SIMPLE_PARTS_INITIAL_CAPACITY
-                              : decoder->simple_parts.capacity * 2;
-
-    // Realloc one field at a time, committing each to the struct before the
-    // next attempt. safe_realloc frees the old block on success, so if a
-    // later realloc fails we must never leave the struct pointing at a
-    // freed block.
-    size_t *new_keys =
-        safe_realloc(decoder->simple_parts.keys, sizeof(size_t) * new_capacity);
-    if (!new_keys)
-      return false;
-    decoder->simple_parts.keys = new_keys;
-
-    decoder_part_t *new_values = safe_realloc(
-        decoder->simple_parts.values, sizeof(decoder_part_t) * new_capacity);
-    if (!new_values)
-      return false;
-    decoder->simple_parts.values = new_values;
-
-    size_t *new_lens = safe_realloc(decoder->simple_parts.value_lens,
-                                    sizeof(size_t) * new_capacity);
-    if (!new_lens)
-      return false;
-    decoder->simple_parts.value_lens = new_lens;
-
-    for (size_t i = decoder->simple_parts.capacity; i < new_capacity; i++) {
-      new_values[i].indexes.indexes = NULL;
-      new_values[i].indexes.count = 0;
-      new_values[i].indexes.capacity = 0;
-      new_values[i].data = NULL;
-      new_values[i].data_len = 0;
-    }
-
-    decoder->simple_parts.capacity = new_capacity;
-  }
-
-  decoder_part_t *stored_part =
-      &decoder->simple_parts.values[decoder->simple_parts.count];
-  if (!decoder_part_copy(part, stored_part)) {
+  if (is_received(decoder, index) || index >= decoder->expected_seq_len ||
+      !part->data || part->data_len != decoder->expected_fragment_len)
     return false;
-  }
 
-  decoder->simple_parts.keys[decoder->simple_parts.count] = index;
-  decoder->simple_parts.value_lens[decoder->simple_parts.count] =
-      part->data_len;
-  decoder->simple_parts.count++;
-
+  decoder->fragments[index] = part->data;
+  part->data = NULL;
+  part->data_len = 0;
+  decoder->received_count++;
   return true;
 }
 
-static UR_WARN_UNUSED_RESULT bool
-reduce_part_by_part(const decoder_part_t *const a,
-                    const decoder_part_t *const b,
-                    decoder_part_t *const result) {
-  if (!a || !b || !result)
-    return false;
-
-  // Only reduce if b's indexes are a strict subset of a's indexes
-  if (!part_indexes_is_strict_subset(&b->indexes, &a->indexes)) {
-    return decoder_part_copy(a, result);
+static void assemble_message(fountain_decoder_t *decoder) {
+  uint8_t *message = safe_malloc_uninit(decoder->expected_message_len);
+  fountain_decoder_result_t *result =
+      safe_malloc(sizeof(fountain_decoder_result_t));
+  if (!message || !result) {
+    free(message);
+    free(result);
+    decoder->alloc_failed = true;
+    return;
   }
 
-  *result = (decoder_part_t){0};
-
-  if (!part_indexes_difference(&a->indexes, &b->indexes, &result->indexes)) {
-    return false;
+  // The geometry checked when the first part arrived makes the fragments
+  // cover the message exactly, so every byte of the uninitialised buffer is
+  // written before it is read.
+  size_t offset = 0;
+  for (size_t i = 0; i < decoder->expected_seq_len; i++) {
+    size_t copy_len = decoder->expected_message_len - offset;
+    if (copy_len > decoder->expected_fragment_len)
+      copy_len = decoder->expected_fragment_len;
+    memcpy(message + offset, decoder->fragments[i], copy_len);
+    offset += copy_len;
   }
 
-  result->data = safe_malloc_uninit(a->data_len);
-  if (!result->data) {
-    if (result->indexes.indexes) {
-      free(result->indexes.indexes);
-    }
-    return false;
+  if (crc32_calculate(message, decoder->expected_message_len) ==
+      decoder->expected_checksum) {
+    result->data = message;
+    result->data_len = decoder->expected_message_len;
+    result->is_success = true;
+    result->is_error = false;
+  } else {
+    free(message);
+    result->data = NULL;
+    result->data_len = 0;
+    result->is_success = false;
+    result->is_error = true;
   }
+  decoder->result = result;
 
-  result->data_len = a->data_len;
-  ur_xor(result->data, a->data, b->data, a->data_len);
-  return true;
+#ifdef DEBUG_STATS
+  printf("=== Mixed Parts Statistics ===\n");
+  printf("Maximum mixed parts reached: %zu\n", decoder->maximum_mixed_parts);
+  printf("  From fragments: %zu\n", decoder->mixed_from_fragments);
+  printf("  From reduction: %zu\n", decoder->mixed_from_reduction);
+  printf("  From cross-reduction: %zu\n", decoder->mixed_from_cross_reduction);
+  printf("  Total created: %zu\n", decoder->mixed_from_fragments +
+                                       decoder->mixed_from_reduction +
+                                       decoder->mixed_from_cross_reduction);
+  printf("Mixed parts that were useful: %zu\n", decoder->mixed_parts_useful);
+#endif
 }
 
+// Store a mixed equation, taking ownership of *part on success. Fails, leaving
+// *part with the caller, at MAX_MIXED_PARTS, on a duplicate, or on OOM.
 static UR_WARN_UNUSED_RESULT bool
-add_mixed_part(fountain_decoder_t *const decoder,
-               const decoder_part_t *const part,
+add_mixed_part(fountain_decoder_t *const decoder, decoder_part_t *const part,
                const mixed_part_source_t source) {
   if (!decoder || !part || is_simple_part(part) || !decoder->mixed_parts_hash)
     return false;
@@ -891,8 +847,19 @@ add_mixed_part(fountain_decoder_t *const decoder,
     return false; // Limit reached, skip adding this mixed part
   }
 
-  // Try to add to hash table (which automatically checks for duplicates)
-  if (!mixed_hash_put(decoder->mixed_parts_hash, &part->indexes, part)) {
+  // In-place reduction leaves the index array at the capacity of the
+  // original, unreduced equation. Stored equations can live for the rest of
+  // the scan, so give the slack back (best effort).
+  if (part->indexes.capacity > part->indexes.count) {
+    size_t *shrunk = safe_realloc(part->indexes.indexes,
+                                  part->indexes.count * sizeof(size_t));
+    if (shrunk) {
+      part->indexes.indexes = shrunk;
+      part->indexes.capacity = part->indexes.count;
+    }
+  }
+
+  if (!mixed_hash_insert(decoder->mixed_parts_hash, part)) {
     return false; // Duplicate or error
   }
 
@@ -924,10 +891,8 @@ static void fountain_decoder_clear_initialization(fountain_decoder_t *decoder) {
   if (!decoder)
     return;
 
-  if (decoder->expected_part_indexes) {
-    part_indexes_free(decoder->expected_part_indexes);
-    decoder->expected_part_indexes = NULL;
-  }
+  free_fragments(decoder);
+  safe_free(decoder->choose_scratch);
   if (decoder->mixed_parts_hash) {
     mixed_hash_free(decoder->mixed_parts_hash);
     safe_free(decoder->mixed_parts_hash);
@@ -941,9 +906,13 @@ static void fountain_decoder_clear_initialization(fountain_decoder_t *decoder) {
   decoder->expected_checksum = 0;
 }
 
+// Eliminate the equation (key, data) from every stored equation that strictly
+// contains it, in place. Equations left with a single fragment go to the work
+// queue; the rest are re-bucketed under their smaller key.
 static void reduce_mixed_by(fountain_decoder_t *const decoder,
-                            const decoder_part_t *const part) {
-  if (!decoder || !part || !decoder->mixed_parts_hash ||
+                            const part_indexes_t *const key,
+                            const uint8_t *const data) {
+  if (!decoder || !key || !data || !decoder->mixed_parts_hash ||
       decoder->mixed_parts_hash->count == 0)
     return;
 
@@ -961,55 +930,25 @@ static void reduce_mixed_by(fountain_decoder_t *const decoder,
     while (entry) {
       hash_entry_t *next = entry->next;
 
-      if (!part_indexes_is_strict_subset(&part->indexes, &entry->key)) {
+      if (!part_indexes_is_strict_subset(key, &entry->value.indexes)) {
         prev = entry;
         entry = next;
         continue;
       }
 
-      part_indexes_t new_indexes = {0};
-      if (!part_indexes_difference(&entry->key, &part->indexes, &new_indexes)) {
-        prev = entry;
-        entry = next;
-        continue;
-      }
-
-      // The value carries its own copy of the reduced index set. Build it
-      // before the XOR below, not after: once the data has been mutated there
-      // is no way back, and part_indexes_copy() clears its destination before
-      // it can fail. Copying afterwards therefore left the value describing an
-      // empty set while the key described the real one - an equation that can
-      // never satisfy is_simple_part() and is silently XORed into others.
-      part_indexes_t new_value_indexes = {0};
-      if (!part_indexes_copy(&new_indexes, &new_value_indexes)) {
-        // new_indexes is an automatic struct; only its array is heap.
-        // part_indexes_free() would free the struct itself.
-        free(new_indexes.indexes);
-        prev = entry;
-        entry = next;
-        continue;
-      }
-
-      // XOR the data in-place.
-      size_t xor_len = entry->value.data_len < part->data_len
+      part_indexes_subtract(&entry->value.indexes, key);
+      size_t xor_len = entry->value.data_len < decoder->expected_fragment_len
                            ? entry->value.data_len
-                           : part->data_len;
-      ur_xor_inplace(entry->value.data, part->data, xor_len);
-
-      free(entry->key.indexes);
-      entry->key = new_indexes;
-      entry->key_hash = hash_indexes(&entry->key);
-
-      free(entry->value.indexes.indexes);
-      entry->value.indexes = new_value_indexes;
+                           : decoder->expected_fragment_len;
+      ur_xor_inplace(entry->value.data, data, xor_len);
+      entry->key_hash = hash_indexes(&entry->value.indexes);
 
       if (is_simple_part(&entry->value)) {
 #ifdef DEBUG_STATS
         decoder->mixed_parts_useful++;
 #endif
         size_t fragment_idx = get_part_index(&entry->value);
-        if (!part_indexes_contains(&decoder->received_part_indexes,
-                                   fragment_idx) &&
+        if (!is_received(decoder, fragment_idx) &&
             !queue_enqueue(&decoder->queue, &entry->value)) {
           // The queue grows on demand, so this only fails at
           // QUEUE_MAX_CAPACITY or on OOM. Freeing here would discard a
@@ -1030,9 +969,7 @@ static void reduce_mixed_by(fountain_decoder_t *const decoder,
         } else {
           hash->buckets[i] = next;
         }
-        decoder_part_free(&entry->value);
-        free(entry->key.indexes);
-        free(entry);
+        hash_entry_free(entry);
         hash->count--;
         entry = next;
         continue;
@@ -1105,8 +1042,7 @@ promote_deferred_parts(fountain_decoder_t *const decoder) {
       // Already-received fragments fall through to the unlink below: dropping
       // a duplicate is not a loss.
       size_t fragment_idx = get_part_index(&entry->value);
-      if (!part_indexes_contains(&decoder->received_part_indexes,
-                                 fragment_idx) &&
+      if (!is_received(decoder, fragment_idx) &&
           !queue_enqueue(&decoder->queue, &entry->value)) {
         still_deferred = true;
         prev = entry;
@@ -1119,9 +1055,7 @@ promote_deferred_parts(fountain_decoder_t *const decoder) {
       } else {
         hash->buckets[i] = next;
       }
-      decoder_part_free(&entry->value);
-      free(entry->key.indexes);
-      free(entry);
+      hash_entry_free(entry);
       hash->count--;
       promoted = true;
       entry = next;
@@ -1134,6 +1068,36 @@ promote_deferred_parts(fountain_decoder_t *const decoder) {
 
 #ifdef ENABLE_CROSS_REDUCTION
 static UR_WARN_UNUSED_RESULT bool
+reduce_part_by_part(const decoder_part_t *const a,
+                    const decoder_part_t *const b,
+                    decoder_part_t *const result) {
+  if (!a || !b || !result)
+    return false;
+
+  // Only reduce if b's indexes are a strict subset of a's indexes
+  if (!part_indexes_is_strict_subset(&b->indexes, &a->indexes)) {
+    return decoder_part_copy(a, result);
+  }
+
+  *result = (decoder_part_t){0};
+
+  if (!part_indexes_difference(&a->indexes, &b->indexes, &result->indexes)) {
+    safe_free(result->indexes.indexes);
+    return false;
+  }
+
+  result->data = safe_malloc_uninit(a->data_len);
+  if (!result->data) {
+    safe_free(result->indexes.indexes);
+    return false;
+  }
+
+  result->data_len = a->data_len;
+  ur_xor(result->data, a->data, b->data, a->data_len);
+  return true;
+}
+
+static UR_WARN_UNUSED_RESULT bool
 create_symmetric_diff(const decoder_part_t *const a,
                       const decoder_part_t *const b,
                       decoder_part_t *const result) {
@@ -1144,6 +1108,7 @@ create_symmetric_diff(const decoder_part_t *const a,
 
   if (!part_indexes_symmetric_difference(&a->indexes, &b->indexes,
                                          &result->indexes)) {
+    safe_free(result->indexes.indexes);
     return false;
   }
 
@@ -1203,8 +1168,8 @@ static void reduce_mixed_against_mixed(fountain_decoder_t *const decoder) {
            offset <= entry_count && (i + offset) < entry_count; offset++) {
         size_t j = i + offset;
 
-        if (part_indexes_have_intersection(&entries[i]->key,
-                                           &entries[j]->key)) {
+        if (part_indexes_have_intersection(&entries[i]->value.indexes,
+                                           &entries[j]->value.indexes)) {
 
           decoder_part_t new_part = {0};
 
@@ -1216,10 +1181,11 @@ static void reduce_mixed_against_mixed(fountain_decoder_t *const decoder) {
             // the table becomes strictly simpler without accumulating extra
             // equations and crowding out future fountain parts.
             hash_entry_t *victim = NULL;
-            if (new_part.indexes.count < entries[i]->key.count)
+            if (new_part.indexes.count < entries[i]->value.indexes.count)
               victim = entries[i];
-            if (new_part.indexes.count < entries[j]->key.count &&
-                (!victim || entries[j]->key.count > victim->key.count))
+            if (new_part.indexes.count < entries[j]->value.indexes.count &&
+                (!victim ||
+                 entries[j]->value.indexes.count > victim->value.indexes.count))
               victim = entries[j];
 
             if (!victim) {
@@ -1230,8 +1196,7 @@ static void reduce_mixed_against_mixed(fountain_decoder_t *const decoder) {
             if (new_part.indexes.count > 0) {
               if (is_simple_part(&new_part)) {
                 size_t fragment_idx = get_part_index(&new_part);
-                if (!part_indexes_contains(&decoder->received_part_indexes,
-                                           fragment_idx)) {
+                if (!is_received(decoder, fragment_idx)) {
                   // Queue the recovered fragment before removing its parent:
                   // an allocation failure must leave the equation system
                   // intact so a later fountain part can retry the reduction.
@@ -1294,13 +1259,14 @@ static void gaussian_reduce_with_new_part(fountain_decoder_t *const decoder,
       hash_entry_t *next = entry->next;
 
       // Skip if this is the pivot itself
-      if (part_indexes_equal(&entry->key, &pivot->indexes)) {
+      if (part_indexes_equal(&entry->value.indexes, &pivot->indexes)) {
         prev = entry;
         entry = next;
         continue;
       }
 
-      if (part_indexes_is_strict_subset(&pivot->indexes, &entry->key)) {
+      if (part_indexes_is_strict_subset(&pivot->indexes,
+                                        &entry->value.indexes)) {
         decoder_part_t reduced = {0};
 
         if (reduce_part_by_part(&entry->value, pivot, &reduced)) {
@@ -1311,19 +1277,13 @@ static void gaussian_reduce_with_new_part(fountain_decoder_t *const decoder,
             decoder->mixed_parts_hash->buckets[b] = next;
           }
 
-          // Free the entry
-          decoder_part_free(&entry->value);
-          if (entry->key.indexes) {
-            free(entry->key.indexes);
-          }
-          free(entry);
+          hash_entry_free(entry);
           decoder->mixed_parts_hash->count--;
 
           // Handle reduced part
           if (is_simple_part(&reduced)) {
             size_t fragment_idx = get_part_index(&reduced);
-            if (!part_indexes_contains(&decoder->received_part_indexes,
-                                       fragment_idx)) {
+            if (!is_received(decoder, fragment_idx)) {
               // Unlike reduce_mixed_by() there is nowhere to retain this -
               // the entry it came from has already been unlinked and freed -
               // so report the loss rather than returning success on a decode
@@ -1369,183 +1329,66 @@ static void gaussian_reduce_with_new_part(fountain_decoder_t *const decoder,
 }
 #endif // ENABLE_CROSS_REDUCTION
 
-static UR_WARN_UNUSED_RESULT bool
-all_fragments_received(const fountain_decoder_t *decoder) {
-  return decoder->expected_part_indexes &&
-         part_indexes_equal(&decoder->received_part_indexes,
-                            decoder->expected_part_indexes);
-}
-
-static void assemble_message(fountain_decoder_t *const decoder) {
-  size_t part_count = decoder->simple_parts.count;
-
-  // Sort simple_parts by fragment index in place (paired insertion
-  // sort across the three parallel arrays). part_count <= seq_len,
-  // which is small in practice, so O(n²) is fine and saves the three
-  // temporary arrays the earlier qsort-based path allocated.
-  for (size_t i = 1; i < part_count; i++) {
-    size_t key = decoder->simple_parts.keys[i];
-    decoder_part_t val = decoder->simple_parts.values[i];
-    size_t val_len = decoder->simple_parts.value_lens[i];
-    size_t j = i;
-    while (j > 0 && decoder->simple_parts.keys[j - 1] > key) {
-      decoder->simple_parts.keys[j] = decoder->simple_parts.keys[j - 1];
-      decoder->simple_parts.values[j] = decoder->simple_parts.values[j - 1];
-      decoder->simple_parts.value_lens[j] =
-          decoder->simple_parts.value_lens[j - 1];
-      j--;
-    }
-    decoder->simple_parts.keys[j] = key;
-    decoder->simple_parts.values[j] = val;
-    decoder->simple_parts.value_lens[j] = val_len;
-  }
-
-  uint8_t *message = safe_malloc_uninit(decoder->expected_message_len);
-  fountain_decoder_result_t *result =
-      safe_malloc(sizeof(fountain_decoder_result_t));
-  if (!message || !result) {
-    free(message);
-    free(result);
-    decoder->alloc_failed = true;
-    return;
-  }
-
-  size_t offset = 0;
-  for (size_t i = 0; i < part_count && offset < decoder->expected_message_len;
-       i++) {
-    decoder_part_t *p = &decoder->simple_parts.values[i];
-    if (!p->data || p->data_len == 0)
-      continue;
-    size_t copy_len = p->data_len;
-    if (offset + copy_len > decoder->expected_message_len)
-      copy_len = decoder->expected_message_len - offset;
-    memcpy(message + offset, p->data, copy_len);
-    offset += copy_len;
-  }
-
-  // The buffer is deliberately allocated uninitialised, so every byte must
-  // have been written before it is read. Callers validate the fragment
-  // geometry up front, but this is the invariant that actually matters and
-  // it is asserted here independently: if the join ever falls short, bail
-  // out rather than CRC (and potentially return) uninitialised heap.
-  // NOTE: relaxing this check means switching to a zeroing allocator.
-  if (offset != decoder->expected_message_len) {
-    free(message);
-    free(result);
-    return;
-  }
-
-  if (crc32_calculate(message, decoder->expected_message_len) ==
-      decoder->expected_checksum) {
-    result->data = message;
-    result->data_len = decoder->expected_message_len;
-    result->is_success = true;
-    result->is_error = false;
-#ifdef DEBUG_STATS
-    printf("=== Mixed Parts Statistics ===\n");
-    printf("Maximum mixed parts reached: %zu\n", decoder->maximum_mixed_parts);
-    printf("  From fragments: %zu\n", decoder->mixed_from_fragments);
-    printf("  From reduction: %zu\n", decoder->mixed_from_reduction);
-    printf("  From cross-reduction: %zu\n",
-           decoder->mixed_from_cross_reduction);
-    printf("  Total created: %zu\n", decoder->mixed_from_fragments +
-                                         decoder->mixed_from_reduction +
-                                         decoder->mixed_from_cross_reduction);
-    printf("Mixed parts that were useful: %zu\n", decoder->mixed_parts_useful);
-#endif
-  } else {
-    free(message);
-    result->data = NULL;
-    result->data_len = 0;
-    result->is_success = false;
-    result->is_error = true;
-  }
-  decoder->result = result;
-}
-
-static void process_simple_part(fountain_decoder_t *const decoder,
-                                const decoder_part_t *const part) {
-  if (!decoder || !part || !is_simple_part(part))
-    return;
-
-  size_t fragment_index = get_part_index(part);
-
-  if (part_indexes_contains(&decoder->received_part_indexes, fragment_index)) {
-    return;
-  }
-
-  if (!add_simple_part(decoder, part)) {
-    return;
-  }
-
-  if (!part_indexes_add(&decoder->received_part_indexes, fragment_index)) {
-    return;
-  }
-
-  if (all_fragments_received(decoder))
-    assemble_message(decoder);
-}
-
+// Reduces *part in place, then queues or stores it, taking its buffers.
 static void process_mixed_part(fountain_decoder_t *const decoder,
-                               const decoder_part_t *const part) {
+                               decoder_part_t *const part) {
   if (!decoder || !part || is_simple_part(part) || !decoder->mixed_parts_hash)
     return;
 
-  decoder_part_t reduced_part = {0};
+  part_indexes_t *indexes = &part->indexes;
+  size_t len = decoder->expected_fragment_len;
+  if (!part->data || part->data_len != len)
+    return;
 
-  if (!decoder_part_copy(part, &reduced_part)) {
+  // Eliminate recovered fragments. Like reducing by each simple part in turn,
+  // which needs a strict subset, this stops with one index left.
+  size_t remaining = indexes->count, kept = 0;
+  for (size_t i = 0; i < indexes->count; i++) {
+    size_t index = indexes->indexes[i];
+    if (remaining > 1 && is_received(decoder, index)) {
+      ur_xor_inplace(part->data, decoder->fragments[index], len);
+      remaining--;
+      continue;
+    }
+    indexes->indexes[kept++] = index;
+  }
+  indexes->count = kept;
+
+  mixed_parts_hash_t *hash = decoder->mixed_parts_hash;
+  for (size_t i = 0; i < hash->capacity && !is_simple_part(part); i++) {
+    for (hash_entry_t *entry = hash->buckets[i]; entry; entry = entry->next) {
+      if (part_indexes_is_strict_subset(&entry->value.indexes, indexes)) {
+        part_indexes_subtract(indexes, &entry->value.indexes);
+        ur_xor_inplace(part->data, entry->value.data, len);
+      }
+    }
+  }
+
+  if (is_simple_part(part)) {
+    // Locally derived from the incoming fragment, so there is no table entry
+    // to fall back on - report the loss. See reduce_mixed_by().
+    if (!queue_enqueue(&decoder->queue, part))
+      decoder->alloc_failed = true;
     return;
   }
 
-  for (size_t i = 0; i < decoder->simple_parts.count; i++) {
-    decoder_part_t temp = {0};
-
-    if (reduce_part_by_part(&reduced_part, &decoder->simple_parts.values[i],
-                            &temp)) {
-      decoder_part_free(&reduced_part);
-      reduced_part = temp;
-    }
-  }
-
-  for (size_t i = 0; i < decoder->mixed_parts_hash->capacity; i++) {
-    hash_entry_t *entry = decoder->mixed_parts_hash->buckets[i];
-    while (entry) {
-      decoder_part_t temp = {0};
-
-      if (reduce_part_by_part(&reduced_part, &entry->value, &temp)) {
-        decoder_part_free(&reduced_part);
-        reduced_part = temp;
-      }
-      entry = entry->next;
-    }
-  }
-
-  if (is_simple_part(&reduced_part)) {
-    // Locally derived from the incoming fragment, so there is no table entry
-    // to fall back on - report the loss. See reduce_mixed_by().
-    if (!queue_enqueue(&decoder->queue, &reduced_part))
-      decoder->alloc_failed = true;
-  } else {
-    reduce_mixed_by(decoder, &reduced_part);
-    if (!add_mixed_part(decoder, &reduced_part, MIXED_SOURCE_FRAGMENT)) {
-      // The table is at MAX_MIXED_PARTS, the equation is a duplicate, or the
-      // allocation failed. Dropping it is the documented behaviour of the cap:
-      // the fountain stream keeps supplying parts, so the message still
-      // converges, just from more frames.
+  reduce_mixed_by(decoder, indexes, part->data);
+  if (!add_mixed_part(decoder, part, MIXED_SOURCE_FRAGMENT)) {
+    // The table is at MAX_MIXED_PARTS, the equation is a duplicate, or the
+    // allocation failed. Dropping it is the documented behaviour of the cap:
+    // the fountain stream keeps supplying parts, so the message still
+    // converges, just from more frames.
 #ifdef ENABLE_CROSS_REDUCTION
-    } else {
-      // A newly stored mixed equation may combine with equations already in
-      // the table even when neither is a subset of the other. The ordinary
-      // reduce_mixed_by() path cannot discover those relationships, so run
-      // the bounded mixed-against-mixed pass while the new information is
-      // available. Parts recovered here are queued and consumed by the outer
-      // receive loop.
-      reduce_mixed_against_mixed(decoder);
+  } else {
+    // A newly stored mixed equation may combine with equations already in
+    // the table even when neither is a subset of the other. The ordinary
+    // reduce_mixed_by() path cannot discover those relationships, so run
+    // the bounded mixed-against-mixed pass while the new information is
+    // available. Parts recovered here are queued and consumed by the outer
+    // receive loop.
+    reduce_mixed_against_mixed(decoder);
 #endif
-    }
   }
-
-  decoder_part_free(&reduced_part);
 }
 
 static void process_queue_item(fountain_decoder_t *const decoder) {
@@ -1558,13 +1401,91 @@ static void process_queue_item(fountain_decoder_t *const decoder) {
     return;
 
   if (is_simple_part(&part)) {
-    process_simple_part(decoder, &part);
-    reduce_mixed_by(decoder, &part);
+    size_t index = get_part_index(&part);
+    part_indexes_t key = {.indexes = &index, .count = 1, .capacity = 1};
+    const uint8_t *data = part.data;
+
+    if (store_fragment(decoder, &part)) {
+      data = decoder->fragments[index];
+      if (decoder->received_count == decoder->expected_seq_len)
+        assemble_message(decoder);
+    }
+    reduce_mixed_by(decoder, &key, data);
   } else {
     process_mixed_part(decoder, &part);
   }
 
   decoder_part_free(&part);
+}
+
+static UR_WARN_UNUSED_RESULT bool
+fountain_decoder_initialize(fountain_decoder_t *decoder,
+                            const fountain_encoder_part_t *part) {
+  // Every fragment is ceil(message_len / seq_len) bytes, the last one
+  // zero-padded, so the fragments cover the message exactly.
+  if (part->seq_len == 0 || part->message_len == 0 ||
+      part->data_len != part->message_len / part->seq_len +
+                            (part->message_len % part->seq_len ? 1 : 0))
+    return false;
+
+  decoder->fragments = safe_malloc(part->seq_len * sizeof(uint8_t *));
+  decoder->choose_scratch = safe_malloc_uninit(part->seq_len * sizeof(size_t));
+  if (!decoder->fragments || !decoder->choose_scratch) {
+    fountain_decoder_clear_initialization(decoder);
+    return false;
+  }
+
+  // A single simple pivot can resolve many cached mixed equations at once,
+  // so size the work queue up front rather than growing it a step at a time.
+  // Bounded by MAX_MIXED_PARTS, not QUEUE_MAX_CAPACITY: what the queue has to
+  // absorb in one burst is the equations held in the mixed table, and that is
+  // where the cap actually bites. Best-effort - queue_enqueue() still grows on
+  // demand if a message genuinely needs more.
+  if (!queue_reserve(&decoder->queue, part->seq_len < MAX_MIXED_PARTS
+                                          ? part->seq_len
+                                          : MAX_MIXED_PARTS)) {
+    // Best effort - queue_enqueue() still grows on demand.
+  }
+
+  decoder->expected_seq_len = part->seq_len;
+  decoder->expected_checksum = part->checksum;
+  decoder->expected_fragment_len = part->data_len;
+  decoder->expected_message_len = part->message_len;
+
+  size_t hash_capacity =
+      part->seq_len < (HASH_MIN_CAPACITY / HASH_CAPACITY_MULTIPLIER)
+          ? HASH_MIN_CAPACITY
+          : part->seq_len * HASH_CAPACITY_MULTIPLIER;
+
+  decoder->mixed_parts_hash = safe_malloc(sizeof(mixed_parts_hash_t));
+  if (!decoder->mixed_parts_hash ||
+      !mixed_hash_init(decoder->mixed_parts_hash, hash_capacity) ||
+      !hash_set_init(&decoder->received_fragments_hashes,
+                     hash_capacity < MAX_DUPLICATE_TRACKING
+                         ? hash_capacity
+                         : MAX_DUPLICATE_TRACKING)) {
+    fountain_decoder_clear_initialization(decoder);
+    return false;
+  }
+
+  // Degree probs and the sampler stay double — interop-critical, must
+  // match reference implementations bit-for-bit (see fountain_utils.c).
+  double *degree_probs = safe_malloc(part->seq_len * sizeof(double));
+  if (!degree_probs) {
+    fountain_decoder_clear_initialization(decoder);
+    return false;
+  }
+  for (size_t i = 0; i < part->seq_len; i++) {
+    degree_probs[i] = 1.0 / (i + 1);
+  }
+  bool sampler_ok = random_sampler_init(&decoder->degree_sampler, degree_probs,
+                                        part->seq_len);
+  free(degree_probs);
+  if (!sampler_ok) {
+    fountain_decoder_clear_initialization(decoder);
+    return false;
+  }
+  return true;
 }
 
 bool fountain_decoder_receive_part(fountain_decoder_t *decoder,
@@ -1579,7 +1500,8 @@ bool fountain_decoder_receive_part(fountain_decoder_t *decoder,
 
   // Reassembly failed for lack of memory when the last fragment arrived.
   // Every fragment is held, so no later part would trigger it again.
-  if (all_fragments_received(decoder)) {
+  if (decoder->fragments &&
+      decoder->received_count == decoder->expected_seq_len) {
     decoder->alloc_failed = false;
     assemble_message(decoder);
     return !decoder->alloc_failed;
@@ -1595,85 +1517,8 @@ bool fountain_decoder_receive_part(fountain_decoder_t *decoder,
     return false;
   }
 
-  if (decoder->expected_part_indexes == NULL) {
-    // Every fragment is ceil(message_len / seq_len) bytes, the last one
-    // zero-padded, so the fragments cover the message exactly.
-    if (part->seq_len == 0 || part->message_len == 0 ||
-        part->data_len != part->message_len / part->seq_len +
-                              (part->message_len % part->seq_len ? 1 : 0)) {
-      return false;
-    }
-
-    decoder->expected_part_indexes = part_indexes_new();
-    if (!decoder->expected_part_indexes)
-      return false;
-
-    for (size_t i = 0; i < part->seq_len; i++) {
-      if (!part_indexes_add(decoder->expected_part_indexes, i)) {
-        fountain_decoder_clear_initialization(decoder);
-        return false;
-      }
-    }
-
-    // A single simple pivot can resolve many cached mixed equations at once,
-    // so size the work queue up front rather than growing it a step at a time.
-    // Bounded by MAX_MIXED_PARTS, not QUEUE_MAX_CAPACITY: what the queue has to
-    // absorb in one burst is the equations held in the mixed table, and that is
-    // where the cap actually bites. Reserving seq_len entries instead would
-    // claim ~20 KiB of the 32-bit heap at seq_len 1024 to back a table that can
-    // never exceed 256 entries. Best-effort - queue_enqueue() still grows on
-    // demand if a message genuinely needs more.
-    if (!queue_reserve(&decoder->queue, part->seq_len < MAX_MIXED_PARTS
-                                            ? part->seq_len
-                                            : MAX_MIXED_PARTS)) {
-      // Best effort - queue_enqueue() still grows on demand.
-    }
-
-    decoder->expected_seq_len = part->seq_len;
-    decoder->expected_checksum = part->checksum;
-    decoder->expected_fragment_len = part->data_len;
-    decoder->expected_message_len = part->message_len;
-
-    size_t hash_capacity =
-        part->seq_len < (HASH_MIN_CAPACITY / HASH_CAPACITY_MULTIPLIER)
-            ? HASH_MIN_CAPACITY
-            : part->seq_len * HASH_CAPACITY_MULTIPLIER;
-
-    decoder->mixed_parts_hash = safe_malloc(sizeof(mixed_parts_hash_t));
-    if (!decoder->mixed_parts_hash) {
-      fountain_decoder_clear_initialization(decoder);
-      return false;
-    }
-
-    if (!mixed_hash_init(decoder->mixed_parts_hash, hash_capacity)) {
-      fountain_decoder_clear_initialization(decoder);
-      return false;
-    }
-
-    if (!hash_set_init(&decoder->received_fragments_hashes, hash_capacity)) {
-      fountain_decoder_clear_initialization(decoder);
-      return false;
-    }
-
-    // Degree probs and the sampler stay double — interop-critical, must
-    // match reference implementations bit-for-bit (see fountain_utils.c).
-    if (part->seq_len > 0) {
-      double *degree_probs = safe_malloc(part->seq_len * sizeof(double));
-      if (!degree_probs) {
-        fountain_decoder_clear_initialization(decoder);
-        return false;
-      }
-      for (size_t i = 0; i < part->seq_len; i++) {
-        degree_probs[i] = 1.0 / (i + 1);
-      }
-      if (!random_sampler_init(&decoder->degree_sampler, degree_probs,
-                               part->seq_len)) {
-        free(degree_probs);
-        fountain_decoder_clear_initialization(decoder);
-        return false;
-      }
-      free(degree_probs);
-    }
+  if (!decoder->fragments && !fountain_decoder_initialize(decoder, part)) {
+    return false;
   }
 
   // Every part of a message must agree on all four header fields. The first
@@ -1681,8 +1526,7 @@ bool fountain_decoder_receive_part(fountain_decoder_t *decoder,
   // checked against them here.
   //
   // Fragment length matters for memory safety: accepting a shorter part would
-  // let the XOR reduction (reduce_part_by_part / create_symmetric_diff /
-  // reduce_mixed_by) read past its buffer. The other three matter for
+  // let the XOR reduction read past its buffer. The other three matter for
   // integrity: a later part's own seq_len and checksum drive fragment
   // selection, so a frame from a different message - an interleaved animation
   // of the same UR type, or a crafted one - would otherwise be mixed into this
@@ -1697,8 +1541,7 @@ bool fountain_decoder_receive_part(fountain_decoder_t *decoder,
   decoder->alloc_failed = false;
 
   decoder_part_t decoder_part;
-  if (!create_decoder_part_from_encoder_part(part, &decoder_part,
-                                             &decoder->degree_sampler)) {
+  if (!create_decoder_part_from_encoder_part(decoder, part, &decoder_part)) {
     return false;
   }
 
@@ -1710,18 +1553,8 @@ bool fountain_decoder_receive_part(fountain_decoder_t *decoder,
 
   if (!hash_set_add(&decoder->received_fragments_hashes, fragment_hash)) {
     // Best effort. Losing an entry only costs the cheap duplicate short-circuit
-    // above; a fragment that slips through is filtered again by
-    // received_part_indexes before it can be applied twice.
-  }
-
-  if (decoder->last_part_indexes) {
-    part_indexes_free(decoder->last_part_indexes);
-  }
-  decoder->last_part_indexes = part_indexes_new();
-  if (decoder->last_part_indexes &&
-      !part_indexes_copy(&decoder_part.indexes, decoder->last_part_indexes)) {
-    // Best effort: this only feeds the weighted progress estimate, which
-    // degrades to the unweighted one rather than misreporting.
+    // above; a fragment that slips through is filtered again by the fragment
+    // table before it can be applied twice.
   }
 
   if (!queue_enqueue(&decoder->queue, &decoder_part)) {
@@ -1753,10 +1586,10 @@ bool fountain_decoder_receive_part(fountain_decoder_t *decoder,
 
   decoder_part_free(&decoder_part);
 
-  // A recovered fragment was dropped because the queue could not be extended.
-  // Report it rather than returning success on a decode that silently lost
-  // data - the caller maps this to a non-terminal memory error, so scanning
-  // continues and the fountain animation can resupply the fragment.
+  // A recovered fragment was dropped because the queue could not be extended,
+  // or the message could not be assembled. Report it rather than returning
+  // success - the caller maps this to a non-terminal memory error, so scanning
+  // continues and the next part retries or resupplies what was lost.
   return !decoder->alloc_failed;
 }
 
@@ -1773,9 +1606,9 @@ bool fountain_decoder_is_success(fountain_decoder_t *decoder) {
 }
 
 size_t fountain_decoder_expected_part_count(fountain_decoder_t *decoder) {
-  if (!decoder || !decoder->expected_part_indexes)
+  if (!decoder || !decoder->fragments)
     return 0;
-  return decoder->expected_part_indexes->count;
+  return decoder->expected_seq_len;
 }
 
 float fountain_decoder_estimated_percent_complete(fountain_decoder_t *decoder) {
@@ -1783,7 +1616,7 @@ float fountain_decoder_estimated_percent_complete(fountain_decoder_t *decoder) {
     return 0.0f;
   if (fountain_decoder_is_complete(decoder))
     return 1.0f;
-  if (!decoder->expected_part_indexes)
+  if (!decoder->fragments)
     return 0.0f;
 
   float estimated_input_parts =
@@ -1825,9 +1658,9 @@ float fountain_decoder_estimated_percent_complete_weighted(
       for (size_t b = 0; b < hash->capacity; b++) {
         for (hash_entry_t *entry = hash->buckets[b]; entry;
              entry = entry->next) {
-          float score = 1.0f / (float)entry->key.count;
-          for (size_t k = 0; k < entry->key.count; k++) {
-            size_t index = entry->key.indexes[k];
+          float score = 1.0f / (float)entry->value.indexes.count;
+          for (size_t k = 0; k < entry->value.indexes.count; k++) {
+            size_t index = entry->value.indexes.indexes[k];
             if (index < parts)
               scoring[index] += score;
           }
@@ -1840,7 +1673,7 @@ float fountain_decoder_estimated_percent_complete_weighted(
     }
   }
 
-  float num_complete = (float)decoder->received_part_indexes.count;
+  float num_complete = (float)decoder->received_count;
   float progress = (num_complete + mixed_score) / (float)parts;
   // Never report >= 1.0 while incomplete (same 0.99 cap as the reference
   // estimate): keeps rounded displays below 100% and bounds the result even
@@ -1882,5 +1715,5 @@ size_t fountain_decoder_processed_parts_count(fountain_decoder_t *decoder) {
 size_t fountain_decoder_received_parts_count(fountain_decoder_t *decoder) {
   if (!decoder)
     return 0;
-  return decoder->received_part_indexes.count;
+  return decoder->received_count;
 }

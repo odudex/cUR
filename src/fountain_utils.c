@@ -222,7 +222,7 @@ static size_t choose_degree(size_t seq_len, prng_state_t *prng,
 static UR_WARN_UNUSED_RESULT bool
 choose_fragments_internal(uint32_t seq_num, size_t seq_len, uint32_t checksum,
                           part_indexes_t *result,
-                          random_sampler_t *cached_sampler) {
+                          random_sampler_t *cached_sampler, size_t *scratch) {
   if (!result || seq_len == 0)
     return false;
 
@@ -246,8 +246,18 @@ choose_fragments_internal(uint32_t seq_num, size_t seq_len, uint32_t checksum,
   prng_init_from_bytes(&rng, seed, 8);
 
   size_t degree = choose_degree(seq_len, &rng, cached_sampler);
+  size_t draws = (degree < seq_len) ? degree : seq_len;
 
-  size_t *remaining_indexes = safe_malloc(seq_len * sizeof(size_t));
+  if (result->capacity < draws) {
+    size_t *grown = safe_realloc(result->indexes, draws * sizeof(size_t));
+    if (!grown)
+      return false;
+    result->indexes = grown;
+    result->capacity = draws;
+  }
+
+  size_t *remaining_indexes =
+      scratch ? scratch : safe_malloc_uninit(seq_len * sizeof(size_t));
   if (!remaining_indexes)
     return false;
 
@@ -260,39 +270,45 @@ choose_fragments_internal(uint32_t seq_num, size_t seq_len, uint32_t checksum,
   // removal is preserved to keep the PRNG call pattern identical to the
   // Python reference implementation.
   size_t remaining_count = seq_len;
-  size_t draws = (degree < seq_len) ? degree : seq_len;
+  bool ok = true;
   for (size_t i = 0; i < draws && remaining_count > 0; i++) {
     uint32_t idx = prng_next_int(&rng, 0, remaining_count - 1);
     // prng_next_double() rounds the top 1024 outputs up to 1.0, so idx can
     // equal remaining_count; the reference implementations fault or throw.
-    if (idx >= remaining_count) {
-      free(remaining_indexes);
-      return false;
+    if (idx >= remaining_count ||
+        !part_indexes_add(result, remaining_indexes[idx])) {
+      ok = false;
+      break;
     }
-    if (!part_indexes_add(result, remaining_indexes[idx])) {
-      free(remaining_indexes);
-      return false;
-    }
-    for (size_t j = idx; j < remaining_count - 1; j++) {
-      remaining_indexes[j] = remaining_indexes[j + 1];
-    }
+    memmove(remaining_indexes + idx, remaining_indexes + idx + 1,
+            (remaining_count - 1 - idx) * sizeof(size_t));
     remaining_count--;
   }
 
-  free(remaining_indexes);
-  return true;
+  if (!scratch)
+    free(remaining_indexes);
+  return ok;
 }
 
 bool choose_fragments(uint32_t seq_num, size_t seq_len, uint32_t checksum,
                       part_indexes_t *result) {
-  return choose_fragments_internal(seq_num, seq_len, checksum, result, NULL);
+  return choose_fragments_internal(seq_num, seq_len, checksum, result, NULL,
+                                   NULL);
 }
 
 bool choose_fragments_cached(uint32_t seq_num, size_t seq_len,
                              uint32_t checksum, part_indexes_t *result,
                              random_sampler_t *cached_sampler) {
   return choose_fragments_internal(seq_num, seq_len, checksum, result,
-                                   cached_sampler);
+                                   cached_sampler, NULL);
+}
+
+bool choose_fragments_with_scratch(uint32_t seq_num, size_t seq_len,
+                                   uint32_t checksum, part_indexes_t *result,
+                                   random_sampler_t *cached_sampler,
+                                   size_t *scratch) {
+  return choose_fragments_internal(seq_num, seq_len, checksum, result,
+                                   cached_sampler, scratch);
 }
 
 bool part_indexes_is_strict_subset(const part_indexes_t *a,
