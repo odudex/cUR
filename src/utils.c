@@ -12,7 +12,6 @@
 
 #include "utils.h"
 #include "xor_internal.h"
-#include <ctype.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
@@ -232,7 +231,8 @@ void str_to_lower(char *str) {
   if (!str)
     return;
   for (char *p = str; *p; p++) {
-    *p = tolower((unsigned char)*p);
+    if (*p >= 'A' && *p <= 'Z')
+      *p += 'a' - 'A';
   }
 }
 
@@ -274,8 +274,7 @@ bool is_ur_type(const char *type) {
 
   char last = 0;
   for (const char *p = type; *p; p++) {
-    if (!islower((unsigned char)*p) && !isdigit((unsigned char)*p) &&
-        *p != '-') {
+    if (!(*p >= 'a' && *p <= 'z') && !(*p >= '0' && *p <= '9') && *p != '-') {
       return false;
     }
     last = *p;
