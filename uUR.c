@@ -53,6 +53,10 @@ typedef void (*release_fn_t)(void *);
 static mp_obj_t new_obj_then_release(const mp_obj_type_t *obj_type,
                                      const void *data, size_t len,
                                      release_fn_t release, void *owner) {
+  // With NULL data mp_obj_new_bytes() leaves the object without a buffer,
+  // which C consumers then read as a NULL string.
+  if (len == 0)
+    data = "";
   mp_obj_t obj = MP_OBJ_NULL;
   nlr_buf_t nlr;
   if (nlr_push(&nlr) == 0) {
@@ -107,15 +111,20 @@ static mp_obj_t ur_make_new(const mp_obj_type_t *type, size_t n_args,
                             size_t n_kw, const mp_obj_t *args) {
   mp_arg_check_num(n_args, n_kw, 2, 2, false);
 
-  // Extract type and CBOR data from args
-  const char *ur_type = mp_obj_str_get_str(args[0]);
+  // str only, as on CPython. mp_obj_str_get_str() would also take bytes, and
+  // an embedded NUL would cut the type short without failing validation.
+  if (!mp_obj_is_str(args[0])) {
+    mp_raise_TypeError(MP_ERROR_TEXT("type must be str"));
+  }
+  size_t ur_type_len;
+  const char *ur_type = mp_obj_str_get_data(args[0], &ur_type_len);
 
   mp_buffer_info_t cbor_buf;
   mp_get_buffer_raise(args[1], &cbor_buf, MP_BUFFER_READ);
 
   // Distinguish bad arguments (ValueError) from allocation failure
   // (MemoryError): ur_new returns NULL for both. Matches the CPython binding.
-  if (!is_ur_type(ur_type)) {
+  if (strlen(ur_type) != ur_type_len || !is_ur_type(ur_type)) {
     mp_raise_msg(
         &mp_type_ValueError,
         MP_ERROR_TEXT(
@@ -299,7 +308,13 @@ static mp_obj_t ur_decoder_receive_part_py(mp_obj_t self_in,
     mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("URDecoder is closed"));
   }
 
-  const char *part_cstr = mp_obj_str_get_str(part_str);
+  size_t part_len;
+  const char *part_cstr = mp_obj_str_get_data(part_str, &part_len);
+  // The C decoder reads up to the first NUL, so a frame with an embedded NUL
+  // would be accepted by its prefix. Hand it "" to reject the frame instead.
+  if (!part_cstr || strlen(part_cstr) != part_len) {
+    part_cstr = "";
+  }
   return mp_obj_new_int(
       (mp_int_t)ur_decoder_receive_part(self->decoder, part_cstr));
 }
@@ -427,7 +442,7 @@ static void ur_encoder_print(const mp_print_t *print, mp_obj_t self_in,
   mp_obj_ur_encoder_t *self = MP_OBJ_TO_PTR(self_in);
   if (self->encoder) {
     mp_printf(print, "UREncoder(seq_len=%u, complete=%s)",
-              ur_encoder_seq_len(self->encoder),
+              (unsigned)ur_encoder_seq_len(self->encoder),
               ur_encoder_is_complete(self->encoder) ? "True" : "False");
   } else {
     mp_printf(print, "UREncoder(invalid)");
@@ -479,9 +494,9 @@ static mp_obj_t ur_encoder_make_new(const mp_obj_type_t *type, size_t n_args,
   // Range-check before the cast: a negative value would silently become a
   // huge sequence number and fail later, inside next_part().
   mp_int_t raw_seq = parsed_args[ARG_first_seq_num].u_int;
-  if (raw_seq < 0 || (uintmax_t)raw_seq > (uintmax_t)UINT32_MAX) {
+  if (raw_seq < 0 || (uintmax_t)raw_seq >= (uintmax_t)UINT32_MAX) {
     mp_raise_msg(&mp_type_ValueError,
-                 MP_ERROR_TEXT("first_seq_num out of range (0..4294967295)"));
+                 MP_ERROR_TEXT("first_seq_num out of range (0..4294967294)"));
   }
   uint32_t first_seq_num = (uint32_t)raw_seq;
 
@@ -614,7 +629,8 @@ static void fountain_encoder_wrapper_print(const mp_print_t *print,
   mp_obj_fountain_encoder_wrapper_t *self = MP_OBJ_TO_PTR(self_in);
   ur_encoder_t *enc = fountain_encoder_wrapper_encoder(self);
   if (enc && enc->fountain_encoder) {
-    mp_printf(print, "FountainEncoder(seq_len=%u)", ur_encoder_seq_len(enc));
+    mp_printf(print, "FountainEncoder(seq_len=%u)",
+              (unsigned)ur_encoder_seq_len(enc));
   } else {
     mp_printf(print, "FountainEncoder(invalid)");
   }

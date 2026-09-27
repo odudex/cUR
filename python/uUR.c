@@ -285,20 +285,34 @@ static PyObject *URDecoder_receive_part(uUR_URDecoder *self, PyObject *part) {
     PyErr_SetString(PyExc_RuntimeError, "URDecoder is closed");
     return NULL;
   }
-  // Accept str or bytes, matching MicroPython's mp_obj_str_get_str: QR
+  // Accept str or bytes, matching MicroPython's mp_obj_str_get_data: QR
   // scanner APIs commonly hand back bytes.
   const char *part_cstr;
+  Py_ssize_t part_len;
   if (PyUnicode_Check(part)) {
-    part_cstr = PyUnicode_AsUTF8(part);
+    part_cstr = PyUnicode_AsUTF8AndSize(part, &part_len);
     if (!part_cstr) {
-      return NULL;
+      // Lone surrogates cannot be encoded. No UR contains them, so this is a
+      // malformed frame, which is reported through the state, not raised.
+      if (!PyErr_ExceptionMatches(PyExc_UnicodeEncodeError)) {
+        return NULL;
+      }
+      PyErr_Clear();
+      part_cstr = "";
+      part_len = 0;
     }
   } else if (PyBytes_Check(part)) {
     part_cstr = PyBytes_AS_STRING(part);
+    part_len = PyBytes_GET_SIZE(part);
   } else {
     PyErr_Format(PyExc_TypeError, "part must be str or bytes, not %.200s",
                  Py_TYPE(part)->tp_name);
     return NULL;
+  }
+  // The C decoder reads up to the first NUL, so a frame with an embedded NUL
+  // would be accepted by its prefix. Hand it "" to reject the frame instead.
+  if (strlen(part_cstr) != (size_t)part_len) {
+    part_cstr = "";
   }
   return PyLong_FromLong(
       (long)ur_decoder_receive_part(self->decoder, part_cstr));
@@ -415,16 +429,30 @@ static PyTypeObject uUR_FountainEncoderType;
 // FountainEncoder is a thin view exposing seq_len(). It holds a strong
 // reference to its parent UREncoder (whose ->encoder it reads at call time), so
 // the parent cannot be freed while the view is alive. Unlike the MicroPython
-// binding it is NOT cached on the parent: a fresh view is returned per access,
-// which avoids a parent<->view reference cycle (no cyclic GC needed). Behavior
-// matches MicroPython except for wrapper identity: enc.fountain_encoder is not
-// `is`-identical across accesses here, while MP returns the cached object.
+// binding it is NOT cached on the parent: a fresh view is returned per access.
+// A view stored on an instance of a UREncoder subclass still closes a cycle
+// through that instance's __dict__, so the view takes part in cyclic GC.
+// Behavior matches MicroPython except for wrapper identity:
+// enc.fountain_encoder is not `is`-identical across accesses here, while MP
+// returns the cached object.
 typedef struct {
   PyObject_HEAD PyObject *parent; // uUR_UREncoder, strong ref
 } uUR_FountainEncoder;
 
+static int FountainEncoder_traverse(uUR_FountainEncoder *self, visitproc visit,
+                                    void *arg) {
+  Py_VISIT(self->parent);
+  return 0;
+}
+
+static int FountainEncoder_clear(uUR_FountainEncoder *self) {
+  Py_CLEAR(self->parent);
+  return 0;
+}
+
 static void FountainEncoder_dealloc(uUR_FountainEncoder *self) {
-  Py_XDECREF(self->parent);
+  PyObject_GC_UnTrack(self);
+  Py_CLEAR(self->parent);
   Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
@@ -450,8 +478,10 @@ static PyTypeObject uUR_FountainEncoderType = {
     PyVarObject_HEAD_INIT(NULL, 0).tp_name = "uUR.FountainEncoder",
     .tp_basicsize = sizeof(uUR_FountainEncoder),
     .tp_dealloc = (destructor)FountainEncoder_dealloc,
-    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,
     .tp_doc = "View over a UREncoder's fountain encoder.",
+    .tp_traverse = (traverseproc)FountainEncoder_traverse,
+    .tp_clear = (inquiry)FountainEncoder_clear,
     .tp_methods = FountainEncoder_methods,
 };
 
@@ -489,10 +519,11 @@ static int UREncoder_init(uUR_UREncoder *self, PyObject *args, PyObject *kwds) {
 
   // Parsed as 'L' (long long) so out-of-range values raise instead of the 'I'
   // format's silent modulo-2^32 wrap (first_seq_num=-1 used to become
-  // 4294967295 and fail later, inside next_part).
-  if (first_seq_num < 0 || first_seq_num > (long long)UINT32_MAX) {
+  // 4294967295 and fail later, inside next_part). UINT32_MAX itself is out
+  // too: the counter is incremented before each part and never wraps.
+  if (first_seq_num < 0 || first_seq_num >= (long long)UINT32_MAX) {
     PyErr_SetString(PyExc_ValueError,
-                    "first_seq_num out of range (0..4294967295)");
+                    "first_seq_num out of range (0..4294967294)");
     return -1;
   }
 
@@ -607,12 +638,13 @@ static PyObject *UREncoder_get_fountain_encoder(uUR_UREncoder *self,
     Py_RETURN_NONE;
   }
   uUR_FountainEncoder *view =
-      PyObject_New(uUR_FountainEncoder, &uUR_FountainEncoderType);
+      PyObject_GC_New(uUR_FountainEncoder, &uUR_FountainEncoderType);
   if (!view) {
     return NULL;
   }
   Py_INCREF(self);
   view->parent = (PyObject *)self;
+  PyObject_GC_Track(view);
   return (PyObject *)view;
 }
 
