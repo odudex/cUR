@@ -736,6 +736,87 @@ static void test_hdkey_fields_fail_closed(void) {
          "32-byte key-data is not rendered as an xpub");
 }
 
+static cbor_value_t *hdkey_map_with_origin(const uint64_t *index,
+                                           size_t count) {
+  static const bool hardened[] = {true, true, true, true};
+  cbor_value_t *map = hdkey_map();
+  cbor_value_t *origin = keypath_item(index, hardened, count);
+  map_put(cbor_value_get_tag_content(origin), 2,
+          cbor_value_new_unsigned_int(0xdeadbeef));
+  map_put(map, 6, origin);
+  return map;
+}
+
+static void test_keypath_components_fail_closed(void) {
+  printf("\n=== keypath_components_fail_closed ===\n");
+
+  cbor_value_t *range = cbor_value_new_array();
+  array_push(range, cbor_value_new_unsigned_int(0));
+  array_push(range, cbor_value_new_unsigned_int(99));
+  cbor_value_t *components = cbor_value_new_array();
+  array_push(components, range);
+  array_push(components, cbor_value_new_bool(false));
+  cbor_value_t *children = cbor_value_new_map();
+  map_put(children, 1, components);
+  cbor_value_t *map = hdkey_map();
+  map_put(map, 7, cbor_value_new_tag(CRYPTO_KEYPATH_TAG, children));
+  ASSERT(decode_wpkh(map, NULL) == REJECTED,
+         "child range rejected, not read as a wildcard");
+
+  const uint64_t truncating[] = {0x100000000ull + 84, 0, 0};
+  ASSERT(decode_wpkh(hdkey_map_with_origin(truncating, 3), NULL) == REJECTED,
+         "index above 32 bits rejected, not truncated");
+
+  const uint64_t hardened_range[] = {0x80000000ull, 0, 0};
+  ASSERT(decode_wpkh(hdkey_map_with_origin(hardened_range, 3), NULL) ==
+             REJECTED,
+         "index at 2^31 rejected");
+
+  map = hdkey_map();
+  cbor_value_t *origin = get_map_value(map, 6);
+  map_put(cbor_value_get_tag_content(origin), 2,
+          cbor_value_new_unsigned_int(0x100000000ull));
+  ASSERT(decode_wpkh(map, NULL) == REJECTED,
+         "source fingerprint above 32 bits rejected");
+
+  map = hdkey_map();
+  origin = get_map_value(map, 6);
+  map_put(cbor_value_get_tag_content(origin), 2,
+          cbor_value_new_bytes(PUBKEY, 4));
+  ASSERT(decode_wpkh(map, NULL) == REJECTED,
+         "non-integer source fingerprint rejected");
+
+  map = hdkey_map();
+  origin = get_map_value(map, 6);
+  map_put(cbor_value_get_tag_content(origin), 3,
+          cbor_value_new_unsigned_int(256));
+  ASSERT(decode_wpkh(map, NULL) == REJECTED, "depth above 255 rejected");
+
+  // The descriptor-string parser takes uint31 indexes only, too.
+  char *descriptor = NULL;
+  if (decode_wpkh(hdkey_map(), &descriptor) == RENDERED && descriptor) {
+    const char *at = strstr(descriptor, "/84'/");
+    size_t prefix = at ? (size_t)(at - descriptor) + 1 : 0;
+    char *hash = strchr(descriptor, '#');
+    if (hash)
+      *hash = '\0';
+    char mutated[512];
+    snprintf(mutated, sizeof mutated, "%.*s2147483648%s", (int)prefix,
+             descriptor, at ? at + 3 : "");
+    output_data_t *parsed = output_from_descriptor_string(mutated);
+    ASSERT(at && !parsed, "descriptor index at 2^31 rejected");
+    output_free(parsed);
+    snprintf(mutated, sizeof mutated, "%.*s2147483647%s", (int)prefix,
+             descriptor, at ? at + 3 : "");
+    parsed = output_from_descriptor_string(mutated);
+    ASSERT(at && parsed, "descriptor index 2^31 - 1 accepted");
+    output_free(parsed);
+  } else {
+    ASSERT(false, "rendered the reference descriptor");
+  }
+  free(descriptor);
+}
+
 int main(void) {
   printf("=== UR Negative-Path Tests ===\n");
   test_null_and_empty();
@@ -754,6 +835,7 @@ int main(void) {
   test_multipart_geometry();
   test_unsupported_size_is_terminal();
   test_hdkey_fields_fail_closed();
+  test_keypath_components_fail_closed();
 
   printf("\n=== Summary ===\n");
   printf("Tests passed: %d/%d\n", asserts - failures, asserts);
