@@ -5,6 +5,8 @@
  * (-Wl,--wrap=malloc, GNU ld only; the Makefile builds this test on Linux).
  */
 
+#include "../src/types/bip39.h"
+#include "../src/types/bytes_type.h"
 #include "../src/ur_decoder.h"
 #include "../src/ur_encoder.h"
 #include <stdio.h>
@@ -28,12 +30,15 @@ static int failures = 0;
 void *__real_malloc(size_t size);
 
 static size_t fail_size; // fail the next malloc() of exactly this size
+static size_t largest;   // largest malloc() since the last reset
 
 void *__wrap_malloc(size_t size) {
   if (fail_size && size == fail_size) {
     fail_size = 0;
     return NULL;
   }
+  if (size > largest)
+    largest = size;
   return __real_malloc(size);
 }
 
@@ -83,9 +88,31 @@ static void test_reassembly_retry(void) {
   ur_encoder_free(enc);
 }
 
+// A string head declaring more bytes than the input holds must be rejected
+// before anything that size is allocated.
+static void test_cbor_length_checked_before_alloc(void) {
+  printf("\n=== cbor_length_checked_before_alloc ===\n");
+
+  const uint8_t bytes_head[] = {0x5a, 0x00, 0x04, 0x00, 0x00}; // 256 KiB
+  largest = 0;
+  bytes_data_t *bytes = bytes_from_cbor(bytes_head, sizeof bytes_head);
+  ASSERT(!bytes, "truncated byte string is rejected");
+  ASSERT(largest < 1024, "  -> without allocating its declared length");
+  bytes_free(bytes);
+
+  // {1: [<text of 256 KiB>]}, the text itself missing
+  const uint8_t text_head[] = {0xa1, 0x01, 0x81, 0x7a, 0x00, 0x04, 0x00, 0x00};
+  largest = 0;
+  bip39_data_t *bip39 = bip39_from_cbor(text_head, sizeof text_head);
+  ASSERT(!bip39, "truncated text string is rejected");
+  ASSERT(largest < 1024, "  -> without allocating its declared length");
+  bip39_free(bip39);
+}
+
 int main(void) {
   printf("=== UR Allocation Tests ===\n");
   test_reassembly_retry();
+  test_cbor_length_checked_before_alloc();
   printf("\n=== Summary ===\n");
   printf("Tests passed: %d/%d\n", asserts - failures, asserts);
   return failures == 0 ? 0 : 1;
