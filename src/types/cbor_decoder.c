@@ -191,7 +191,9 @@ decode_map(urtypes_cbor_decoder_t *decoder, uint8_t additional,
       return NULL;
     }
 
-    if (!cbor_map_set(map, key, value)) {
+    // A repeated key makes the map ambiguous: another decoder may keep the
+    // first value where cbor_map_set() would keep the last.
+    if (cbor_map_get(map, key) || !cbor_map_set(map, key, value)) {
       cbor_value_free(value);
       cbor_value_free(key);
       cbor_value_free(map);
@@ -305,6 +307,11 @@ cbor_value_t *cbor_decode(const uint8_t *data, size_t len) {
     return NULL;
 
   cbor_value_t *value = urtypes_cbor_decoder_decode(decoder);
+  if (value && decoder->offset != len) {
+    // Trailing bytes after the item: not the payload that was declared.
+    cbor_value_free(value);
+    value = NULL;
+  }
   urtypes_cbor_decoder_free(decoder);
 
   return value;

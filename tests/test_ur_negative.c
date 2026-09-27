@@ -12,6 +12,7 @@
 #include "../src/fountain_decoder.h"
 #include "../src/fountain_encoder.h"
 #include "../src/fountain_types.h"
+#include "../src/types/bip39.h"
 #include "../src/types/bytes_type.h"
 #include "../src/types/cbor_encoder.h"
 #include "../src/types/output.h"
@@ -736,6 +737,26 @@ static void test_hdkey_fields_fail_closed(void) {
          "32-byte key-data is not rendered as an xpub");
 }
 
+static void test_cbor_ambiguity_rejected(void) {
+  printf("\n=== cbor_ambiguity_rejected ===\n");
+
+  // {1: ["a"]}
+  const uint8_t words[] = {0xa1, 0x01, 0x81, 0x61, 'a'};
+  bip39_data_t *bip39 = bip39_from_cbor(words, sizeof words);
+  ASSERT(bip39 != NULL, "well-formed map decodes");
+  bip39_free(bip39);
+
+  // {1: ["a"], 1: ["b"]}
+  const uint8_t repeated[] = {0xa2, 0x01, 0x81, 0x61, 'a',
+                              0x01, 0x81, 0x61, 'b'};
+  ASSERT(bip39_from_cbor(repeated, sizeof repeated) == NULL,
+         "repeated map key rejected");
+
+  const uint8_t trailing[] = {0xa1, 0x01, 0x81, 0x61, 'a', 0x00};
+  ASSERT(bip39_from_cbor(trailing, sizeof trailing) == NULL,
+         "trailing bytes after the item rejected");
+}
+
 // Path and sequence components split the way the reference decoders do.
 static void test_path_components(void) {
   printf("\n=== path_components ===\n");
@@ -889,6 +910,7 @@ int main(void) {
   test_empty_bytes_cbor_roundtrip();
   test_multipart_geometry();
   test_unsupported_size_is_terminal();
+  test_cbor_ambiguity_rejected();
   test_path_components();
   test_hdkey_fields_fail_closed();
   test_keypath_components_fail_closed();
