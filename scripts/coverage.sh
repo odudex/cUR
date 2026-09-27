@@ -100,7 +100,11 @@ echo -e "${YELLOW}Building and running tests...${NC}"
 for test_file in "${TEST_FILES[@]}"; do
     test_name=$(basename "$test_file" .c)
     echo -e "  Building ${test_name}..."
-    gcc $CFLAGS $INCLUDES "$test_file" $SUPPORT_OBJS -Lsrc -lur_cov -lm -o "tests/${test_name}_cov" --coverage
+    test_ldflags=""
+    if [ "$test_name" = "test_ur_alloc" ]; then
+        test_ldflags="-Wl,--wrap=malloc"
+    fi
+    gcc $CFLAGS $INCLUDES "$test_file" $SUPPORT_OBJS -Lsrc -lur_cov -lm $test_ldflags -o "tests/${test_name}_cov" --coverage
 
     echo -e "  Running ${test_name}..."
     "./tests/${test_name}_cov" || true

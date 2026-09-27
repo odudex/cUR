@@ -1369,6 +1369,100 @@ static void gaussian_reduce_with_new_part(fountain_decoder_t *const decoder,
 }
 #endif // ENABLE_CROSS_REDUCTION
 
+static UR_WARN_UNUSED_RESULT bool
+all_fragments_received(const fountain_decoder_t *decoder) {
+  return decoder->expected_part_indexes &&
+         part_indexes_equal(&decoder->received_part_indexes,
+                            decoder->expected_part_indexes);
+}
+
+static void assemble_message(fountain_decoder_t *const decoder) {
+  size_t part_count = decoder->simple_parts.count;
+
+  // Sort simple_parts by fragment index in place (paired insertion
+  // sort across the three parallel arrays). part_count <= seq_len,
+  // which is small in practice, so O(n²) is fine and saves the three
+  // temporary arrays the earlier qsort-based path allocated.
+  for (size_t i = 1; i < part_count; i++) {
+    size_t key = decoder->simple_parts.keys[i];
+    decoder_part_t val = decoder->simple_parts.values[i];
+    size_t val_len = decoder->simple_parts.value_lens[i];
+    size_t j = i;
+    while (j > 0 && decoder->simple_parts.keys[j - 1] > key) {
+      decoder->simple_parts.keys[j] = decoder->simple_parts.keys[j - 1];
+      decoder->simple_parts.values[j] = decoder->simple_parts.values[j - 1];
+      decoder->simple_parts.value_lens[j] =
+          decoder->simple_parts.value_lens[j - 1];
+      j--;
+    }
+    decoder->simple_parts.keys[j] = key;
+    decoder->simple_parts.values[j] = val;
+    decoder->simple_parts.value_lens[j] = val_len;
+  }
+
+  uint8_t *message = safe_malloc_uninit(decoder->expected_message_len);
+  fountain_decoder_result_t *result =
+      safe_malloc(sizeof(fountain_decoder_result_t));
+  if (!message || !result) {
+    free(message);
+    free(result);
+    decoder->alloc_failed = true;
+    return;
+  }
+
+  size_t offset = 0;
+  for (size_t i = 0; i < part_count && offset < decoder->expected_message_len;
+       i++) {
+    decoder_part_t *p = &decoder->simple_parts.values[i];
+    if (!p->data || p->data_len == 0)
+      continue;
+    size_t copy_len = p->data_len;
+    if (offset + copy_len > decoder->expected_message_len)
+      copy_len = decoder->expected_message_len - offset;
+    memcpy(message + offset, p->data, copy_len);
+    offset += copy_len;
+  }
+
+  // The buffer is deliberately allocated uninitialised, so every byte must
+  // have been written before it is read. Callers validate the fragment
+  // geometry up front, but this is the invariant that actually matters and
+  // it is asserted here independently: if the join ever falls short, bail
+  // out rather than CRC (and potentially return) uninitialised heap.
+  // NOTE: relaxing this check means switching to a zeroing allocator.
+  if (offset != decoder->expected_message_len) {
+    free(message);
+    free(result);
+    return;
+  }
+
+  if (crc32_calculate(message, decoder->expected_message_len) ==
+      decoder->expected_checksum) {
+    result->data = message;
+    result->data_len = decoder->expected_message_len;
+    result->is_success = true;
+    result->is_error = false;
+#ifdef DEBUG_STATS
+    printf("=== Mixed Parts Statistics ===\n");
+    printf("Maximum mixed parts reached: %zu\n", decoder->maximum_mixed_parts);
+    printf("  From fragments: %zu\n", decoder->mixed_from_fragments);
+    printf("  From reduction: %zu\n", decoder->mixed_from_reduction);
+    printf("  From cross-reduction: %zu\n",
+           decoder->mixed_from_cross_reduction);
+    printf("  Total created: %zu\n", decoder->mixed_from_fragments +
+                                         decoder->mixed_from_reduction +
+                                         decoder->mixed_from_cross_reduction);
+    printf("Mixed parts that were useful: %zu\n", decoder->mixed_parts_useful);
+#endif
+  } else {
+    free(message);
+    result->data = NULL;
+    result->data_len = 0;
+    result->is_success = false;
+    result->is_error = true;
+  }
+  decoder->result = result;
+}
+
 static void process_simple_part(fountain_decoder_t *const decoder,
                                 const decoder_part_t *const part) {
   if (!decoder || !part || !is_simple_part(part))
@@ -1388,105 +1482,8 @@ static void process_simple_part(fountain_decoder_t *const decoder,
     return;
   }
 
-  if (decoder->expected_part_indexes &&
-      part_indexes_equal(&decoder->received_part_indexes,
-                         decoder->expected_part_indexes)) {
-
-    size_t part_count = decoder->simple_parts.count;
-
-    // Sort simple_parts by fragment index in place (paired insertion
-    // sort across the three parallel arrays). part_count <= seq_len,
-    // which is small in practice, so O(n²) is fine and saves the three
-    // temporary arrays the earlier qsort-based path allocated.
-    for (size_t i = 1; i < part_count; i++) {
-      size_t key = decoder->simple_parts.keys[i];
-      decoder_part_t val = decoder->simple_parts.values[i];
-      size_t val_len = decoder->simple_parts.value_lens[i];
-      size_t j = i;
-      while (j > 0 && decoder->simple_parts.keys[j - 1] > key) {
-        decoder->simple_parts.keys[j] = decoder->simple_parts.keys[j - 1];
-        decoder->simple_parts.values[j] = decoder->simple_parts.values[j - 1];
-        decoder->simple_parts.value_lens[j] =
-            decoder->simple_parts.value_lens[j - 1];
-        j--;
-      }
-      decoder->simple_parts.keys[j] = key;
-      decoder->simple_parts.values[j] = val;
-      decoder->simple_parts.value_lens[j] = val_len;
-    }
-
-    uint8_t *message = safe_malloc_uninit(decoder->expected_message_len);
-    if (!message) {
-      return;
-    }
-
-    // Inline join: same semantics as fountain_utils' join_fragments but
-    // reads directly from the sorted simple_parts without a pointer array.
-    {
-      size_t offset = 0;
-      for (size_t i = 0;
-           i < part_count && offset < decoder->expected_message_len; i++) {
-        decoder_part_t *p = &decoder->simple_parts.values[i];
-        if (!p->data || p->data_len == 0)
-          continue;
-        size_t copy_len = p->data_len;
-        if (offset + copy_len > decoder->expected_message_len)
-          copy_len = decoder->expected_message_len - offset;
-        memcpy(message + offset, p->data, copy_len);
-        offset += copy_len;
-      }
-
-      // The buffer is deliberately allocated uninitialised, so every byte must
-      // have been written before it is read. Callers validate the fragment
-      // geometry up front, but this is the invariant that actually matters and
-      // it is asserted here independently: if the join ever falls short, bail
-      // out rather than CRC (and potentially return) uninitialised heap.
-      // NOTE: relaxing this check means switching to a zeroing allocator.
-      if (offset != decoder->expected_message_len) {
-        free(message);
-        return;
-      }
-
-      uint32_t checksum =
-          crc32_calculate(message, decoder->expected_message_len);
-
-      if (checksum == decoder->expected_checksum) {
-        decoder->result = safe_malloc(sizeof(fountain_decoder_result_t));
-        if (decoder->result) {
-          decoder->result->data = message;
-          decoder->result->data_len = decoder->expected_message_len;
-          decoder->result->is_success = true;
-          decoder->result->is_error = false;
-          message = NULL;
-        }
-#ifdef DEBUG_STATS
-        printf("=== Mixed Parts Statistics ===\n");
-        printf("Maximum mixed parts reached: %zu\n",
-               decoder->maximum_mixed_parts);
-        printf("  From fragments: %zu\n", decoder->mixed_from_fragments);
-        printf("  From reduction: %zu\n", decoder->mixed_from_reduction);
-        printf("  From cross-reduction: %zu\n",
-               decoder->mixed_from_cross_reduction);
-        printf("  Total created: %zu\n",
-               decoder->mixed_from_fragments + decoder->mixed_from_reduction +
-                   decoder->mixed_from_cross_reduction);
-        printf("Mixed parts that were useful: %zu\n",
-               decoder->mixed_parts_useful);
-#endif
-      } else {
-        decoder->result = safe_malloc(sizeof(fountain_decoder_result_t));
-        if (decoder->result) {
-          decoder->result->data = NULL;
-          decoder->result->data_len = 0;
-          decoder->result->is_success = false;
-          decoder->result->is_error = true;
-        }
-      }
-    }
-
-    if (message)
-      free(message);
-  }
+  if (all_fragments_received(decoder))
+    assemble_message(decoder);
 }
 
 static void process_mixed_part(fountain_decoder_t *const decoder,
@@ -1578,6 +1575,14 @@ bool fountain_decoder_receive_part(fountain_decoder_t *decoder,
 
   if (fountain_decoder_is_complete(decoder)) {
     return false;
+  }
+
+  // Reassembly failed for lack of memory when the last fragment arrived.
+  // Every fragment is held, so no later part would trigger it again.
+  if (all_fragments_received(decoder)) {
+    decoder->alloc_failed = false;
+    assemble_message(decoder);
+    return !decoder->alloc_failed;
   }
 
   if (decoder->has_received_fragment &&
