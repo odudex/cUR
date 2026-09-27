@@ -358,7 +358,8 @@ parse_keypath_components(const char *path, size_t len,
       c->index = 0;
       while (p < end && isdigit((unsigned char)*p)) {
         uint32_t digit = (uint32_t)(*p - '0');
-        if (!append_decimal_digit_u32(&c->index, digit)) {
+        if (!append_decimal_digit_u32(&c->index, digit) ||
+            c->index > 0x7FFFFFFF) {
           free(comp);
           return false;
         }

@@ -107,15 +107,17 @@ registry_item_t *keypath_from_data_item(cbor_value_t *data_item) {
       }
 
       bool hardened = cbor_value_get_bool(hardened_val);
+      cbor_type_t index_type = cbor_value_get_type(index_val);
 
-      // Check if wildcard (empty array) or index (unsigned int)
-      if (cbor_value_get_type(index_val) == CBOR_TYPE_ARRAY) {
-        // Wildcard component
+      // Wildcard (empty array) or index (uint31). A non-empty array is a
+      // child range or pair, which a descriptor path cannot express.
+      if (index_type == CBOR_TYPE_ARRAY &&
+          cbor_value_get_array_size(index_val) == 0) {
         components[i].wildcard = true;
         components[i].index = 0;
         components[i].hardened = hardened;
-      } else if (cbor_value_get_type(index_val) == CBOR_TYPE_UNSIGNED_INT) {
-        // Regular index
+      } else if (index_type == CBOR_TYPE_UNSIGNED_INT &&
+                 cbor_value_get_uint(index_val) <= 0x7FFFFFFF) {
         components[i].wildcard = false;
         components[i].index = (uint32_t)cbor_value_get_uint(index_val);
         components[i].hardened = hardened;
@@ -127,32 +129,39 @@ registry_item_t *keypath_from_data_item(cbor_value_t *data_item) {
   }
 
   // Get source_fingerprint (key 2, optional)
-  uint8_t *source_fingerprint = NULL;
+  uint8_t fingerprint[4];
+  const uint8_t *source_fingerprint = NULL;
   cbor_value_t *fingerprint_val = get_map_value(data_item, 2);
-  if (fingerprint_val &&
-      cbor_value_get_type(fingerprint_val) == CBOR_TYPE_UNSIGNED_INT) {
-    uint32_t fp_int = (uint32_t)cbor_value_get_uint(fingerprint_val);
-    source_fingerprint = safe_malloc(4);
-    if (source_fingerprint) {
-      // Big-endian encoding
-      source_fingerprint[0] = (fp_int >> 24) & 0xFF;
-      source_fingerprint[1] = (fp_int >> 16) & 0xFF;
-      source_fingerprint[2] = (fp_int >> 8) & 0xFF;
-      source_fingerprint[3] = fp_int & 0xFF;
+  if (fingerprint_val) {
+    if (cbor_value_get_type(fingerprint_val) != CBOR_TYPE_UNSIGNED_INT ||
+        cbor_value_get_uint(fingerprint_val) > UINT32_MAX) {
+      free(components);
+      return NULL;
     }
+    uint32_t fp_int = (uint32_t)cbor_value_get_uint(fingerprint_val);
+    // Big-endian encoding
+    fingerprint[0] = (fp_int >> 24) & 0xFF;
+    fingerprint[1] = (fp_int >> 16) & 0xFF;
+    fingerprint[2] = (fp_int >> 8) & 0xFF;
+    fingerprint[3] = fp_int & 0xFF;
+    source_fingerprint = fingerprint;
   }
 
   // Get depth (key 3, optional)
   int depth = -1;
   cbor_value_t *depth_val = get_map_value(data_item, 3);
-  if (depth_val && cbor_value_get_type(depth_val) == CBOR_TYPE_UNSIGNED_INT) {
+  if (depth_val) {
+    if (cbor_value_get_type(depth_val) != CBOR_TYPE_UNSIGNED_INT ||
+        cbor_value_get_uint(depth_val) > 255) {
+      free(components);
+      return NULL;
+    }
     depth = (int)cbor_value_get_uint(depth_val);
   }
 
   keypath_data_t *keypath =
       keypath_new(components, component_count, source_fingerprint, depth);
   free(components);
-  free(source_fingerprint);
 
   if (!keypath)
     return NULL;
