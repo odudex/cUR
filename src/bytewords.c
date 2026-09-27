@@ -185,9 +185,9 @@ bool bytewords_decode_raw(const char *encoded, uint8_t **decoded,
     return false;
   }
 
-  // Shrink buf in-place instead of allocating a new body buffer
-  uint8_t *body = safe_realloc(buf, body_size);
-  *decoded = body ? body : buf; // realloc may fail; buf is still valid
+  // The trailing CRC bytes stay allocated: every caller either keeps the
+  // buffer briefly or shrinks it to its own final size.
+  *decoded = buf;
   *decoded_len = body_size;
   return true;
 }
