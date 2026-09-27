@@ -231,7 +231,8 @@ static void ur_decoder_print(const mp_print_t *print, mp_obj_t self_in,
   mp_obj_ur_decoder_t *self = MP_OBJ_TO_PTR(self_in);
   float progress = ur_decoder_estimated_percent_complete(self->decoder);
   mp_printf(print, "URDecoder(state=%d, progress=%.1f%%)",
-            (int)ur_decoder_get_state(self->decoder), progress * 100.0f);
+            (int)ur_decoder_get_state(self->decoder),
+            (double)(progress * 100.0f));
 }
 
 static mp_obj_t ur_decoder_make_new(const mp_obj_type_t *type, size_t n_args,
