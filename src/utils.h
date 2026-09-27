@@ -55,6 +55,22 @@ UR_WARN_UNUSED_RESULT bool parse_ur_string(const char *ur_str, char **type,
                                            size_t *component_count);
 
 /**
+ * Parse a UR string in place, without allocating. `lowered` must already be
+ * lowercased and is modified: separators are overwritten with NUL, and the
+ * returned pointers point into it.
+ * @param lowered Mutable, lowercased UR string
+ * @param type Output: the UR type
+ * @param components Output: up to max_components path components
+ * @param max_components Capacity of components
+ * @param component_count Output: number of path components after the type
+ * @return true on success, false on error
+ */
+UR_WARN_UNUSED_RESULT bool parse_ur_string_inplace(char *lowered, char **type,
+                                                   char **components,
+                                                   size_t max_components,
+                                                   size_t *component_count);
+
+/**
  * Parse sequence component (e.g., "1-5" -> seq_num=1, seq_len=5)
  * @param seq_str Sequence string
  * @param seq_num Output sequence number

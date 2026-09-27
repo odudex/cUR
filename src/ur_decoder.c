@@ -21,46 +21,6 @@
 // UR_MAX_SEQ_LEN / UR_MAX_MESSAGE_LEN are declared in ur_decoder.h so that
 // encoders can check against the same limits this decoder enforces.
 
-static UR_WARN_UNUSED_RESULT fountain_encoder_part_t *
-create_fountain_part_from_cbor(uint8_t *cbor_data, size_t cbor_len,
-                               uint32_t seq_num, size_t seq_len,
-                               bool take_ownership) {
-  if (!cbor_data || cbor_len == 0)
-    return NULL;
-
-  fountain_encoder_part_t *part = safe_malloc(sizeof(fountain_encoder_part_t));
-  if (!part)
-    return NULL;
-
-  part->seq_num = seq_num;
-  part->seq_len = seq_len;
-  part->message_len = 0;
-  part->checksum = 0;
-  part->data_len = cbor_len;
-
-  if (take_ownership) {
-    part->data = cbor_data;
-  } else {
-    part->data = safe_malloc(cbor_len);
-    if (!part->data) {
-      free(part);
-      return NULL;
-    }
-    memcpy(part->data, cbor_data, cbor_len);
-  }
-
-  return part;
-}
-
-static void free_fountain_part(fountain_encoder_part_t *part) {
-  if (part) {
-    if (part->data) {
-      free(part->data);
-    }
-    free(part);
-  }
-}
-
 ur_decoder_t *ur_decoder_new(void) {
   ur_decoder_t *decoder = safe_malloc(sizeof(ur_decoder_t));
   if (!decoder)
@@ -299,12 +259,26 @@ ur_decoder_state_t ur_decoder_receive_part(ur_decoder_t *decoder,
     return decoder->state;
   }
 
+  // One lowercased copy of the part, split in place: the type and path
+  // components below all point into it.
+  size_t part_len = strlen(part_str);
+  char *lowered = safe_malloc_uninit(part_len + 1);
+  if (!lowered) {
+    decoder->state = UR_DECODER_ERROR_MEMORY;
+    return decoder->state;
+  }
+  memcpy(lowered, part_str, part_len + 1);
+  str_to_lower(lowered);
+
   char *type = NULL;
-  char **components = NULL;
+  char *components[9];
   size_t component_count = 0;
   uint8_t *cbor_data = NULL;
 
-  if (!parse_ur_string(part_str, &type, &components, &component_count)) {
+  if (!parse_ur_string_inplace(lowered, &type, components,
+                               sizeof components / sizeof components[0],
+                               &component_count)) {
+    free(lowered);
     decoder->state = UR_DECODER_ERROR_INVALID_SCHEME;
     return decoder->state;
   }
@@ -390,8 +364,7 @@ ur_decoder_state_t ur_decoder_receive_part(ur_decoder_t *decoder,
   // Reject empty fragments. An attacker-crafted UR part with a zero-
   // length CBOR byte string (head 0x40) would otherwise reach
   // safe_realloc(cbor_data, 0) below, which on glibc/musl frees the
-  // buffer and returns NULL — leaving fragment_data dangling for a
-  // double-free on the create_fountain_part_from_cbor failure path.
+  // buffer and returns NULL.
   if (fragment_len == 0) {
     decoder->state = UR_DECODER_ERROR_INVALID_FRAGMENT;
     goto cleanup;
@@ -432,21 +405,22 @@ ur_decoder_state_t ur_decoder_receive_part(ur_decoder_t *decoder,
     memmove(cbor_data, cbor_data + fragment_offset, fragment_len);
   }
   uint8_t *shrunk = safe_realloc(cbor_data, fragment_len);
-  uint8_t *fragment_data = shrunk ? shrunk : cbor_data;
-  cbor_data = NULL; // ownership transferred to fragment_data
+  if (shrunk)
+    cbor_data = shrunk;
 
-  fountain_encoder_part_t *part = create_fountain_part_from_cbor(
-      fragment_data, fragment_len, seq_num, seq_len, true);
-  if (!part) {
-    free(fragment_data);
-    decoder->state = UR_DECODER_ERROR_MEMORY;
-    goto cleanup;
-  }
-  part->message_len = cbor_message_len;
-  part->checksum = cbor_checksum;
+  // The fountain decoder takes the fragment buffer; whatever it leaves in
+  // part.data is still ours to free.
+  fountain_encoder_part_t part = {.seq_num = seq_num,
+                                  .seq_len = seq_len,
+                                  .message_len = cbor_message_len,
+                                  .checksum = cbor_checksum,
+                                  .data = cbor_data,
+                                  .data_len = fragment_len};
+  cbor_data = NULL;
 
-  bool success = fountain_decoder_receive_part(decoder->fountain_decoder, part);
-  free_fountain_part(part);
+  bool success =
+      fountain_decoder_receive_part(decoder->fountain_decoder, &part);
+  free(part.data);
 
   if (!success) {
     // Separate a malformed part from a transient allocation failure: both are
@@ -465,9 +439,7 @@ ur_decoder_state_t ur_decoder_receive_part(ur_decoder_t *decoder,
 
 cleanup:
   free(cbor_data);
-  free(type);
-  free_string_array(components, component_count);
-  free(components);
+  free(lowered);
   return decoder->state;
 }
 

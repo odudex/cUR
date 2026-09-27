@@ -283,40 +283,30 @@ bool is_ur_type(const char *type) {
   return last != '-';
 }
 
-bool parse_ur_string(const char *ur_str, char **type, char ***components,
-                     size_t *component_count) {
-  if (!ur_str || !type || !components || !component_count)
+// At most 10 path segments, the type included, are collected.
+#define UR_MAX_PATH_PARTS 10
+
+bool parse_ur_string_inplace(char *lowered, char **type, char **components,
+                             size_t max_components, size_t *component_count) {
+  if (!lowered || !type || !components || !component_count)
     return false;
 
-  size_t len = strlen(ur_str);
-  char *lowered = safe_malloc(len + 1);
-  if (!lowered)
+  if (lowered[0] != 'u' || lowered[1] != 'r' || lowered[2] != ':')
     return false;
-
-  memcpy(lowered, ur_str, len + 1);
-  str_to_lower(lowered);
-
-  if (len < 3 || lowered[0] != 'u' || lowered[1] != 'r' || lowered[2] != ':') {
-    free(lowered);
-    return false;
-  }
 
   char *path = lowered + 3;
-  if (*path == '\0') {
-    free(lowered);
+  if (*path == '\0')
     return false;
-  }
 
   // Split in-place by replacing '/' with '\0' and collecting pointers
-  // Max 10 parts (same as before)
-  char *part_ptrs[10];
+  char *part_ptrs[UR_MAX_PATH_PARTS];
   size_t part_count = 0;
   char *start = path;
 
   for (char *p = path;; p++) {
     if (*p == '/' || *p == '\0') {
       bool is_end = (*p == '\0');
-      if (part_count < 10) {
+      if (part_count < UR_MAX_PATH_PARTS) {
         *p = '\0';
         part_ptrs[part_count++] = start;
       }
@@ -326,31 +316,52 @@ bool parse_ur_string(const char *ur_str, char **type, char ***components,
     }
   }
 
-  if (part_count < 2) {
-    free(lowered);
+  if (part_count < 2 || part_count - 1 > max_components)
     return false;
-  }
 
-  if (!is_ur_type(part_ptrs[0])) {
-    free(lowered);
+  if (!is_ur_type(part_ptrs[0]))
     return false;
-  }
 
-  *type = safe_strdup(part_ptrs[0]);
+  *type = part_ptrs[0];
   *component_count = part_count - 1;
-  *components = safe_malloc(sizeof(char *) * (*component_count));
+  for (size_t i = 0; i < *component_count; i++)
+    components[i] = part_ptrs[i + 1];
+  return true;
+}
 
-  if (!*type || !*components) {
-    if (*type)
-      free(*type);
-    if (*components)
-      free(*components);
+bool parse_ur_string(const char *ur_str, char **type, char ***components,
+                     size_t *component_count) {
+  if (!ur_str || !type || !components || !component_count)
+    return false;
+
+  size_t len = strlen(ur_str);
+  char *lowered = safe_malloc_uninit(len + 1);
+  if (!lowered)
+    return false;
+
+  memcpy(lowered, ur_str, len + 1);
+  str_to_lower(lowered);
+
+  char *type_ptr = NULL;
+  char *part_ptrs[UR_MAX_PATH_PARTS];
+  size_t count = 0;
+  if (!parse_ur_string_inplace(lowered, &type_ptr, part_ptrs, UR_MAX_PATH_PARTS,
+                               &count)) {
     free(lowered);
     return false;
   }
 
-  for (size_t i = 0; i < *component_count; i++) {
-    (*components)[i] = safe_strdup(part_ptrs[i + 1]);
+  *type = safe_strdup(type_ptr);
+  *components = safe_malloc(sizeof(char *) * count);
+  if (!*type || !*components) {
+    free(*type);
+    free(*components);
+    free(lowered);
+    return false;
+  }
+
+  for (size_t i = 0; i < count; i++) {
+    (*components)[i] = safe_strdup(part_ptrs[i]);
     if (!(*components)[i]) {
       free(*type);
       free_string_array(*components, i);
@@ -359,6 +370,7 @@ bool parse_ur_string(const char *ur_str, char **type, char ***components,
       return false;
     }
   }
+  *component_count = count;
 
   free(lowered);
   return true;
