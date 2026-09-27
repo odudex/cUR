@@ -99,27 +99,14 @@ decode_bytes(urtypes_cbor_decoder_t *decoder, uint8_t additional) {
   uint64_t len;
   if (!read_argument(decoder, additional, &len))
     return NULL;
-  if (len > CBOR_MAX_ITEM_LEN)
+  if (len > CBOR_MAX_ITEM_LEN || len > decoder->len - decoder->offset)
     return NULL;
 
   size_t slen = (size_t)len;
-
-  // Empty byte string (0x40) is valid CBOR; safe_malloc(0) returns NULL, so
-  // skip the staging buffer instead of misreading the empty case as OOM.
-  if (slen == 0)
-    return cbor_value_new_bytes(NULL, 0);
-
-  uint8_t *data = safe_malloc(slen);
-  if (!data)
-    return NULL;
-
-  if (!read_bytes(decoder, data, slen)) {
-    free(data);
-    return NULL;
-  }
-
-  cbor_value_t *value = cbor_value_new_bytes(data, slen);
-  free(data);
+  cbor_value_t *value =
+      cbor_value_new_bytes(decoder->data + decoder->offset, slen);
+  if (value)
+    decoder->offset += slen;
   return value;
 }
 
@@ -128,11 +115,11 @@ decode_string(urtypes_cbor_decoder_t *decoder, uint8_t additional) {
   uint64_t len;
   if (!read_argument(decoder, additional, &len))
     return NULL;
-  if (len > CBOR_MAX_ITEM_LEN)
+  if (len > CBOR_MAX_ITEM_LEN || len > decoder->len - decoder->offset)
     return NULL;
 
   size_t slen = (size_t)len;
-  char *str = safe_malloc(slen + 1);
+  char *str = safe_malloc_uninit(slen + 1);
   if (!str)
     return NULL;
 
