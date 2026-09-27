@@ -81,7 +81,9 @@ double prng_next_double(prng_state_t *prng) {
     return 0.0;
 
   uint64_t val = prng_next_uint64(prng);
-  return (double)val / (double)(0xFFFFFFFFFFFFFFFFULL + 1.0);
+  // 2^64: what the reference's float(UINT64_MAX) + 1 rounds to, without the
+  // implicit integer-to-double conversion.
+  return (double)val / 0x1p64;
 }
 
 bool random_sampler_init(random_sampler_t *sampler, double *probs,
