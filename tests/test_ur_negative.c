@@ -736,6 +736,61 @@ static void test_hdkey_fields_fail_closed(void) {
          "32-byte key-data is not rendered as an xpub");
 }
 
+// Path and sequence components split the way the reference decoders do.
+static void test_path_components(void) {
+  printf("\n=== path_components ===\n");
+
+  uint8_t message[50];
+  for (size_t i = 0; i < sizeof message; i++)
+    message[i] = (uint8_t)i;
+  ur_encoder_t *enc =
+      ur_encoder_new("bytes", message, sizeof message, 20, 0, 10);
+  char *part = NULL;
+  char *single = NULL;
+  if (!enc || !ur_encoder_next_part(enc, &part) ||
+      !ur_encoder_encode_single("bytes", message, 20, &single)) {
+    ASSERT(false, "built reference parts");
+    ur_encoder_free(enc);
+    free(part);
+    free(single);
+    return;
+  }
+  const char *body = strchr(part + strlen("UR:BYTES/"), '/') + 1;
+  const char *single_body = single + strlen("UR:BYTES/");
+
+  struct {
+    const char *seq;
+    bool accepted;
+  } cases[] = {
+      {"1-3", true},   {"+1-3", true},          {"1-3-99", false},
+      {"1--3", false}, {"1-", false},           {"-3", false},
+      {"1-3x", false}, {"4294967297-3", false}, {"1-4294967299", false}};
+  for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+    char frame[1024];
+    snprintf(frame, sizeof frame, "ur:bytes/%s/%s", cases[i].seq, body);
+    ur_decoder_t *d = ur_decoder_new();
+    ur_decoder_state_t state = ur_decoder_receive_part(d, frame);
+    ASSERT(cases[i].accepted ? state == UR_DECODER_PROCESSING
+                             : ur_decoder_state_is_error(state),
+           cases[i].seq);
+    ur_decoder_free(d);
+  }
+
+  const char *layouts[] = {"ur:bytes//%s", "ur:bytes/%s/"};
+  for (size_t i = 0; i < 2; i++) {
+    char frame[1024];
+    snprintf(frame, sizeof frame, layouts[i], single_body);
+    ur_decoder_t *d = ur_decoder_new();
+    ASSERT(ur_decoder_state_is_error(ur_decoder_receive_part(d, frame)),
+           layouts[i]);
+    ur_decoder_free(d);
+  }
+
+  free(part);
+  free(single);
+  ur_encoder_free(enc);
+}
+
 static cbor_value_t *hdkey_map_with_origin(const uint64_t *index,
                                            size_t count) {
   static const bool hardened[] = {true, true, true, true};
@@ -834,6 +889,7 @@ int main(void) {
   test_empty_bytes_cbor_roundtrip();
   test_multipart_geometry();
   test_unsupported_size_is_terminal();
+  test_path_components();
   test_hdkey_fields_fail_closed();
   test_keypath_components_fail_closed();
 

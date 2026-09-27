@@ -13,6 +13,7 @@
 #include "utils.h"
 #include "xor_internal.h"
 #include <ctype.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -316,7 +317,7 @@ bool parse_ur_string(const char *ur_str, char **type, char ***components,
   for (char *p = path;; p++) {
     if (*p == '/' || *p == '\0') {
       bool is_end = (*p == '\0');
-      if (p > start && part_count < 10) {
+      if (part_count < 10) {
         *p = '\0';
         part_ptrs[part_count++] = start;
       }
@@ -369,36 +370,23 @@ bool parse_sequence_component(const char *seq_str, uint32_t *seq_num,
   if (!seq_str || !seq_num || !seq_len)
     return false;
 
-  char **parts = safe_malloc(sizeof(char *) * 2);
-  if (!parts)
+  // Exactly two '-'-separated numbers, as the reference decoders split it.
+  const char *dash = strchr(seq_str, '-');
+  if (!dash || strchr(dash + 1, '-'))
     return false;
 
-  size_t part_count = str_split(seq_str, '-', parts, 2);
-  if (part_count != 2) {
-    free_string_array(parts, part_count);
-    free(parts);
+  // Both must also fit the uint32 fields of the CBOR header they must match.
+  char *end;
+  errno = 0;
+  unsigned long long num = strtoull(seq_str, &end, 10);
+  if (end != dash || num == 0 || num > UINT32_MAX || errno)
     return false;
-  }
+  unsigned long long len = strtoull(dash + 1, &end, 10);
+  if (*end != '\0' || len == 0 || len > UINT32_MAX || errno)
+    return false;
 
-  char *endptr;
-  unsigned long num = strtoul(parts[0], &endptr, 10);
-  if (*endptr != '\0' || num == 0) {
-    free_string_array(parts, part_count);
-    free(parts);
-    return false;
-  }
   *seq_num = (uint32_t)num;
-
-  unsigned long len = strtoul(parts[1], &endptr, 10);
-  if (*endptr != '\0' || len == 0) {
-    free_string_array(parts, part_count);
-    free(parts);
-    return false;
-  }
   *seq_len = (size_t)len;
-
-  free_string_array(parts, part_count);
-  free(parts);
   return true;
 }
 
