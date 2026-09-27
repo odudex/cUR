@@ -16,7 +16,6 @@
 #include "bytewords.h"
 #include "crc32.h"
 #include "utils.h"
-#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -129,6 +128,10 @@ void bytewords_free(void *ptr) {
   }
 }
 
+static char ascii_lower(char c) {
+  return (c >= 'A' && c <= 'Z') ? (char)(c + ('a' - 'A')) : c;
+}
+
 bool bytewords_decode_raw(const char *encoded, uint8_t **decoded,
                           size_t *decoded_len) {
   if (!encoded || !decoded || !decoded_len)
@@ -146,11 +149,8 @@ bool bytewords_decode_raw(const char *encoded, uint8_t **decoded,
 
   // Decode each 2-char pair using lookup table
   for (size_t i = 0; i < num_bytes; i++) {
-    char first = tolower((unsigned char)encoded[i * 2]);
-    char last = tolower((unsigned char)encoded[i * 2 + 1]);
-
-    int x = first - 'a';
-    int y = last - 'a';
+    int x = ascii_lower(encoded[i * 2]) - 'a';
+    int y = ascii_lower(encoded[i * 2 + 1]) - 'a';
 
     if (x < 0 || x >= 26 || y < 0 || y >= 26) {
       free(buf);
