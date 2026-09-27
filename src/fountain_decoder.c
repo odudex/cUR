@@ -1590,7 +1590,20 @@ bool fountain_decoder_receive_part(fountain_decoder_t *decoder,
     return true;
   }
 
+  // seq_num 0 would select fragment index (uint32_t)-1.
+  if (part->seq_num == 0) {
+    return false;
+  }
+
   if (decoder->expected_part_indexes == NULL) {
+    // Every fragment is ceil(message_len / seq_len) bytes, the last one
+    // zero-padded, so the fragments cover the message exactly.
+    if (part->seq_len == 0 || part->message_len == 0 ||
+        part->data_len != part->message_len / part->seq_len +
+                              (part->message_len % part->seq_len ? 1 : 0)) {
+      return false;
+    }
+
     decoder->expected_part_indexes = part_indexes_new();
     if (!decoder->expected_part_indexes)
       return false;
