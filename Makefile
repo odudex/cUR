@@ -50,6 +50,11 @@ TEST_STEMS = bytes_decoder bytes_encoder output_decoder output_encoder \
              account_descriptor_decoder output_descriptor_roundtrip \
              weighted_progress gaussian negative envelope_api
 
+# test_ur_alloc wraps malloc() at link time, which needs GNU ld.
+ifeq ($(shell uname -s),Linux)
+  TEST_STEMS += alloc
+endif
+
 TEST_BINS = $(TEST_STEMS:%=tests/test_ur_%)
 TEST_TARGETS = $(foreach s,$(TEST_STEMS),test-$(subst _,-,$(s)))
 
@@ -147,6 +152,8 @@ $(TEST_HARNESS_OBJECT): tests/test_harness.c tests/test_harness.h
 # Pattern rule: build each test binary.
 tests/test_ur_%: tests/test_ur_%.c $(TEST_SUPPORT_OBJECTS) $(TARGET)
 	$(CC) $(CFLAGS) $(INCLUDES) $< $(TEST_SUPPORT_OBJECTS) -L$(SRCDIR) -lur $(LDFLAGS) -o $@
+
+tests/test_ur_alloc: LDFLAGS += -Wl,--wrap=malloc
 
 # Generate a `test-<name>` phony target per stem that runs the corresponding binary.
 define TEST_RUN_RULE
