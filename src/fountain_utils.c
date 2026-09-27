@@ -142,7 +142,7 @@ bool random_sampler_init(random_sampler_t *sampler, double *probs,
 
     sampler->probs[a] = P[a];
     sampler->aliases[a] = g;
-    P[g] = P[g] + P[a] - 1.0;
+    P[g] += P[a] - 1.0;
 
     if (P[g] < 1.0) {
       small[small_size++] = g;
