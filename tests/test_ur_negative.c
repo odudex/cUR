@@ -737,6 +737,39 @@ static void test_hdkey_fields_fail_closed(void) {
          "32-byte key-data is not rendered as an xpub");
 }
 
+static void test_fountain_part_validation(void) {
+  printf("\n=== fountain_part_validation ===\n");
+
+  uint8_t fragment[8] = {0};
+  struct {
+    uint32_t seq_num;
+    size_t seq_len, message_len, data_len;
+    bool accepted;
+    const char *what;
+  } cases[] = {
+      {1, 2, 16, 8, true, "consistent geometry accepted"},
+      {0, 2, 16, 8, false, "seq_num 0 rejected"},
+      {1, 2, 20, 8, false, "fragments shorter than the message rejected"},
+      {1, 2, 10, 8, false, "fragments longer than ceil(len/seq) rejected"},
+  };
+  for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+    fountain_decoder_t *d = fountain_decoder_new();
+    fountain_encoder_part_t part = {0};
+    part.seq_num = cases[i].seq_num;
+    part.seq_len = cases[i].seq_len;
+    part.message_len = cases[i].message_len;
+    part.checksum = 1;
+    part.data = malloc(cases[i].data_len);
+    part.data_len = cases[i].data_len;
+    if (part.data)
+      memcpy(part.data, fragment, cases[i].data_len);
+    ASSERT(fountain_decoder_receive_part(d, &part) == cases[i].accepted,
+           cases[i].what);
+    fountain_encoder_part_free(&part);
+    fountain_decoder_free(d);
+  }
+}
+
 static void test_cbor_ambiguity_rejected(void) {
   printf("\n=== cbor_ambiguity_rejected ===\n");
 
@@ -910,6 +943,7 @@ int main(void) {
   test_empty_bytes_cbor_roundtrip();
   test_multipart_geometry();
   test_unsupported_size_is_terminal();
+  test_fountain_part_validation();
   test_cbor_ambiguity_rejected();
   test_path_components();
   test_hdkey_fields_fail_closed();
