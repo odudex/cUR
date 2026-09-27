@@ -13,6 +13,8 @@
 #include "../src/fountain_encoder.h"
 #include "../src/fountain_types.h"
 #include "../src/types/bytes_type.h"
+#include "../src/types/cbor_encoder.h"
+#include "../src/types/output.h"
 #include "../src/types/psbt.h"
 #include "../src/ur.h"
 #include "../src/ur_decoder.h"
@@ -593,6 +595,147 @@ static void test_unsupported_size_is_terminal(void) {
   }
 }
 
+// --- crypto-output hd-key fields ------------------------------------------
+
+static void map_put(cbor_value_t *map, uint64_t key, cbor_value_t *value) {
+  if (!cbor_map_set(map, cbor_value_new_unsigned_int(key), value))
+    abort();
+}
+
+static void array_push(cbor_value_t *array, cbor_value_t *item) {
+  if (!cbor_array_append(array, item))
+    abort();
+}
+
+// #6.304({1: [index, hardened, ...]}); UINT64_MAX stands for the wildcard.
+static cbor_value_t *keypath_item(const uint64_t *index, const bool *hardened,
+                                  size_t count) {
+  cbor_value_t *components = cbor_value_new_array();
+  for (size_t i = 0; i < count; i++) {
+    array_push(components, index[i] == UINT64_MAX
+                               ? cbor_value_new_array()
+                               : cbor_value_new_unsigned_int(index[i]));
+    array_push(components, cbor_value_new_bool(hardened[i]));
+  }
+  cbor_value_t *map = cbor_value_new_map();
+  map_put(map, 1, components);
+  return cbor_value_new_tag(CRYPTO_KEYPATH_TAG, map);
+}
+
+static const uint8_t PUBKEY[33] = {
+    0x02, 0x79, 0xbe, 0x66, 0x7e, 0xf9, 0xdc, 0xbb, 0xac, 0x55, 0xa0,
+    0x62, 0x95, 0xce, 0x87, 0x0b, 0x07, 0x02, 0x9b, 0xfc, 0xdb, 0x2d,
+    0xce, 0x28, 0xd9, 0x59, 0xf2, 0x81, 0x5b, 0x16, 0xf8, 0x17, 0x98};
+static const uint8_t CHAIN_CODE[32] = {
+    1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, 16,
+    17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32};
+
+// An hd-key map for [deadbeef/84'/0'/0']xpub/0/*, for tests to alter.
+static cbor_value_t *hdkey_map(void) {
+  static const uint64_t origin[] = {84, 0, 0};
+  static const bool origin_hardened[] = {true, true, true};
+  static const uint64_t children[] = {0, UINT64_MAX};
+  static const bool children_hardened[] = {false, false};
+
+  cbor_value_t *map = cbor_value_new_map();
+  map_put(map, 3, cbor_value_new_bytes(PUBKEY, sizeof PUBKEY));
+  map_put(map, 4, cbor_value_new_bytes(CHAIN_CODE, sizeof CHAIN_CODE));
+  cbor_value_t *origin_path = keypath_item(origin, origin_hardened, 3);
+  map_put(cbor_value_get_tag_content(origin_path), 2,
+          cbor_value_new_unsigned_int(0xdeadbeef));
+  map_put(map, 6, origin_path);
+  map_put(map, 7, keypath_item(children, children_hardened, 2));
+  return map;
+}
+
+typedef enum { REJECTED, NOT_RENDERED, RENDERED } hdkey_outcome_t;
+
+// Decode wpkh(<map>) as a crypto-output and render it. Takes ownership.
+static hdkey_outcome_t decode_wpkh(cbor_value_t *map, char **descriptor) {
+  cbor_value_t *item = cbor_value_new_tag(
+      SCRIPT_EXPR_WPKH, cbor_value_new_tag(CRYPTO_HDKEY_TAG, map));
+  size_t len = 0;
+  uint8_t *cbor = cbor_encode(item, &len);
+  cbor_value_free(item);
+  output_data_t *output = cbor ? output_from_cbor(cbor, len) : NULL;
+  free(cbor);
+  if (!output)
+    return REJECTED;
+  char *rendered = output_descriptor(output, true);
+  output_free(output);
+  if (descriptor)
+    *descriptor = rendered;
+  else
+    free(rendered);
+  return rendered ? RENDERED : NOT_RENDERED;
+}
+
+static void test_hdkey_fields_fail_closed(void) {
+  printf("\n=== hdkey_fields_fail_closed ===\n");
+
+  char *descriptor = NULL;
+  ASSERT(decode_wpkh(hdkey_map(), &descriptor) == RENDERED && descriptor &&
+             strncmp(descriptor, "wpkh([deadbeef/84'/0'/0']xpub", 29) == 0 &&
+             strstr(descriptor, "/0/*)#"),
+         "well-formed key renders with origin and children");
+  free(descriptor);
+
+  cbor_value_t *map = hdkey_map();
+  map_put(map, 4, cbor_value_new_bytes(CHAIN_CODE, 31));
+  ASSERT(decode_wpkh(map, NULL) == REJECTED, "31-byte chain code rejected");
+
+  map = hdkey_map();
+  map_put(map, 4, cbor_value_new_unsigned_int(7));
+  ASSERT(decode_wpkh(map, NULL) == REJECTED, "non-bytes chain code rejected");
+
+  cbor_value_t *no_chain = cbor_value_new_map();
+  map_put(no_chain, 3, cbor_value_new_bytes(PUBKEY, sizeof PUBKEY));
+  ASSERT(decode_wpkh(no_chain, NULL) == NOT_RENDERED,
+         "key without chain code is not rendered as an xpub");
+
+  static const uint64_t odd_index[] = {0};
+  static const bool odd_hardened[] = {false};
+  map = hdkey_map();
+  cbor_value_t *odd = keypath_item(odd_index, odd_hardened, 1);
+  array_push(get_map_value(cbor_value_get_tag_content(odd), 1),
+             cbor_value_new_unsigned_int(1));
+  map_put(map, 7, odd);
+  ASSERT(decode_wpkh(map, NULL) == REJECTED,
+         "malformed children path rejected, not dropped");
+
+  map = hdkey_map();
+  map_put(
+      map, 6,
+      cbor_value_new_tag(CRYPTO_KEYPATH_TAG, cbor_value_new_unsigned_int(7)));
+  ASSERT(decode_wpkh(map, NULL) == REJECTED,
+         "malformed origin rejected, not dropped");
+
+  map = hdkey_map();
+  map_put(map, 8, cbor_value_new_unsigned_int(0x100000000ull));
+  ASSERT(decode_wpkh(map, NULL) == REJECTED,
+         "parent fingerprint above 32 bits rejected");
+
+  map = hdkey_map();
+  map_put(map, 2, cbor_value_new_bool(true));
+  ASSERT(decode_wpkh(map, NULL) == REJECTED, "is-private key rejected");
+
+  map = hdkey_map();
+  map_put(map, 1, cbor_value_new_unsigned_int(1));
+  ASSERT(decode_wpkh(map, NULL) == REJECTED, "non-bool is-master rejected");
+
+  uint8_t private_data[33] = {0};
+  memcpy(private_data + 1, CHAIN_CODE, 32);
+  map = hdkey_map();
+  map_put(map, 3, cbor_value_new_bytes(private_data, sizeof private_data));
+  ASSERT(decode_wpkh(map, NULL) == NOT_RENDERED,
+         "private key-data is not rendered as an xpub");
+
+  map = hdkey_map();
+  map_put(map, 3, cbor_value_new_bytes(PUBKEY + 1, 32));
+  ASSERT(decode_wpkh(map, NULL) == NOT_RENDERED,
+         "32-byte key-data is not rendered as an xpub");
+}
+
 int main(void) {
   printf("=== UR Negative-Path Tests ===\n");
   test_null_and_empty();
@@ -610,6 +753,7 @@ int main(void) {
   test_empty_bytes_cbor_roundtrip();
   test_multipart_geometry();
   test_unsupported_size_is_terminal();
+  test_hdkey_fields_fail_closed();
 
   printf("\n=== Summary ===\n");
   printf("Tests passed: %d/%d\n", asserts - failures, asserts);

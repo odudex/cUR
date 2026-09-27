@@ -44,7 +44,25 @@ void hd_key_free(hd_key_data_t *hd_key) {
   free(hd_key);
 }
 
-// Parse HDKey from CBOR data item
+// Read an optional keypath field (tag 304 optional). *out stays NULL when the
+// field is absent; a present field that does not parse fails the key.
+static UR_WARN_UNUSED_RESULT bool read_keypath_field(cbor_value_t *map, int key,
+                                                     keypath_data_t **out) {
+  cbor_value_t *val = get_map_value(map, key);
+  if (!val)
+    return true;
+  if (cbor_value_get_type(val) == CBOR_TYPE_TAG)
+    val = cbor_value_get_tag_content(val);
+  registry_item_t *item = keypath_from_data_item(val);
+  if (!item)
+    return false;
+  *out = keypath_from_registry_item(item);
+  free(item);
+  return *out != NULL;
+}
+
+// Parse HDKey from CBOR data item. A field that is present but malformed
+// fails the whole key: dropping it would describe a different key.
 registry_item_t *hd_key_from_data_item(cbor_value_t *data_item) {
   if (!data_item)
     return NULL;
@@ -59,103 +77,96 @@ registry_item_t *hd_key_from_data_item(cbor_value_t *data_item) {
 
   // Check if master key (key 1)
   cbor_value_t *master_val = get_map_value(data_item, 1);
-  if (master_val && cbor_value_get_type(master_val) == CBOR_TYPE_BOOL) {
+  if (master_val) {
+    if (cbor_value_get_type(master_val) != CBOR_TYPE_BOOL)
+      goto fail;
     hd_key->master = cbor_value_get_bool(master_val);
   }
 
-  // Get private key (key 2, optional)
+  // Key 2 is is-private (bool) in BCR-2020-007; the byte-string form is this
+  // library's legacy private-key field. Private keys are not accepted.
   cbor_value_t *priv_val = get_map_value(data_item, 2);
-  if (priv_val && cbor_value_get_type(priv_val) == CBOR_TYPE_BYTES) {
-    const uint8_t *priv_data =
-        cbor_value_get_bytes(priv_val, &hd_key->private_key_len);
-    if (priv_data && hd_key->private_key_len > 0) {
-      hd_key->private_key = safe_malloc(hd_key->private_key_len);
-      if (hd_key->private_key) {
+  if (priv_val) {
+    cbor_type_t priv_type = cbor_value_get_type(priv_val);
+    if (priv_type == CBOR_TYPE_BOOL) {
+      if (cbor_value_get_bool(priv_val))
+        goto fail;
+    } else if (priv_type == CBOR_TYPE_BYTES) {
+      const uint8_t *priv_data =
+          cbor_value_get_bytes(priv_val, &hd_key->private_key_len);
+      if (priv_data && hd_key->private_key_len > 0) {
+        hd_key->private_key = safe_malloc(hd_key->private_key_len);
+        if (!hd_key->private_key)
+          goto fail;
         memcpy(hd_key->private_key, priv_data, hd_key->private_key_len);
       }
+    } else {
+      goto fail;
     }
   }
 
   // Get key (key 3, required)
   cbor_value_t *key_val = get_map_value(data_item, 3);
-  if (!key_val || cbor_value_get_type(key_val) != CBOR_TYPE_BYTES) {
-    hd_key_free(hd_key);
-    return NULL;
-  }
+  if (!key_val || cbor_value_get_type(key_val) != CBOR_TYPE_BYTES)
+    goto fail;
   const uint8_t *key_data = cbor_value_get_bytes(key_val, &hd_key->key_len);
-  if (!key_data || hd_key->key_len == 0) {
-    hd_key_free(hd_key);
-    return NULL;
-  }
+  if (!key_data || hd_key->key_len == 0)
+    goto fail;
   hd_key->key = safe_malloc(hd_key->key_len);
-  if (!hd_key->key) {
-    hd_key_free(hd_key);
-    return NULL;
-  }
+  if (!hd_key->key)
+    goto fail;
   memcpy(hd_key->key, key_data, hd_key->key_len);
 
   // Get chain code (key 4, optional)
   cbor_value_t *chain_val = get_map_value(data_item, 4);
-  if (chain_val && cbor_value_get_type(chain_val) == CBOR_TYPE_BYTES) {
-    size_t chain_len;
-    const uint8_t *chain_data = cbor_value_get_bytes(chain_val, &chain_len);
-    if (chain_data && chain_len == 32) {
-      hd_key->chain_code = safe_malloc(32);
-      if (hd_key->chain_code) {
-        memcpy(hd_key->chain_code, chain_data, 32);
-      }
-    }
+  if (chain_val) {
+    size_t chain_len = 0;
+    const uint8_t *chain_data =
+        cbor_value_get_type(chain_val) == CBOR_TYPE_BYTES
+            ? cbor_value_get_bytes(chain_val, &chain_len)
+            : NULL;
+    if (!chain_data || chain_len != 32)
+      goto fail;
+    hd_key->chain_code = safe_malloc(32);
+    if (!hd_key->chain_code)
+      goto fail;
+    memcpy(hd_key->chain_code, chain_data, 32);
   }
 
   // Skip use_info (key 5) - not needed for descriptors
 
-  // Get origin (key 6, optional)
-  cbor_value_t *origin_val = get_map_value(data_item, 6);
-  if (origin_val) {
-    // Unwrap tag if present (tag 304 for crypto-keypath)
-    cbor_value_t *origin_content = origin_val;
-    if (cbor_value_get_type(origin_val) == CBOR_TYPE_TAG) {
-      origin_content = cbor_value_get_tag_content(origin_val);
-    }
-    registry_item_t *origin_item = keypath_from_data_item(origin_content);
-    if (origin_item) {
-      hd_key->origin = keypath_from_registry_item(origin_item);
-      free(origin_item); // Transfer ownership
-    }
-  }
-
-  // Get children (key 7, optional)
-  cbor_value_t *children_val = get_map_value(data_item, 7);
-  if (children_val) {
-    // Unwrap tag if present (tag 304 for crypto-keypath)
-    cbor_value_t *children_content = children_val;
-    if (cbor_value_get_type(children_val) == CBOR_TYPE_TAG) {
-      children_content = cbor_value_get_tag_content(children_val);
-    }
-    registry_item_t *children_item = keypath_from_data_item(children_content);
-    if (children_item) {
-      hd_key->children = keypath_from_registry_item(children_item);
-      free(children_item); // Transfer ownership
-    }
-  }
+  // Origin (key 6) and children (key 7), both optional
+  if (!read_keypath_field(data_item, 6, &hd_key->origin) ||
+      !read_keypath_field(data_item, 7, &hd_key->children))
+    goto fail;
 
   // Get parent fingerprint (key 8, optional)
   cbor_value_t *pfp_val = get_map_value(data_item, 8);
-  if (pfp_val && cbor_value_get_type(pfp_val) == CBOR_TYPE_UNSIGNED_INT) {
+  if (pfp_val) {
+    if (cbor_value_get_type(pfp_val) != CBOR_TYPE_UNSIGNED_INT ||
+        cbor_value_get_uint(pfp_val) > UINT32_MAX)
+      goto fail;
     uint32_t fp_int = (uint32_t)cbor_value_get_uint(pfp_val);
     hd_key->parent_fingerprint = safe_malloc(4);
-    if (hd_key->parent_fingerprint) {
-      // Big-endian encoding
-      hd_key->parent_fingerprint[0] = (fp_int >> 24) & 0xFF;
-      hd_key->parent_fingerprint[1] = (fp_int >> 16) & 0xFF;
-      hd_key->parent_fingerprint[2] = (fp_int >> 8) & 0xFF;
-      hd_key->parent_fingerprint[3] = fp_int & 0xFF;
-    }
+    if (!hd_key->parent_fingerprint)
+      goto fail;
+    // Big-endian encoding
+    hd_key->parent_fingerprint[0] = (fp_int >> 24) & 0xFF;
+    hd_key->parent_fingerprint[1] = (fp_int >> 16) & 0xFF;
+    hd_key->parent_fingerprint[2] = (fp_int >> 8) & 0xFF;
+    hd_key->parent_fingerprint[3] = fp_int & 0xFF;
   }
 
   // Skip name (key 9) and note (key 10) - not needed for descriptors
 
-  return hd_key_to_registry_item(hd_key);
+  registry_item_t *item = hd_key_to_registry_item(hd_key);
+  if (!item)
+    goto fail;
+  return item;
+
+fail:
+  hd_key_free(hd_key);
+  return NULL;
 }
 
 // Set map[key] = value. Frees `value` if the key allocation or the insert
@@ -253,7 +264,10 @@ hd_key_data_t *hd_key_from_registry_item(registry_item_t *item) {
 
 // Generate BIP32 extended key (xpub/xprv format)
 char *hd_key_bip32_key(hd_key_data_t *hd_key, bool include_derivation_path) {
-  if (!hd_key || !hd_key->key)
+  // An xpub needs a compressed public key and a chain code. Private key-data
+  // (0x00 prefix, which includes every BCR-2020-007 master key) cannot be one.
+  if (!hd_key || !hd_key->key || hd_key->key_len != 33 ||
+      (hd_key->key[0] != 0x02 && hd_key->key[0] != 0x03) || !hd_key->chain_code)
     return NULL;
 
   // Build the 78-byte BIP32 key data
@@ -329,22 +343,8 @@ char *hd_key_bip32_key(hd_key_data_t *hd_key, bool include_derivation_path) {
   key_data[11] = (index >> 8) & 0xFF;
   key_data[12] = index & 0xFF;
 
-  // Chain code (32 bytes)
-  if (hd_key->chain_code) {
-    memcpy(key_data + 13, hd_key->chain_code, 32);
-  }
-
-  // Key data (33 bytes)
-  if (hd_key->key_len == 32) {
-    // Private key: prefix with 0x00
-    key_data[45] = 0x00;
-    memcpy(key_data + 46, hd_key->key, 32);
-  } else if (hd_key->key_len == 33) {
-    // Public key: use as-is
-    memcpy(key_data + 45, hd_key->key, 33);
-  } else {
-    return NULL; // Invalid key length
-  }
+  memcpy(key_data + 13, hd_key->chain_code, 32);
+  memcpy(key_data + 45, hd_key->key, 33);
 
   // Encode with base58check
   char *xpub = base58check_encode(key_data, 78);
