@@ -105,6 +105,16 @@ choose_fragments_cached(uint32_t seq_num, size_t seq_len, uint32_t checksum,
                         random_sampler_t *cached_sampler);
 
 /**
+ * Choose fragments using a caller-owned work buffer instead of allocating one
+ * per call.
+ * @param scratch Work buffer of at least seq_len entries
+ * @return true on success
+ */
+UR_WARN_UNUSED_RESULT bool choose_fragments_with_scratch(
+    uint32_t seq_num, size_t seq_len, uint32_t checksum, part_indexes_t *result,
+    random_sampler_t *cached_sampler, size_t *scratch);
+
+/**
  * Check if part_indexes_a is strict subset of part_indexes_b
  * @param a First set
  * @param b Second set
