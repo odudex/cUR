@@ -124,32 +124,6 @@ static mp_obj_t ur_del(mp_obj_t self_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ur_del_obj, ur_del);
 
-// UR attributes
-static void ur_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
-  mp_obj_ur_t *self = MP_OBJ_TO_PTR(self_in);
-
-  if (dest[0] == MP_OBJ_NULL) {
-    // Load attribute
-    if (attr == MP_QSTR_type) {
-      if (self->ur) {
-        dest[0] = mp_obj_new_str(ur_get_type(self->ur),
-                                 strlen(ur_get_type(self->ur)));
-      } else {
-        dest[0] = mp_const_none;
-      }
-    } else if (attr == MP_QSTR_cbor) {
-      if (self->ur) {
-        // A snapshot copy of the payload, so hand it out as immutable bytes:
-        // writing to a copy could never reach the UR. Same on the CPython side.
-        dest[0] =
-            mp_obj_new_bytes(ur_get_cbor(self->ur), ur_get_cbor_len(self->ur));
-      } else {
-        dest[0] = mp_const_none;
-      }
-    }
-  }
-}
-
 // Value equality over (type, cbor) — consumers compare decoded URs against
 // expected ones, and identity comparison would make every such check fail.
 // A closed UR (payload freed by __del__) equals only another closed UR.
@@ -198,6 +172,43 @@ static const mp_rom_map_elem_t ur_locals_dict_table[] = {
     {MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&ur_del_obj)},
 };
 static MP_DEFINE_CONST_DICT(ur_locals_dict, ur_locals_dict_table);
+
+// UR attributes
+static void ur_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
+  mp_obj_ur_t *self = MP_OBJ_TO_PTR(self_in);
+
+  if (dest[0] == MP_OBJ_NULL) {
+    // Load attribute
+    if (attr == MP_QSTR_type) {
+      if (self->ur) {
+        dest[0] = mp_obj_new_str(ur_get_type(self->ur),
+                                 strlen(ur_get_type(self->ur)));
+      } else {
+        dest[0] = mp_const_none;
+      }
+    } else if (attr == MP_QSTR_cbor) {
+      if (self->ur) {
+        // A snapshot copy of the payload, so hand it out as immutable bytes:
+        // writing to a copy could never reach the UR. Same on the CPython side.
+        dest[0] =
+            mp_obj_new_bytes(ur_get_cbor(self->ur), ur_get_cbor_len(self->ur));
+      } else {
+        dest[0] = mp_const_none;
+      }
+    } else {
+      // Anything else, __del__ included, comes from locals_dict: with an attr
+      // handler that does not look there, the GC never finds the finaliser.
+      // The method-load protocol does not allocate, as a sweep requires.
+      mp_obj_dict_t *locals_dict = (mp_obj_dict_t *)&ur_locals_dict;
+      mp_map_elem_t *elem = mp_map_lookup(&locals_dict->map,
+                                          MP_OBJ_NEW_QSTR(attr), MP_MAP_LOOKUP);
+      if (elem != NULL) {
+        dest[0] = elem->value;
+        dest[1] = self_in;
+      }
+    }
+  }
+}
 
 #if defined(MP_DEFINE_CONST_OBJ_TYPE)
 MP_DEFINE_CONST_OBJ_TYPE(mp_type_ur, MP_QSTR_UR, MP_TYPE_FLAG_NONE, make_new,
