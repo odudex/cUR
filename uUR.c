@@ -45,6 +45,32 @@
   })
 #endif
 
+// Copy C-allocated data into a new bytes or str object, then release it
+// with `release` - also when the copy raises (MemoryError, or UnicodeError
+// for invalid UTF-8), which would otherwise long-jump past the free.
+typedef void (*release_fn_t)(void *);
+
+static mp_obj_t new_obj_then_release(const mp_obj_type_t *obj_type,
+                                     const void *data, size_t len,
+                                     release_fn_t release, void *owner) {
+  mp_obj_t obj = MP_OBJ_NULL;
+  nlr_buf_t nlr;
+  if (nlr_push(&nlr) == 0) {
+    obj = obj_type == &mp_type_str ? mp_obj_new_str((const char *)data, len)
+                                   : mp_obj_new_bytes(data, len);
+    nlr_pop();
+  } else {
+    release(owner);
+    nlr_jump(nlr.ret_val);
+  }
+  release(owner);
+  return obj;
+}
+
+static void release_heap(void *ptr) { free(ptr); }
+static void release_bytes(void *bytes) { bytes_free(bytes); }
+static void release_psbt(void *psbt) { psbt_free(psbt); }
+
 // URDecoder class structure
 typedef struct {
   mp_obj_base_t base;
@@ -99,17 +125,15 @@ static mp_obj_t ur_make_new(const mp_obj_type_t *type, size_t n_args,
     mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("cbor must not be empty"));
   }
 
-  // Create internal UR object first so a failure doesn't leak the wrapper
-  // through the exception long-jump in mp_raise_msg.
-  ur_t *ur = ur_new(ur_type, cbor_buf.buf, cbor_buf.len);
-  if (!ur) {
+  // The GC wrapper comes first: it cannot leak if a later step raises, while
+  // a C object allocated before it would. with_finaliser so __del__ (ur_del)
+  // runs on GC and frees ur_t.
+  mp_obj_ur_t *self = mp_obj_malloc_with_finaliser(mp_obj_ur_t, type);
+  self->ur = ur_new(ur_type, cbor_buf.buf, cbor_buf.len);
+  if (!self->ur) {
     mp_raise_msg(&mp_type_MemoryError,
                  MP_ERROR_TEXT("Failed to create UR object"));
   }
-
-  // with_finaliser so __del__ (ur_del) runs on GC and frees ur_t.
-  mp_obj_ur_t *self = mp_obj_malloc_with_finaliser(mp_obj_ur_t, type);
-  self->ur = ur;
 
   return MP_OBJ_FROM_PTR(self);
 }
@@ -239,18 +263,15 @@ static mp_obj_t ur_decoder_make_new(const mp_obj_type_t *type, size_t n_args,
                                     size_t n_kw, const mp_obj_t *args) {
   mp_arg_check_num(n_args, n_kw, 0, 0, false);
 
-  // Allocate the C decoder before the wrapper so a failure doesn't leak the
-  // wrapper through mp_raise_msg's long-jump.
-  ur_decoder_t *decoder = ur_decoder_new();
-  if (!decoder) {
+  // Wrapper first, as in ur_make_new(). with_finaliser so __del__
+  // (ur_decoder_del) runs on GC and frees decoder.
+  mp_obj_ur_decoder_t *self =
+      mp_obj_malloc_with_finaliser(mp_obj_ur_decoder_t, type);
+  self->decoder = ur_decoder_new();
+  if (!self->decoder) {
     mp_raise_msg(&mp_type_MemoryError,
                  MP_ERROR_TEXT("Failed to create URDecoder"));
   }
-
-  // with_finaliser so __del__ (ur_decoder_del) runs on GC and frees decoder.
-  mp_obj_ur_decoder_t *self =
-      mp_obj_malloc_with_finaliser(mp_obj_ur_decoder_t, type);
-  self->decoder = decoder;
 
   return MP_OBJ_FROM_PTR(self);
 }
@@ -464,8 +485,6 @@ static mp_obj_t ur_encoder_make_new(const mp_obj_type_t *type, size_t n_args,
   }
   uint32_t first_seq_num = (uint32_t)raw_seq;
 
-  // Allocate the C encoder before the wrapper so a failure doesn't leak the
-  // wrapper through mp_raise_msg's long-jump.
   const char *ur_type_str = ur_get_type(ur_obj->ur);
   const uint8_t *cbor_data = ur_get_cbor(ur_obj->ur);
   size_t cbor_len = ur_get_cbor_len(ur_obj->ur);
@@ -478,19 +497,18 @@ static mp_obj_t ur_encoder_make_new(const mp_obj_type_t *type, size_t n_args,
                  MP_ERROR_TEXT("UR payload is shorter than min_fragment_len"));
   }
 
-  ur_encoder_t *encoder =
+  // Wrapper first, as in ur_make_new(). with_finaliser so __del__
+  // (ur_encoder_del) runs on GC.
+  mp_obj_ur_encoder_t *self =
+      mp_obj_malloc_with_finaliser(mp_obj_ur_encoder_t, type);
+  self->fountain_encoder_cached = MP_OBJ_NULL;
+  self->encoder =
       ur_encoder_new(ur_type_str, cbor_data, cbor_len, max_fragment_len,
                      first_seq_num, min_fragment_len);
-  if (!encoder) {
+  if (!self->encoder) {
     mp_raise_msg(&mp_type_MemoryError,
                  MP_ERROR_TEXT("Failed to create UREncoder"));
   }
-
-  // with_finaliser so __del__ (ur_encoder_del) runs on GC.
-  mp_obj_ur_encoder_t *self =
-      mp_obj_malloc_with_finaliser(mp_obj_ur_encoder_t, type);
-  self->encoder = encoder;
-  self->fountain_encoder_cached = MP_OBJ_NULL;
 
   return MP_OBJ_FROM_PTR(self);
 }
@@ -528,15 +546,8 @@ static mp_obj_t ur_encoder_next_part_py(mp_obj_t self_in) {
     mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("Generated NULL part"));
   }
 
-  // Copy the string into MicroPython's memory space
-  size_t len = strlen(ur_part);
-  mp_obj_t part_str =
-      mp_obj_new_str_copy(&mp_type_str, (const byte *)ur_part, len);
-
-  // Free the C-allocated string
-  free(ur_part);
-
-  return part_str;
+  return new_obj_then_release(&mp_type_str, ur_part, strlen(ur_part),
+                              release_heap, ur_part);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ur_encoder_next_part_obj,
                                  ur_encoder_next_part_py);
@@ -716,17 +727,9 @@ static mp_obj_t bytes_from_cbor_py(mp_obj_t cbor_data_in) {
                  MP_ERROR_TEXT("Failed to decode Bytes from CBOR"));
   }
 
-  // Get raw bytes data
   size_t len;
   const uint8_t *data = bytes_get_data(bytes, &len);
-
-  // Create Python bytes object
-  mp_obj_t result = mp_obj_new_bytes(data, len);
-
-  // Cleanup
-  bytes_free(bytes);
-
-  return result;
+  return new_obj_then_release(&mp_type_bytes, data, len, release_bytes, bytes);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(bytes_from_cbor_obj, bytes_from_cbor_py);
 
@@ -744,20 +747,14 @@ static mp_obj_t bytes_to_cbor_py(mp_obj_t bytes_data_in) {
   // Encode to CBOR
   size_t cbor_len;
   uint8_t *cbor_data = bytes_to_cbor(bytes, &cbor_len);
+  bytes_free(bytes);
   if (!cbor_data) {
-    bytes_free(bytes);
     mp_raise_msg(&mp_type_RuntimeError,
                  MP_ERROR_TEXT("Failed to encode Bytes to CBOR"));
   }
 
-  // Create Python bytes object
-  mp_obj_t result = mp_obj_new_bytes(cbor_data, cbor_len);
-
-  // Cleanup
-  free(cbor_data);
-  bytes_free(bytes);
-
-  return result;
+  return new_obj_then_release(&mp_type_bytes, cbor_data, cbor_len, release_heap,
+                              cbor_data);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(bytes_to_cbor_obj, bytes_to_cbor_py);
 
@@ -777,17 +774,9 @@ static mp_obj_t psbt_from_cbor_py(mp_obj_t cbor_data_in) {
                  MP_ERROR_TEXT("Failed to decode PSBT from CBOR"));
   }
 
-  // Get raw PSBT data
   size_t len;
   const uint8_t *data = psbt_get_data(psbt, &len);
-
-  // Create Python bytes object
-  mp_obj_t result = mp_obj_new_bytes(data, len);
-
-  // Cleanup
-  psbt_free(psbt);
-
-  return result;
+  return new_obj_then_release(&mp_type_bytes, data, len, release_psbt, psbt);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(psbt_from_cbor_obj, psbt_from_cbor_py);
 
@@ -805,20 +794,14 @@ static mp_obj_t psbt_to_cbor_py(mp_obj_t psbt_data_in) {
   // Encode to CBOR
   size_t cbor_len;
   uint8_t *cbor_data = psbt_to_cbor(psbt, &cbor_len);
+  psbt_free(psbt);
   if (!cbor_data) {
-    psbt_free(psbt);
     mp_raise_msg(&mp_type_RuntimeError,
                  MP_ERROR_TEXT("Failed to encode PSBT to CBOR"));
   }
 
-  // Create Python bytes object
-  mp_obj_t result = mp_obj_new_bytes(cbor_data, cbor_len);
-
-  // Cleanup
-  free(cbor_data);
-  psbt_free(psbt);
-
-  return result;
+  return new_obj_then_release(&mp_type_bytes, cbor_data, cbor_len, release_heap,
+                              cbor_data);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(psbt_to_cbor_obj, psbt_to_cbor_py);
 
@@ -839,19 +822,24 @@ static mp_obj_t bip39_words_from_cbor_py(mp_obj_t cbor_data_in) {
                  MP_ERROR_TEXT("Failed to decode BIP39 from CBOR"));
   }
 
-  // Get words
   size_t word_count;
   char **words = bip39_get_words(bip39, &word_count);
 
-  // Create Python list
-  mp_obj_t list = mp_obj_new_list(0, NULL);
-  for (size_t i = 0; i < word_count; i++) {
-    mp_obj_list_append(list, mp_obj_new_str(words[i], strlen(words[i])));
+  // mp_obj_new_str() raises on a word that is not valid UTF-8; free the
+  // decoded words on that path too.
+  mp_obj_t list = MP_OBJ_NULL;
+  nlr_buf_t nlr;
+  if (nlr_push(&nlr) == 0) {
+    list = mp_obj_new_list(0, NULL);
+    for (size_t i = 0; i < word_count; i++) {
+      mp_obj_list_append(list, mp_obj_new_str(words[i], strlen(words[i])));
+    }
+    nlr_pop();
+  } else {
+    bip39_free(bip39);
+    nlr_jump(nlr.ret_val);
   }
-
-  // Cleanup
   bip39_free(bip39);
-
   return list;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(bip39_words_from_cbor_obj,
@@ -876,20 +864,14 @@ static mp_obj_t output_from_cbor_py(mp_obj_t cbor_data_in) {
 
   // Generate descriptor string with checksum
   char *descriptor = output_descriptor(output, true);
+  output_free(output);
   if (!descriptor) {
-    output_free(output);
     mp_raise_msg(&mp_type_RuntimeError,
                  MP_ERROR_TEXT("Failed to generate output descriptor"));
   }
 
-  // Create Python string from descriptor
-  mp_obj_t result = mp_obj_new_str(descriptor, strlen(descriptor));
-
-  // Cleanup
-  free(descriptor);
-  output_free(output);
-
-  return result;
+  return new_obj_then_release(&mp_type_str, descriptor, strlen(descriptor),
+                              release_heap, descriptor);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(output_from_cbor_obj, output_from_cbor_py);
 
@@ -907,13 +889,8 @@ static mp_obj_t output_from_cbor_account_py(mp_obj_t cbor_data_in) {
         MP_ERROR_TEXT("Failed to extract output descriptor from Account CBOR"));
   }
 
-  // Create Python string from descriptor
-  mp_obj_t result = mp_obj_new_str(descriptor, strlen(descriptor));
-
-  // Cleanup
-  free(descriptor);
-
-  return result;
+  return new_obj_then_release(&mp_type_str, descriptor, strlen(descriptor),
+                              release_heap, descriptor);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(output_from_cbor_account_obj,
                                  output_from_cbor_account_py);
