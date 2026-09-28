@@ -10,6 +10,7 @@
 #include "src/ur_decoder.h"
 #include "src/ur_encoder.h"
 #include "src/utils.h" // is_ur_type()
+#include <string.h>
 
 // ---------------------------------------------------------------------------
 // MicroPython version compatibility.
