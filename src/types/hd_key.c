@@ -312,9 +312,9 @@ char *hd_key_bip32_key(hd_key_data_t *hd_key, bool include_derivation_path) {
   }
   key_data[4] = depth;
 
-  // Parent fingerprint (4 bytes)
+  // Parent fingerprint (4 bytes). A depth-1 key may omit it, because its
+  // parent is the origin's source (BCR-2020-007).
   uint8_t parent_fp[4] = {0, 0, 0, 0};
-  bool source_is_parent = false;
 
   if (!hd_key->master) {
     if (hd_key->parent_fingerprint) {
@@ -322,7 +322,6 @@ char *hd_key_bip32_key(hd_key_data_t *hd_key, bool include_derivation_path) {
     } else if (hd_key->origin && hd_key->origin->source_fingerprint &&
                hd_key->origin->component_count == 1) {
       memcpy(parent_fp, hd_key->origin->source_fingerprint, 4);
-      source_is_parent = true;
     }
   }
   memcpy(key_data + 5, parent_fp, 4);
@@ -358,7 +357,7 @@ char *hd_key_bip32_key(hd_key_data_t *hd_key, bool include_derivation_path) {
   // Build full descriptor string with derivation paths
   char *derivation = NULL;
   if (hd_key->origin && hd_key->origin->source_fingerprint &&
-      hd_key->origin->component_count > 0 && !source_is_parent) {
+      hd_key->origin->component_count > 0) {
     // Format: [fingerprint/path]
     char fp_hex[9];
     sprintf(fp_hex, "%02x%02x%02x%02x", hd_key->origin->source_fingerprint[0],
