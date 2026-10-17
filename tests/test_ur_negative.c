@@ -1096,6 +1096,81 @@ static void test_use_info(void) {
   }
 }
 
+// hdkey_map() with its origin path replaced: no source fingerprint, and a
+// depth when `depth` is not ABSENT.
+static cbor_value_t *hdkey_map_unsourced(uint64_t depth) {
+  static const uint64_t origin[] = {84, 0, 0};
+  static const bool hardened[] = {true, true, true};
+  cbor_value_t *map = hdkey_map();
+  cbor_value_t *path = keypath_item(origin, hardened, 3);
+  if (depth != ABSENT)
+    map_put(cbor_value_get_tag_content(path), 3,
+            cbor_value_new_unsigned_int(depth));
+  map_put(map, 6, path);
+  return map;
+}
+
+// Encode {1: mfp, 2: [#6.308(wpkh(#6.303(hdkey)))]}, leaving out key 1 when
+// `mfp` is ABSENT, and decode it as a crypto-account. Takes ownership.
+static char *decode_account(cbor_value_t *hdkey, uint64_t mfp) {
+  cbor_value_t *outputs = cbor_value_new_array();
+  array_push(outputs, cbor_value_new_tag(
+                          CRYPTO_OUTPUT_TAG,
+                          cbor_value_new_tag(
+                              SCRIPT_EXPR_WPKH,
+                              cbor_value_new_tag(CRYPTO_HDKEY_TAG, hdkey))));
+  cbor_value_t *account = cbor_value_new_map();
+  if (mfp != ABSENT)
+    map_put(account, 1, cbor_value_new_unsigned_int(mfp));
+  map_put(account, 2, outputs);
+  size_t len = 0;
+  uint8_t *cbor = cbor_encode(account, &len);
+  cbor_value_free(account);
+  char *descriptor =
+      cbor ? output_descriptor_from_cbor_account(cbor, len) : NULL;
+  free(cbor);
+  return descriptor;
+}
+
+static void test_account_master_fingerprint(void) {
+  printf("\n=== account_master_fingerprint ===\n");
+
+  char *descriptor = decode_account(hdkey_map_unsourced(ABSENT), 0x12345678);
+  ASSERT(descriptor &&
+             strncmp(descriptor, "wpkh([12345678/84'/0'/0']xpub", 29) == 0,
+         "origin without a source fingerprint takes the master fingerprint");
+  free(descriptor);
+
+  descriptor = decode_account(hdkey_map(), 0xdeadbeef);
+  ASSERT(descriptor &&
+             strncmp(descriptor, "wpkh([deadbeef/84'/0'/0']xpub", 29) == 0,
+         "origin naming the master fingerprint is kept");
+  free(descriptor);
+
+  descriptor = decode_account(hdkey_map(), 0x12345678);
+  ASSERT(!descriptor, "origin naming another fingerprint is refused");
+  free(descriptor);
+
+  descriptor = decode_account(hdkey_map(), ABSENT);
+  ASSERT(!descriptor, "account without a master fingerprint is refused");
+  free(descriptor);
+
+  descriptor = decode_account(hdkey_map(), 0x100000000ull);
+  ASSERT(!descriptor, "master fingerprint above 32 bits is refused");
+  free(descriptor);
+
+  descriptor = decode_account(hdkey_map_unsourced(5), 0x12345678);
+  ASSERT(descriptor && strncmp(descriptor, "wpkh(xpub", 9) == 0,
+         "partial origin path is not given the master fingerprint");
+  free(descriptor);
+
+  descriptor = decode_account(hdkey_map_unsourced(3), 0x12345678);
+  ASSERT(descriptor &&
+             strncmp(descriptor, "wpkh([12345678/84'/0'/0']xpub", 29) == 0,
+         "origin whose depth matches its length takes the master fingerprint");
+  free(descriptor);
+}
+
 int main(void) {
   printf("=== UR Negative-Path Tests ===\n");
   test_null_and_empty();
@@ -1120,6 +1195,7 @@ int main(void) {
   test_keypath_components_fail_closed();
   test_descriptor_key_versions();
   test_use_info();
+  test_account_master_fingerprint();
 
   printf("\n=== Summary ===\n");
   printf("Tests passed: %d/%d\n", asserts - failures, asserts);
