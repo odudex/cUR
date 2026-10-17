@@ -1110,22 +1110,31 @@ static cbor_value_t *hdkey_map_unsourced(uint64_t depth) {
   return map;
 }
 
-// Encode {1: mfp, 2: [#6.308(wpkh(#6.303(hdkey)))]}, leaving out key 1 when
-// `mfp` is ABSENT, and decode it as a crypto-account. Takes ownership.
-static char *decode_account(cbor_value_t *hdkey, uint64_t mfp) {
-  cbor_value_t *outputs = cbor_value_new_array();
-  array_push(outputs, cbor_value_new_tag(
-                          CRYPTO_OUTPUT_TAG,
-                          cbor_value_new_tag(
-                              SCRIPT_EXPR_WPKH,
-                              cbor_value_new_tag(CRYPTO_HDKEY_TAG, hdkey))));
+// #6.308(<script>(#6.303(hdkey))), an account output. Takes ownership.
+static cbor_value_t *account_output(uint64_t script, cbor_value_t *hdkey) {
+  return cbor_value_new_tag(
+      CRYPTO_OUTPUT_TAG,
+      cbor_value_new_tag(script, cbor_value_new_tag(CRYPTO_HDKEY_TAG, hdkey)));
+}
+
+// Encode {1: mfp, 2: outputs}, leaving out key 1 when `mfp` is ABSENT. Takes
+// ownership of `outputs`.
+static uint8_t *account_cbor(cbor_value_t *outputs, uint64_t mfp, size_t *len) {
   cbor_value_t *account = cbor_value_new_map();
   if (mfp != ABSENT)
     map_put(account, 1, cbor_value_new_unsigned_int(mfp));
   map_put(account, 2, outputs);
-  size_t len = 0;
-  uint8_t *cbor = cbor_encode(account, &len);
+  uint8_t *cbor = cbor_encode(account, len);
   cbor_value_free(account);
+  return cbor;
+}
+
+// Decode {1: mfp, 2: [wpkh(hdkey)]} as a crypto-account. Takes ownership.
+static char *decode_account(cbor_value_t *hdkey, uint64_t mfp) {
+  cbor_value_t *outputs = cbor_value_new_array();
+  array_push(outputs, account_output(SCRIPT_EXPR_WPKH, hdkey));
+  size_t len = 0;
+  uint8_t *cbor = account_cbor(outputs, mfp, &len);
   char *descriptor =
       cbor ? output_descriptor_from_cbor_account(cbor, len) : NULL;
   free(cbor);
@@ -1171,6 +1180,82 @@ static void test_account_master_fingerprint(void) {
   free(descriptor);
 }
 
+// Decode `outputs` as a crypto-account with every output. Takes ownership.
+static char **decode_account_outputs(cbor_value_t *outputs, size_t *count) {
+  size_t len = 0;
+  uint8_t *cbor = account_cbor(outputs, 0x12345678, &len);
+  char **descriptors =
+      cbor ? output_descriptors_from_cbor_account(cbor, len, count) : NULL;
+  free(cbor);
+  return descriptors;
+}
+
+static bool starts_with(const char *s, const char *prefix) {
+  return s && strncmp(s, prefix, strlen(prefix)) == 0;
+}
+
+static void test_account_outputs(void) {
+  printf("\n=== account_outputs ===\n");
+
+  size_t count = 99;
+  cbor_value_t *outputs = cbor_value_new_array();
+  array_push(outputs,
+             account_output(SCRIPT_EXPR_PKH, hdkey_map_unsourced(ABSENT)));
+  array_push(outputs,
+             account_output(SCRIPT_EXPR_WPKH, hdkey_map_unsourced(ABSENT)));
+  char **descriptors = decode_account_outputs(outputs, &count);
+  ASSERT(descriptors && count == 2 &&
+             starts_with(descriptors[0], "pkh([12345678/84'/0'/0']xpub") &&
+             starts_with(descriptors[1], "wpkh([12345678/84'/0'/0']xpub"),
+         "every output decodes, in order, with the master fingerprint");
+  output_descriptors_free(descriptors, count);
+
+  count = 99;
+  outputs = cbor_value_new_array();
+  cbor_value_t *bad = hdkey_map_unsourced(ABSENT);
+  map_put(bad, 4, cbor_value_new_bytes(CHAIN_CODE, 31));
+  array_push(outputs, account_output(SCRIPT_EXPR_PKH, bad));
+  array_push(outputs,
+             account_output(SCRIPT_EXPR_WPKH, hdkey_map_unsourced(ABSENT)));
+  size_t len = 0;
+  uint8_t *cbor = account_cbor(outputs, 0x12345678, &len);
+  descriptors = output_descriptors_from_cbor_account(cbor, len, &count);
+  ASSERT(descriptors && count == 2 && !descriptors[0] &&
+             starts_with(descriptors[1], "wpkh([12345678/84'/0'/0']xpub"),
+         "an undecodable output is NULL and the rest still decode");
+  output_descriptors_free(descriptors, count);
+  char *first = output_descriptor_from_cbor_account(cbor, len);
+  ASSERT(!first, "the first-output call fails when output 0 does");
+  free(first);
+  free(cbor);
+
+  count = 99;
+  descriptors = decode_account_outputs(cbor_value_new_array(), &count);
+  ASSERT(descriptors && count == 0,
+         "an empty outputs array gives a count of 0");
+  output_descriptors_free(descriptors, count);
+
+  // A crypto-output, not an account.
+  count = 99;
+  cbor_value_t *item = cbor_value_new_tag(
+      SCRIPT_EXPR_WPKH, cbor_value_new_tag(CRYPTO_HDKEY_TAG, hdkey_map()));
+  cbor = cbor_encode(item, &len);
+  cbor_value_free(item);
+  descriptors = output_descriptors_from_cbor_account(cbor, len, &count);
+  ASSERT(!descriptors && count == 0, "a non-account input gives NULL");
+  free(cbor);
+
+  // An account without its master fingerprint.
+  count = 99;
+  outputs = cbor_value_new_array();
+  array_push(outputs, account_output(SCRIPT_EXPR_WPKH, hdkey_map()));
+  cbor = account_cbor(outputs, ABSENT, &len);
+  descriptors = output_descriptors_from_cbor_account(cbor, len, &count);
+  ASSERT(!descriptors && count == 0,
+         "an account without a master fingerprint gives NULL");
+  free(cbor);
+}
+
 int main(void) {
   printf("=== UR Negative-Path Tests ===\n");
   test_null_and_empty();
@@ -1196,6 +1281,7 @@ int main(void) {
   test_descriptor_key_versions();
   test_use_info();
   test_account_master_fingerprint();
+  test_account_outputs();
 
   printf("\n=== Summary ===\n");
   printf("Tests passed: %d/%d\n", asserts - failures, asserts);

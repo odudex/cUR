@@ -82,10 +82,23 @@ output_from_descriptor_string(const char *descriptor);
 UR_WARN_UNUSED_RESULT char *output_descriptor(output_data_t *output,
                                               bool include_checksum);
 
-// Decode the first output of a crypto-account (BCR-2020-015) to descriptor
-// text with checksum. The account's master fingerprint (key 1) is required:
-// origins without a source fingerprint take it, and an origin naming another
-// fingerprint fails the output.
+// Decode every output of a crypto-account (BCR-2020-015) to descriptor text
+// with checksum, in order. The account's master fingerprint (key 1) is
+// required: origins without a source fingerprint take it, and an origin naming
+// another fingerprint fails that output.
+//
+// Returns an array of *count entries, where an entry is NULL for an output
+// that could not be decoded, so callers can show what was skipped. Choosing
+// an output is the caller's decision. Returns NULL with *count = 0 when the
+// input is not a crypto-account. Free with output_descriptors_free().
+UR_WARN_UNUSED_RESULT char **
+output_descriptors_from_cbor_account(const uint8_t *account_cbor, size_t len,
+                                     size_t *count);
+void output_descriptors_free(char **descriptors, size_t count);
+
+// The first output of a crypto-account only, decoded as above; NULL if the
+// account is malformed or its first output cannot be decoded. Kept for the
+// bindings: use output_descriptors_from_cbor_account() to see every output.
 UR_WARN_UNUSED_RESULT char *
 output_descriptor_from_cbor_account(const uint8_t *account_cbor, size_t len);
 
