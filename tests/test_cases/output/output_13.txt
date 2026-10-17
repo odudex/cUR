@@ -1,0 +1,1 @@
+wsh(cosigner([3442193e/48'/0'/0'/2']tpubDETh2uT6eTESPsiZ3kr5451qbbUqgBwxd95QErZyL5gZv4VCtrENttiMnoECbo3bSRXpwzKrbvx6n54oYFsNRMLttVhUTCn4iMzAVvUB3Ly))#k809hw5g

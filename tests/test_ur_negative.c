@@ -981,6 +981,121 @@ static void test_descriptor_key_versions(void) {
            rejected[i].what);
 }
 
+#define ABSENT UINT64_MAX
+
+// {1: type, 2: network}, leaving out the fields given as ABSENT.
+static cbor_value_t *coin_info_map(uint64_t type, uint64_t network) {
+  cbor_value_t *info = cbor_value_new_map();
+  if (type != ABSENT)
+    map_put(info, 1, cbor_value_new_unsigned_int(type));
+  if (network != ABSENT)
+    map_put(info, 2, cbor_value_new_unsigned_int(network));
+  return info;
+}
+
+static cbor_value_t *coin_info(uint64_t type, uint64_t network) {
+  return cbor_value_new_tag(CRYPTO_COININFO_TAG, coin_info_map(type, network));
+}
+
+static bool contains(const uint8_t *data, size_t len, const uint8_t *needle,
+                     size_t needle_len) {
+  for (size_t i = 0; i + needle_len <= len; i++)
+    if (memcmp(data + i, needle, needle_len) == 0)
+      return true;
+  return false;
+}
+
+// The CBOR encoding of a descriptor, or NULL if it does not parse.
+static uint8_t *descriptor_cbor(const char *descriptor, size_t *len) {
+  output_data_t *output = output_from_descriptor_string(descriptor);
+  uint8_t *cbor = output ? output_to_cbor(output, len) : NULL;
+  output_free(output);
+  return cbor;
+}
+
+static void test_use_info(void) {
+  printf("\n=== use_info ===\n");
+
+  // hdkey_map() is on an m/84'/0'/0' path.
+  char *descriptor = NULL;
+  cbor_value_t *map = hdkey_map();
+  map_put(map, 5, coin_info(ABSENT, 1));
+  ASSERT(decode_wpkh(map, &descriptor) == RENDERED && descriptor &&
+             strstr(descriptor, "']tpub"),
+         "testnet use_info gives a tpub on a coin 0' path");
+  free(descriptor);
+
+  descriptor = NULL;
+  map = hdkey_map();
+  map_put(map, 5, coin_info(0, 0));
+  ASSERT(decode_wpkh(map, &descriptor) == RENDERED && descriptor &&
+             strstr(descriptor, "']xpub"),
+         "BTC mainnet use_info gives an xpub");
+  free(descriptor);
+
+  struct {
+    cbor_value_t *use_info;
+    const char *what;
+  } rejected[] = {
+      {coin_info(60, ABSENT), "non-BTC coin type rejected"},
+      {coin_info(ABSENT, 2), "unknown network rejected"},
+      {coin_info_map(ABSENT, 1), "untagged coin-info rejected"},
+      {cbor_value_new_tag(CRYPTO_KEYPATH_TAG, coin_info_map(ABSENT, 1)),
+       "coin-info under another tag rejected"},
+      {cbor_value_new_tag(CRYPTO_COININFO_TAG, cbor_value_new_unsigned_int(1)),
+       "coin-info that is not a map rejected"},
+  };
+  for (size_t i = 0; i < sizeof rejected / sizeof rejected[0]; i++) {
+    map = hdkey_map();
+    map_put(map, 5, rejected[i].use_info);
+    ASSERT(decode_wpkh(map, NULL) == REJECTED, rejected[i].what);
+  }
+
+  cbor_value_t *info = coin_info_map(ABSENT, ABSENT);
+  map_put(info, 2, cbor_value_new_bytes(PUBKEY, 1));
+  map = hdkey_map();
+  map_put(map, 5, cbor_value_new_tag(CRYPTO_COININFO_TAG, info));
+  ASSERT(decode_wpkh(map, NULL) == REJECTED, "non-integer network rejected");
+
+  info = coin_info_map(ABSENT, ABSENT);
+  map_put(info, 1, cbor_value_new_bytes(PUBKEY, 1));
+  map = hdkey_map();
+  map_put(map, 5, cbor_value_new_tag(CRYPTO_COININFO_TAG, info));
+  ASSERT(decode_wpkh(map, NULL) == REJECTED, "non-integer coin type rejected");
+
+  // Keys parsed from text carry their network: 5: 305({2: n}).
+  static const uint8_t TESTNET[] = {0x05, 0xd9, 0x01, 0x31, 0xa1, 0x02, 0x01};
+  static const uint8_t MAINNET[] = {0x05, 0xd9, 0x01, 0x31, 0xa1, 0x02, 0x00};
+  static const uint8_t COININFO_TAG[] = {0xd9, 0x01, 0x31};
+  struct {
+    const char *origin, *key;
+    const uint8_t *expected; // NULL: no use_info at all
+    size_t expected_len;
+    const char *what;
+  } encoded[] = {
+      {"84'/1'/0'", TPUB_84, TESTNET, sizeof TESTNET,
+       "tpub text encodes testnet use_info"},
+      {"84'/0'/0'", XPUB_84, NULL, 0,
+       "xpub text on a coin 0' path leaves mainnet implicit"},
+      {"84'/1'/0'", XPUB_84, MAINNET, sizeof MAINNET,
+       "xpub text on a coin 1' path encodes mainnet use_info"},
+  };
+  for (size_t i = 0; i < sizeof encoded / sizeof encoded[0]; i++) {
+    char text[256];
+    snprintf(text, sizeof text, "wpkh([3442193e/%s]%s/0/*)", encoded[i].origin,
+             encoded[i].key);
+    size_t len = 0;
+    uint8_t *cbor = descriptor_cbor(text, &len);
+    ASSERT(cbor &&
+               (encoded[i].expected
+                    ? contains(cbor, len, encoded[i].expected,
+                               encoded[i].expected_len)
+                    : !contains(cbor, len, COININFO_TAG, sizeof COININFO_TAG)),
+           encoded[i].what);
+    free(cbor);
+  }
+}
+
 int main(void) {
   printf("=== UR Negative-Path Tests ===\n");
   test_null_and_empty();
@@ -1004,6 +1119,7 @@ int main(void) {
   test_hdkey_fields_fail_closed();
   test_keypath_components_fail_closed();
   test_descriptor_key_versions();
+  test_use_info();
 
   printf("\n=== Summary ===\n");
   printf("Tests passed: %d/%d\n", asserts - failures, asserts);
