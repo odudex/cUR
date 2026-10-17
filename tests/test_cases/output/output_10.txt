@@ -1,0 +1,1 @@
+wpkh([3442193e/84'/0'/0']tpubDCNv1bopmNoWJqb6BkFukTquwzvcWugTXVfgXpoukWZKGWm8Qt6obKuaZdb6j4XdU8PuBGff1Ljqf6DXMxCcXNULhVmYRdw2uVwiFHjvReh/0/*)#najquvmw

@@ -23,6 +23,7 @@ hd_key_data_t *hd_key_new(void) {
   hd_key->origin = NULL;
   hd_key->children = NULL;
   hd_key->parent_fingerprint = NULL;
+  hd_key->network = HD_KEY_NETWORK_UNSPECIFIED;
 
   return hd_key;
 }
@@ -59,6 +60,40 @@ static UR_WARN_UNUSED_RESULT bool read_keypath_field(cbor_value_t *map, int key,
   *out = keypath_from_registry_item(item);
   free(item);
   return *out != NULL;
+}
+
+// Read the optional use_info field: #6.305({? 1: type, ? 2: network}), with
+// type defaulting to BTC (0) and network to mainnet (0). Anything other than a
+// BTC mainnet or testnet key fails, because no network could be rendered for
+// it.
+static UR_WARN_UNUSED_RESULT bool read_use_info_field(cbor_value_t *map,
+                                                      hd_key_network_t *out) {
+  cbor_value_t *val = get_map_value(map, 5);
+  if (!val)
+    return true;
+  if (cbor_value_get_type(val) != CBOR_TYPE_TAG ||
+      cbor_value_get_tag(val) != CRYPTO_COININFO_TAG)
+    return false;
+  cbor_value_t *info = cbor_value_get_tag_content(val);
+  if (!info || cbor_value_get_type(info) != CBOR_TYPE_MAP)
+    return false;
+
+  cbor_value_t *type = get_map_value(info, 1);
+  if (type && (cbor_value_get_type(type) != CBOR_TYPE_UNSIGNED_INT ||
+               cbor_value_get_uint(type) != 0))
+    return false;
+
+  uint64_t network = 0;
+  cbor_value_t *network_val = get_map_value(info, 2);
+  if (network_val) {
+    if (cbor_value_get_type(network_val) != CBOR_TYPE_UNSIGNED_INT)
+      return false;
+    network = cbor_value_get_uint(network_val);
+  }
+  if (network > 1)
+    return false;
+  *out = network == 1 ? HD_KEY_NETWORK_TESTNET : HD_KEY_NETWORK_MAINNET;
+  return true;
 }
 
 // Parse HDKey from CBOR data item. A field that is present but malformed
@@ -133,10 +168,9 @@ registry_item_t *hd_key_from_data_item(cbor_value_t *data_item) {
     memcpy(hd_key->chain_code, chain_data, 32);
   }
 
-  // Skip use_info (key 5) - not needed for descriptors
-
-  // Origin (key 6) and children (key 7), both optional
-  if (!read_keypath_field(data_item, 6, &hd_key->origin) ||
+  // use_info (key 5), origin (key 6) and children (key 7), all optional
+  if (!read_use_info_field(data_item, &hd_key->network) ||
+      !read_keypath_field(data_item, 6, &hd_key->origin) ||
       !read_keypath_field(data_item, 7, &hd_key->children))
     goto fail;
 
@@ -197,6 +231,15 @@ static UR_WARN_UNUSED_RESULT bool map_set_tagged(cbor_value_t *map,
   return map_set_owned(map, key, tagged);
 }
 
+// Whether the origin's BIP44 coin type (m/purpose'/coin_type'/...) is 1',
+// the network guess for keys without use_info.
+static bool origin_coin_type_is_testnet(const hd_key_data_t *hd_key) {
+  if (!hd_key->origin || hd_key->origin->component_count < 2)
+    return false;
+  const path_component_t *coin_type = &hd_key->origin->components[1];
+  return !coin_type->wildcard && coin_type->hardened && coin_type->index == 1;
+}
+
 cbor_value_t *hd_key_to_data_item(hd_key_data_t *hd_key) {
   if (!hd_key)
     return NULL;
@@ -225,6 +268,23 @@ cbor_value_t *hd_key_to_data_item(hd_key_data_t *hd_key) {
   if (hd_key->chain_code &&
       !map_set_owned(map, 4, cbor_value_new_bytes(hd_key->chain_code, 32)))
     goto fail;
+
+  // use_info: #6.305({2: network}). Absent means mainnet, so a mainnet key
+  // carries it only where a reader guessing from the coin type would see a
+  // testnet path.
+  bool testnet = hd_key->network == HD_KEY_NETWORK_TESTNET;
+  if (testnet || (hd_key->network == HD_KEY_NETWORK_MAINNET &&
+                  origin_coin_type_is_testnet(hd_key))) {
+    cbor_value_t *info = cbor_value_new_map();
+    if (!info)
+      goto fail;
+    if (!map_set_owned(info, 2, cbor_value_new_unsigned_int(testnet ? 1 : 0))) {
+      cbor_value_free(info);
+      goto fail;
+    }
+    if (!map_set_tagged(map, 5, CRYPTO_COININFO_TAG, info))
+      goto fail;
+  }
 
   if (hd_key->origin && !map_set_tagged(map, 6, CRYPTO_KEYPATH_TAG,
                                         keypath_to_data_item(hd_key->origin)))
@@ -274,17 +334,11 @@ char *hd_key_bip32_key(hd_key_data_t *hd_key, bool include_derivation_path) {
   uint8_t key_data[78];
   memset(key_data, 0, 78);
 
-  // Detect network from BIP44 coin type in origin path
-  // BIP44 path: m/purpose'/coin_type'/account'
-  // coin_type: 0' = mainnet, 1' = testnet
-  bool is_testnet = false;
-  if (hd_key->origin && hd_key->origin->component_count >= 2) {
-    // Check the second component (coin_type)
-    path_component_t *coin_type = &hd_key->origin->components[1];
-    if (coin_type->hardened && coin_type->index == 1) {
-      is_testnet = true;
-    }
-  }
+  // use_info decides the network. Without it, a coin type of 1' in the
+  // origin path means testnet.
+  bool is_testnet = hd_key->network == HD_KEY_NETWORK_UNSPECIFIED
+                        ? origin_coin_type_is_testnet(hd_key)
+                        : hd_key->network == HD_KEY_NETWORK_TESTNET;
 
   // Version bytes (4 bytes)
   uint8_t version[4];

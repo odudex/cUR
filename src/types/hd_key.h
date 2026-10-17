@@ -10,6 +10,17 @@
 // HDKey tag number
 #define CRYPTO_HDKEY_TAG 303
 
+// Coin-info tag number (the hd-key's use_info field)
+#define CRYPTO_COININFO_TAG 305
+
+// Network from use_info. Only BTC keys are accepted, so the coin type is not
+// kept. UNSPECIFIED means the key has no use_info.
+typedef enum {
+  HD_KEY_NETWORK_UNSPECIFIED = 0,
+  HD_KEY_NETWORK_MAINNET,
+  HD_KEY_NETWORK_TESTNET
+} hd_key_network_t;
+
 // HDKey type structure
 typedef struct {
   bool master;  // Is this a master key
@@ -21,8 +32,8 @@ typedef struct {
   keypath_data_t *origin;      // Origin path (optional)
   keypath_data_t *children;    // Children derivation path (optional)
   uint8_t *parent_fingerprint; // Parent fingerprint (4 bytes, optional)
-  // Note: use_info, name, note omitted for simplicity (not needed for
-  // descriptors)
+  hd_key_network_t network;    // From use_info or the xpub/tpub version
+  // Note: name and note omitted (not needed for descriptors)
 } hd_key_data_t;
 
 // HDKey registry type

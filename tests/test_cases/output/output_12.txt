@@ -1,0 +1,1 @@
+wpkh([3442193e/84'/1'/0']xpub6Czo5KTEut5bLtdgdiywZrVL7zmf5X7et72764PUk9gBa9Jr9jSXFUL2n2j4bZLkA19gQj5MhnCgp6e4F3s8GBKGw9hRTLnDN9JYmkvjkiA/0/*)#lfhzxtyc

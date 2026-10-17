@@ -1,0 +1,1 @@
+sh(cosigner([3442193e/45']tpubD8eQVK4Kdxg5gS7hQ3W6u6uPaqGfxaAiUWcMa8eqvP3pdNvbe2VU37B57DNdUm8UdAqMwRpcE4RYGjNPPzecAXbSEe8iuTqoShDaHZUSs9R))#6h3dy02s
