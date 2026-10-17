@@ -926,6 +926,61 @@ static void test_keypath_components_fail_closed(void) {
   free(descriptor);
 }
 
+// Keys at m/84'/0'/0' and m/84'/1'/0' of the BIP32 test vector 1 seed
+// (master fingerprint 3442193e), encoded by embit. The 04- and 00-prefixed
+// xpubs are the mainnet key with key-data byte 0 replaced, re-checksummed.
+static const char XPUB_84[] =
+    "xpub6C1HVMz946r433QEjZGpYYWYcspxXXBPys5PBGkmQboRXE6RLfFiStEkKbWKCZaPgDrzZh"
+    "9nUEunxuiuy6MNdw23du2Ek7GoKYMJVH8eK5E";
+static const char TPUB_84[] =
+    "tpubDDNRbZGvdA33cgpY5uy2mmphT7sK4uciRjcQScSd64S5KRyZDxHcPuzs24or84Hywugb2J"
+    "bEEt2jWH8fduiN9cmZzkSj8sSSx6txXkhXyZs";
+
+static bool descriptor_key_accepted(const char *origin, const char *key) {
+  char descriptor[256];
+  snprintf(descriptor, sizeof descriptor, "wpkh([3442193e/%s]%s/0/*)", origin,
+           key);
+  output_data_t *output = output_from_descriptor_string(descriptor);
+  bool accepted = output != NULL;
+  output_free(output);
+  return accepted;
+}
+
+static void test_descriptor_key_versions(void) {
+  printf("\n=== descriptor_key_versions ===\n");
+
+  ASSERT(descriptor_key_accepted("84'/0'/0'", XPUB_84), "xpub accepted");
+  ASSERT(descriptor_key_accepted("84'/1'/0'", TPUB_84), "tpub accepted");
+
+  struct {
+    const char *origin, *key, *what;
+  } rejected[] = {
+      {"84'/0'/0'",
+       "xprv9y1w5rTFDjHkpZKmdXjpBQZp4qzU84TYce9nNtM9rGGSeRmGo7wTu5vGUJ8CMqB8s3j"
+       "KdHyr9hwMiWDnEYHbh9J5iZ6D7wHkdwCYGH4HjaV",
+       "xprv rejected"},
+      {"84'/1'/0'",
+       "tprv8ggPT9EgUnMNjDnkCGJSNNAat6MNuaRorS1dA6QKfndgUwinbZU2DRNzquHE2RHvdeU"
+       "qdNu4AUHFMGCpkVWQ3Rn1A8BJAT9hxmUQMudcPGi",
+       "tprv rejected"},
+      {"84'/0'/0'",
+       "zpub6qfp6hKyMTw1jdnUQGr4xihYxp7rQmAPp67pk4YYAcZBdRisqyaqh1Z2N1RVCNtEVW6"
+       "c4eLuPZctjUx3QVBQEQPFNaR5uvumrzUbGRQ8voQ",
+       "unknown version (zpub) rejected"},
+      {"84'/0'/0'",
+       "xpub6C1HVMz946r433QEjZGpYYWYcspxXXBPys5PBGkmQboRXE6RLfFiStEkKdT4No2RXeY"
+       "DhWjVNpXnvEKgtCy6HdrvRY6LzFxhKCMgywoYZTV",
+       "04-prefixed key-data rejected"},
+      {"84'/0'/0'",
+       "xpub6C1HVMz946r433QEjZGpYYWYcspxXXBPys5PBGkmQboRXE6RLfFiStEkKVGUT1KjGnB"
+       "KXk6mpTgpKwma8Cn9SztFEZQayG6oZo5n2QBEa3f",
+       "00-prefixed (private) key-data under an xpub version rejected"},
+  };
+  for (size_t i = 0; i < sizeof rejected / sizeof rejected[0]; i++)
+    ASSERT(!descriptor_key_accepted(rejected[i].origin, rejected[i].key),
+           rejected[i].what);
+}
+
 int main(void) {
   printf("=== UR Negative-Path Tests ===\n");
   test_null_and_empty();
@@ -948,6 +1003,7 @@ int main(void) {
   test_path_components();
   test_hdkey_fields_fail_closed();
   test_keypath_components_fail_closed();
+  test_descriptor_key_versions();
 
   printf("\n=== Summary ===\n");
   printf("Tests passed: %d/%d\n", asserts - failures, asserts);

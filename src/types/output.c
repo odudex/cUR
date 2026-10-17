@@ -460,6 +460,18 @@ parse_hd_key_from_string(const char *str, size_t len) {
 
   // BIP32: [0-3]version [4]depth [5-8]parent_fp [9-12]child_idx
   //        [13-44]chain_code [45-77]key
+  // Only xpub and tpub are accepted. The key-data of an xprv is 00 followed
+  // by the private key, and any other version is a key this parser cannot
+  // vouch for; either would be copied into the hd-key as a public key.
+  static const uint8_t XPUB_VERSION[4] = {0x04, 0x88, 0xB2, 0x1E};
+  static const uint8_t TPUB_VERSION[4] = {0x04, 0x35, 0x87, 0xCF};
+  if ((memcmp(dec, XPUB_VERSION, 4) != 0 &&
+       memcmp(dec, TPUB_VERSION, 4) != 0) ||
+      (dec[45] != 0x02 && dec[45] != 0x03)) {
+    free(dec);
+    hd_key_free(hd_key);
+    return NULL;
+  }
   if (dec[5] || dec[6] || dec[7] || dec[8]) {
     hd_key->parent_fingerprint = safe_malloc(4);
     if (!hd_key->parent_fingerprint) {
