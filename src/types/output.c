@@ -837,73 +837,95 @@ output_descriptor_finish(char *descriptor, bool include_checksum) {
   return result;
 }
 
-// Helper function to extract first output descriptor from Account CBOR
+// Read a crypto-account map {1: master fingerprint, 2: [outputs]}
+// (BCR-2020-015) and return its outputs array, or NULL if either field is
+// missing or malformed.
+static cbor_value_t *account_outputs(cbor_value_t *account, uint8_t mfp[4]) {
+  if (!account || cbor_value_get_type(account) != CBOR_TYPE_MAP)
+    return NULL;
+
+  cbor_value_t *mfp_val = cbor_map_get_int(account, 1);
+  if (!mfp_val || cbor_value_get_type(mfp_val) != CBOR_TYPE_UNSIGNED_INT ||
+      cbor_value_get_uint(mfp_val) > UINT32_MAX)
+    return NULL;
+  uint32_t fp = (uint32_t)cbor_value_get_uint(mfp_val);
+  mfp[0] = (fp >> 24) & 0xFF;
+  mfp[1] = (fp >> 16) & 0xFF;
+  mfp[2] = (fp >> 8) & 0xFF;
+  mfp[3] = fp & 0xFF;
+
+  cbor_value_t *outputs = cbor_map_get_int(account, 2);
+  if (!outputs || cbor_value_get_type(outputs) != CBOR_TYPE_ARRAY)
+    return NULL;
+  return outputs;
+}
+
+// An account describes one seed, so an origin without a source fingerprint
+// takes the master fingerprint, and an origin naming another fingerprint is
+// refused. A partial path (depth set and not its length) does not start at
+// the master and is left as it is.
+static UR_WARN_UNUSED_RESULT bool
+apply_master_fingerprint(hd_key_data_t *hd_key, const uint8_t mfp[4]) {
+  keypath_data_t *origin = hd_key->origin;
+  if (!origin)
+    return true;
+  if (origin->source_fingerprint)
+    return memcmp(origin->source_fingerprint, mfp, 4) == 0;
+  if (origin->depth >= 0 && (size_t)origin->depth != origin->component_count)
+    return true;
+  origin->source_fingerprint = safe_malloc(4);
+  if (!origin->source_fingerprint)
+    return false;
+  memcpy(origin->source_fingerprint, mfp, 4);
+  return true;
+}
+
+// Decode one account output to descriptor text (with checksum), or NULL.
+static UR_WARN_UNUSED_RESULT char *
+account_output_descriptor(cbor_value_t *item, const uint8_t mfp[4]) {
+  // BCR-2020-015 tags each output #6.308; some encoders leave the tag off, so
+  // both forms are accepted.
+  if (item && cbor_value_get_type(item) == CBOR_TYPE_TAG &&
+      cbor_value_get_tag(item) == CRYPTO_OUTPUT_TAG)
+    item = cbor_value_get_tag_content(item);
+
+  registry_item_t *output_item = output_from_data_item(item);
+  if (!output_item)
+    return NULL;
+  output_data_t *output = output_from_registry_item(output_item);
+  output_item->data = NULL; // Transfer ownership
+  free(output_item);
+  if (!output)
+    return NULL;
+
+  bool ok = true;
+  if (output->key_type == KEY_TYPE_HD) {
+    ok = apply_master_fingerprint(output->crypto_key.hd_key, mfp);
+  } else {
+    multi_key_data_t *mk = output->crypto_key.multi_key;
+    for (size_t i = 0; ok && i < mk->hd_key_count; i++)
+      ok = apply_master_fingerprint(mk->hd_keys[i], mfp);
+  }
+  char *descriptor = ok ? output_descriptor(output, true) : NULL;
+  output_free(output);
+  return descriptor;
+}
+
 char *output_descriptor_from_cbor_account(const uint8_t *account_cbor,
                                           size_t len) {
   if (!account_cbor || len == 0)
     return NULL;
 
-  // Decode CBOR
-  cbor_value_t *cbor_val = cbor_decode(account_cbor, len);
-  if (!cbor_val)
+  cbor_value_t *account = cbor_decode(account_cbor, len);
+  if (!account)
     return NULL;
 
-  // Account CBOR is a plain map (not wrapped in a tag)
-  // Map structure: { 1: master_fingerprint, 2: [outputs...] }
-  if (cbor_value_get_type(cbor_val) != CBOR_TYPE_MAP) {
-    cbor_value_free(cbor_val);
-    return NULL;
-  }
-
-  cbor_value_t *map = cbor_val;
-
-  // Get map key 2 (output_descriptors array)
-  cbor_value_t *outputs_array = cbor_map_get_int(map, 2);
-  if (!outputs_array || cbor_value_get_type(outputs_array) != CBOR_TYPE_ARRAY) {
-    cbor_value_free(cbor_val);
-    return NULL;
-  }
-
-  // Get array size and check it has at least one element
-  size_t array_size = cbor_value_get_array_size(outputs_array);
-  if (array_size == 0) {
-    cbor_value_free(cbor_val);
-    return NULL;
-  }
-
-  // Get first output from array. BCR-2020-015 tags each one #6.308; some
-  // encoders leave the tag off, so both forms are accepted.
-  cbor_value_t *first_output = cbor_value_get_array_item(outputs_array, 0);
-  if (first_output && cbor_value_get_type(first_output) == CBOR_TYPE_TAG &&
-      cbor_value_get_tag(first_output) == CRYPTO_OUTPUT_TAG)
-    first_output = cbor_value_get_tag_content(first_output);
-  if (!first_output) {
-    cbor_value_free(cbor_val);
-    return NULL;
-  }
-
-  // Parse as Output
-  registry_item_t *output_item = output_from_data_item(first_output);
-  if (!output_item) {
-    cbor_value_free(cbor_val);
-    return NULL;
-  }
-
-  output_data_t *output = output_from_registry_item(output_item);
-  if (!output) {
-    free(output_item);
-    cbor_value_free(cbor_val);
-    return NULL;
-  }
-
-  // Generate descriptor string (with checksum)
-  char *descriptor = output_descriptor(output, true);
-
-  // Cleanup
-  output_item->data = NULL; // Prevent double free
-  free(output_item);
-  cbor_value_free(cbor_val);
-  output_free(output);
-
+  uint8_t mfp[4];
+  cbor_value_t *outputs = account_outputs(account, mfp);
+  char *descriptor = outputs && cbor_value_get_array_size(outputs) > 0
+                         ? account_output_descriptor(
+                               cbor_value_get_array_item(outputs, 0), mfp)
+                         : NULL;
+  cbor_value_free(account);
   return descriptor;
 }

@@ -82,7 +82,10 @@ output_from_descriptor_string(const char *descriptor);
 UR_WARN_UNUSED_RESULT char *output_descriptor(output_data_t *output,
                                               bool include_checksum);
 
-// Helper function to extract first output descriptor from Account CBOR
+// Decode the first output of a crypto-account (BCR-2020-015) to descriptor
+// text with checksum. The account's master fingerprint (key 1) is required:
+// origins without a source fingerprint take it, and an origin naming another
+// fingerprint fails the output.
 UR_WARN_UNUSED_RESULT char *
 output_descriptor_from_cbor_account(const uint8_t *account_cbor, size_t len);
 
