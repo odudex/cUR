@@ -871,8 +871,12 @@ char *output_descriptor_from_cbor_account(const uint8_t *account_cbor,
     return NULL;
   }
 
-  // Get first output from array
+  // Get first output from array. BCR-2020-015 tags each one #6.308; some
+  // encoders leave the tag off, so both forms are accepted.
   cbor_value_t *first_output = cbor_value_get_array_item(outputs_array, 0);
+  if (first_output && cbor_value_get_type(first_output) == CBOR_TYPE_TAG &&
+      cbor_value_get_tag(first_output) == CRYPTO_OUTPUT_TAG)
+    first_output = cbor_value_get_tag_content(first_output);
   if (!first_output) {
     cbor_value_free(cbor_val);
     return NULL;
