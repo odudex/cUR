@@ -911,6 +911,47 @@ account_output_descriptor(cbor_value_t *item, const uint8_t mfp[4]) {
   return descriptor;
 }
 
+char **output_descriptors_from_cbor_account(const uint8_t *account_cbor,
+                                            size_t len, size_t *count) {
+  if (!count)
+    return NULL;
+  *count = 0;
+  if (!account_cbor || len == 0)
+    return NULL;
+
+  cbor_value_t *account = cbor_decode(account_cbor, len);
+  if (!account)
+    return NULL;
+
+  uint8_t mfp[4];
+  cbor_value_t *outputs = account_outputs(account, mfp);
+  if (!outputs) {
+    cbor_value_free(account);
+    return NULL;
+  }
+
+  // At least one slot, so an account without outputs still returns an array.
+  // safe_malloc() zero-fills, so an output that fails stays NULL.
+  size_t n = cbor_value_get_array_size(outputs);
+  char **descriptors = safe_malloc((n > 0 ? n : 1) * sizeof(char *));
+  if (descriptors) {
+    for (size_t i = 0; i < n; i++)
+      descriptors[i] =
+          account_output_descriptor(cbor_value_get_array_item(outputs, i), mfp);
+    *count = n;
+  }
+  cbor_value_free(account);
+  return descriptors;
+}
+
+void output_descriptors_free(char **descriptors, size_t count) {
+  if (!descriptors)
+    return;
+  for (size_t i = 0; i < count; i++)
+    free(descriptors[i]);
+  free(descriptors);
+}
+
 char *output_descriptor_from_cbor_account(const uint8_t *account_cbor,
                                           size_t len) {
   if (!account_cbor || len == 0)

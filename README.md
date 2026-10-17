@@ -115,6 +115,13 @@ expected during scanning).
 > parts every decoder rejects — or explode the fragment count — now fail at
 > construction with NULL/false.
 
+> **Account outputs:** `output_descriptor_from_cbor_account()` returns the
+> first output of a `crypto-account` only. Use
+> `output_descriptors_from_cbor_account()` to get every output (an entry is
+> NULL for an output that could not be decoded) and let the user choose one;
+> free the array with `output_descriptors_free()`. Both require the account's
+> master fingerprint and apply it to origins that lack one.
+
 Type-specific helpers (`bytes_from_cbor`, `psbt_from_cbor`,
 `output_from_descriptor_string`, etc.) live in `src/types/*.h`.
 
