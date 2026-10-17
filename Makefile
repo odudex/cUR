@@ -32,8 +32,9 @@ SOURCES = utils.c bytewords.c fountain_decoder.c fountain_encoder.c fountain_uti
           types/byte_buffer.c types/cbor_data.c types/cbor_encoder.c types/cbor_decoder.c types/registry.c types/bytes_type.c types/psbt.c types/bip39.c \
           types/keypath.c types/hd_key.c types/multi_key.c types/output.c
 
-# Object files
+# Object files, and the header dependencies the compiler writes for them
 OBJECTS = $(SOURCES:%.c=$(OBJDIR)/%.o)
+DEPS = $(OBJECTS:.o=.d)
 
 # Target library
 TARGET = $(SRCDIR)/libur.a
@@ -67,12 +68,13 @@ CROSS_REDUCTION_LIBRARY = $(CROSS_REDUCTION_BUILDDIR)/libur.a
 CROSS_REDUCTION_TEST = $(CROSS_REDUCTION_BUILDDIR)/test_ur_gaussian
 
 .PHONY: all clean test check check-warn-unused-result \
-        check-cross-reduction coverage $(TEST_TARGETS)
+        check-cross-reduction check-header-deps coverage $(TEST_TARGETS)
 
 all: $(TARGET)
 
 # Run all tests. `check` is a GNU-convention alias.
-test: check-warn-unused-result check-cross-reduction $(TEST_TARGETS)
+test: check-warn-unused-result check-cross-reduction check-header-deps \
+      $(TEST_TARGETS)
 	@echo "All tests passed."
 
 check: test
@@ -110,6 +112,27 @@ check-warn-unused-result:
 	done
 	@echo "warn_unused_result annotations enforced."
 
+# A header edit must rebuild every object that includes it. Dry-run make
+# with cbor_decoder.h taken as new: hd_key.o and output.o include it and must
+# be rebuilt, crc32.o does not and must not, and libur.a must be relinked.
+# Once built, a second make must have nothing to do.
+check-header-deps: $(TARGET)
+	@out=`$(MAKE) -f $(firstword $(MAKEFILE_LIST)) --no-print-directory -n -W $(SRCDIR)/types/cbor_decoder.h $(TARGET)`; \
+	for obj in types/hd_key.o types/output.o; do \
+		case "$$out" in *"-o $(OBJDIR)/$$obj"*) ;; \
+			*) echo "$@: editing cbor_decoder.h does not rebuild $$obj"; exit 1;; \
+		esac; \
+	done; \
+	case "$$out" in *"-o $(OBJDIR)/crc32.o"*) \
+		echo "$@: editing cbor_decoder.h rebuilds crc32.o"; exit 1;; \
+	esac; \
+	case "$$out" in *"ar rcs $(TARGET)"*) ;; \
+		*) echo "$@: editing cbor_decoder.h does not relink $(TARGET)"; exit 1;; \
+	esac
+	@$(MAKE) -f $(firstword $(MAKEFILE_LIST)) --no-print-directory -q $(TARGET) || \
+		{ echo "$@: $(TARGET) is out of date right after a build"; exit 1; }
+	@echo "Header dependencies tracked."
+
 # Build the decoder a second time with the opt-in mixed-against-mixed path.
 # Keeping it in a separate object tree avoids stale flag-dependent objects and
 # lets the ordinary `make test` exercise both decoder configurations.
@@ -128,9 +151,11 @@ $(CROSS_REDUCTION_LIBRARY): $(CROSS_REDUCTION_OBJECTS)
 	@mkdir -p $(dir $@)
 	ar rcs $@ $^
 
-$(OBJDIR)/%.o: $(SRCDIR)/%.c
+# Objects also depend on this Makefile, so a flag change rebuilds them and an
+# object built before the dependency files existed is rebuilt once.
+$(OBJDIR)/%.o: $(SRCDIR)/%.c Makefile
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $(LIB_WARNFLAGS) $(INCLUDES) -c $< -o $@
+	$(CC) $(CFLAGS) $(LIB_WARNFLAGS) -MMD -MP $(INCLUDES) -c $< -o $@
 
 $(CROSS_REDUCTION_OBJDIR)/%.o: $(SRCDIR)/%.c
 	@mkdir -p $(dir $@)
@@ -167,18 +192,5 @@ clean:
 	rm -rf $(OBJDIR) $(TARGET) $(TEST_SUPPORT_OBJECTS) $(TEST_BINS) \
 		$(CROSS_REDUCTION_BUILDDIR)
 
-# Dependencies
-$(OBJDIR)/utils.o: $(SRCDIR)/utils.c $(SRCDIR)/utils.h $(SRCDIR)/xor_internal.h
-$(OBJDIR)/crc32.o: $(SRCDIR)/crc32.c $(SRCDIR)/crc32.h $(SRCDIR)/crc32_slice_table.h
-$(OBJDIR)/bytewords.o: $(SRCDIR)/bytewords.c $(SRCDIR)/bytewords.h $(SRCDIR)/utils.h $(SRCDIR)/crc32.h
-$(OBJDIR)/fountain_utils.o: $(SRCDIR)/fountain_utils.c $(SRCDIR)/fountain_utils.h $(SRCDIR)/fountain_decoder.h $(SRCDIR)/fountain_types.h $(SRCDIR)/utils.h $(SRCDIR)/sha256/sha256_compat.h $(SRCDIR)/sha256/sha256.h
-$(OBJDIR)/fountain_decoder.o: $(SRCDIR)/fountain_decoder.c $(SRCDIR)/fountain_decoder.h $(SRCDIR)/fountain_utils.h $(SRCDIR)/fountain_types.h $(SRCDIR)/crc32.h $(SRCDIR)/utils.h $(SRCDIR)/xor_internal.h
-$(OBJDIR)/fountain_encoder.o: $(SRCDIR)/fountain_encoder.c $(SRCDIR)/fountain_encoder.h $(SRCDIR)/fountain_decoder.h $(SRCDIR)/fountain_utils.h $(SRCDIR)/fountain_types.h $(SRCDIR)/crc32.h $(SRCDIR)/utils.h $(SRCDIR)/xor_internal.h
-$(OBJDIR)/types/byte_buffer.o: $(SRCDIR)/types/byte_buffer.c $(SRCDIR)/types/byte_buffer.h $(SRCDIR)/sha256/sha256_compat.h $(SRCDIR)/sha256/sha256.h $(SRCDIR)/utils.h
-$(OBJDIR)/types/output.o: $(SRCDIR)/types/output.c $(SRCDIR)/types/output.h $(SRCDIR)/types/byte_buffer.h $(SRCDIR)/sha256/sha256_compat.h $(SRCDIR)/utils.h
-$(OBJDIR)/ur_decoder.o: $(SRCDIR)/ur_decoder.c $(SRCDIR)/ur_decoder.h $(SRCDIR)/fountain_decoder.h $(SRCDIR)/bytewords.h $(SRCDIR)/utils.h
-$(OBJDIR)/ur_encoder.o: $(SRCDIR)/ur_encoder.c $(SRCDIR)/ur_encoder.h $(SRCDIR)/fountain_encoder.h $(SRCDIR)/bytewords.h $(SRCDIR)/utils.h
-$(OBJDIR)/ur.o: $(SRCDIR)/ur.c $(SRCDIR)/ur.h $(SRCDIR)/ur_decoder.h $(SRCDIR)/utils.h
-$(OBJDIR)/sha256/sha256.o: $(SRCDIR)/sha256/sha256.c $(SRCDIR)/sha256/sha256.h
-
+-include $(DEPS)
 -include $(CROSS_REDUCTION_DEPS)
