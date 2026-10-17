@@ -26,6 +26,13 @@ variant; see [Build options](#build-options).
 Helper types live alongside: `keypath.c` (BIP-32 derivation paths) and
 `multi_key.c` (multisig keys).
 
+Not supported: the version 2 descriptor types (`output-descriptor`
+40308, `hdkey` 40303, `keypath` 40304, `coin-info` 40305 and
+`account-descriptor`), and keypath range or pair components such as
+`<0;1>/*`. Multipath, miniscript and `tr()` script-tree descriptors
+therefore cannot be carried in a UR; send them as descriptor text. Input
+that uses a range or pair component is rejected, not truncated.
+
 ## Building (PC)
 
 ```bash
