@@ -1,15 +1,6 @@
+// SPDX-License-Identifier: BSD-2-Clause-Patent
 //
-// ur_encoder.c
-//
-// Copyright © 2025 Krux Contributors
-// Licensed under the "BSD-2-Clause Plus Patent License"
-//
-// Implementation of Uniform Resources (UR) encoder following the specification:
-// https://github.com/BlockchainCommons/Research/blob/master/papers/bcr-2020-005-ur.md
-//
-// This is an independent implementation written using
-// foundation-ur-py as a reference for testing and validation.
-//
+// Uniform Resources (UR) encoder.
 
 #include "ur_encoder.h"
 #include "bytewords.h"

@@ -1,14 +1,6 @@
-//
-// ur.c
-//
-// Copyright © 2025 Krux Contributors
-// Licensed under the "BSD-2-Clause Plus Patent License"
+// SPDX-License-Identifier: BSD-2-Clause-Patent
 //
 // High-level UR parsing and type handling.
-//
-// This is an independent implementation written using
-// foundation-ur-py as a reference for testing and validation.
-//
 
 #include "ur.h"
 #include "ur_decoder.h"

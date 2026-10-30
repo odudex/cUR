@@ -1,16 +1,6 @@
+// SPDX-License-Identifier: BSD-2-Clause-Patent
 //
-// fountain_decoder.c
-//
-// Copyright © 2025 Krux Contributors
-// Licensed under the "BSD-2-Clause Plus Patent License"
-//
-// Implementation of fountain code decoder for multi-part data reassembly.
-// Based on the specification:
-// https://github.com/BlockchainCommons/Research/blob/master/papers/bcr-2020-006-urtypes.md
-//
-// This is an independent implementation written using
-// foundation-ur-py as a reference for testing and validation.
-//
+// Fountain code decoder for multi-part data reassembly.
 
 #include "fountain_decoder.h"
 #include "crc32.h"

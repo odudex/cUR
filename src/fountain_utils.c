@@ -1,13 +1,6 @@
-//
-// fountain_utils.c
-//
-// Copyright © 2025 Krux Contributors
-// Licensed under the "BSD-2-Clause Plus Patent License"
+// SPDX-License-Identifier: BSD-2-Clause-Patent
 //
 // Utility functions for fountain code operations.
-//
-// This is an independent implementation written using
-// foundation-ur-py as a reference for testing and validation.
 //
 // All floating point in this file MUST remain `double`. The multipart wire
 // format carries no fragment-index list: decoders re-derive each part's
@@ -16,7 +9,6 @@
 // implementations (Python/C++/Swift/JS — all IEEE double). Converting to
 // float, or building with -ffast-math, silently breaks cross-wallet
 // decoding.
-//
 
 #include "fountain_utils.h"
 #include "sha256/sha256_compat.h"
