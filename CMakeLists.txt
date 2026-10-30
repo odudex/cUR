@@ -1,6 +1,6 @@
 # Build only the UR transport layer (bytewords, fountain codes, multi-part
-# assembly) and skip the src/types payload codecs. Integrators that do their
-# own payload CBOR (e.g. Blockstream Jade) enable this to cut build time.
+# assembly) and skip the src/types payload codecs, for integrators that do
+# their own payload CBOR.
 option(UR_ENVELOPE_ONLY "Build only the UR transport (exclude src/types)" OFF)
 
 set(UR_ENVELOPE_SRCS
@@ -42,9 +42,8 @@ if(ESP_PLATFORM)
         REQUIRES mbedtls
     )
 
-    # Ignoring a UR_WARN_UNUSED_RESULT return is a build error, not a warning.
-    # The functions carrying it report failure that way and nothing else -
-    # several defects found by review were a single discarded bool.
+    # Ignoring a UR_WARN_UNUSED_RESULT return is a build error, not a warning:
+    # those functions report failure only through their return value.
     if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
         target_compile_options(${COMPONENT_LIB} PRIVATE -Werror=unused-result)
     endif()

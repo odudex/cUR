@@ -10,13 +10,10 @@ readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "BSD-2-Clause-Patent" }
 
-# The C extension is declared in setup.py (ext_modules); this file provides the
-# build-system + metadata so `pip install .` / `pip wheel .` build the desktop
-# CPython `uUR` module (bundled SHA-256; no external crypto dependency).
+# The C extension itself is declared in setup.py.
 
 [tool.setuptools]
-# cUR's top-level `src/` holds C sources, NOT a Python src-layout package.
-# Disable setuptools auto-discovery so it doesn't misread `src/` as the package
-# root — which otherwise misplaces the built extension (into src/) and breaks
-# the PEP 517 wheel build. This package ships only the `uUR` C extension.
+# `src/` holds C sources, not a Python package. Disable auto-discovery, which
+# would treat it as a src-layout root, misplace the built extension and break
+# the wheel build.
 py-modules = []

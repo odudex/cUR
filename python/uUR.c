@@ -1,29 +1,13 @@
-// CPython binding for cUR — the desktop/CPython counterpart of the MicroPython
-// `uUR.c` at the repo root. It exposes the SAME module surface (module name
-// `uUR`) so business logic that does `__import__("uUR")` gets the native
-// BC-UR encoder/decoder on CPython (e.g. Raspberry Pi) exactly as it does on
-// the ESP32 MicroPython firmware:
-//
-// clang-format off
-//   uUR.UR(type, cbor)                       -> .type, .cbor, == / hash by value
-//   uUR.URDecoder()                          -> receive_part, estimated_percent_complete,
-//                                               .result, .state, .expected_part_count,
-//                                               .processed_parts_count
-//   uUR.UREncoder(ur, max_fragment_len,      -> next_part, is_complete, is_single_part,
-//                 first_seq_num=0,              .fountain_encoder(.seq_len())
-//                 min_fragment_len=10)
-//   uUR.Types.{bytes,psbt}_{from,to}_cbor, bip39_words_from_cbor,
-//             output_from_cbor, output_from_cbor_account, + CRYPTO_* tag/type constants
-//   uUR.DECODER_*                            -> ur_decoder_state_t mirror constants
-// clang-format on
+// CPython binding for cUR, the counterpart of the MicroPython `uUR.c` at the
+// repo root. It exposes the same `uUR` module, so code written against the
+// MicroPython module runs unchanged on CPython.
 //
 // Memory model: cUR allocates output strings/buffers with libc malloc on the
-// host build (bundled src/sha256/sha256.c; no UR_USE_MBEDTLS_SHA256), so this
-// binding frees them with free(). The decoder owns its ur_result_t — we copy it
-// into a fresh UR object rather than freeing it here.
+// host build, so this binding frees them with free(). The decoder owns its
+// ur_result_t — we copy it into a fresh UR object rather than freeing it here.
 //
 // Keep this in sync with the MicroPython uUR.c: same class/method/constant
-// names and semantics, so the two runtimes present one module contract.
+// names and semantics.
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
@@ -518,7 +502,7 @@ static int UREncoder_init(uUR_UREncoder *self, PyObject *args, PyObject *kwds) {
   }
 
   // Parsed as 'L' (long long) so out-of-range values raise instead of the 'I'
-  // format's silent modulo-2^32 wrap (first_seq_num=-1 used to become
+  // format's silent modulo-2^32 wrap (first_seq_num=-1 would become
   // 4294967295 and fail later, inside next_part). UINT32_MAX itself is out
   // too: the counter is incremented before each part and never wraps.
   if (first_seq_num < 0 || first_seq_num >= (long long)UINT32_MAX) {

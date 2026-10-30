@@ -66,12 +66,11 @@ static UR_WARN_UNUSED_RESULT bool read_argument(urtypes_cbor_decoder_t *decoder,
            ((uint64_t)bytes[2] << 8) | bytes[3];
     return true;
   } else if (additional == 27) {
-    // The 8-byte form. Previously rejected, which meant integers and tags
-    // above UINT32_MAX that this library's own encoder emits could not be
-    // read back. Callers that use the argument as a length or element count
-    // bound-check it against CBOR_MAX_ITEM_LEN / CBOR_MAX_ITEMS while it is
-    // still uint64_t, before any narrowing, so widening the range here cannot
-    // turn an oversized value into a small one.
+    // The 8-byte form, which this library's own encoder emits for integers
+    // and tags above UINT32_MAX. Callers that use the argument as a length or
+    // element count bound-check it against CBOR_MAX_ITEM_LEN / CBOR_MAX_ITEMS
+    // while it is still uint64_t, before any narrowing, so an oversized value
+    // cannot turn into a small one.
     uint8_t bytes[8];
     if (!read_bytes(decoder, bytes, 8))
       return false;
