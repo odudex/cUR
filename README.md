@@ -207,7 +207,7 @@ micropython.mk                       # vanilla MicroPython USERMOD
 
 ## License
 
-BSD-2-Clause Plus Patent License. Copyright © 2025 Krux Contributors.
+BSD-2-Clause Plus Patent License. Copyright © 2025 cUR Contributors.
 See [LICENSE](LICENSE) for full text.
 
 Independent implementation written using foundation-ur-py as a

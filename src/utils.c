@@ -1,14 +1,6 @@
-//
-// utils.c
-//
-// Copyright © 2025 Krux Contributors
-// Licensed under the "BSD-2-Clause Plus Patent License"
+// SPDX-License-Identifier: BSD-2-Clause-Patent
 //
 // General utility functions.
-//
-// This is an independent implementation written using
-// foundation-ur-py as a reference for testing and validation.
-//
 
 #include "utils.h"
 #include "xor_internal.h"

@@ -1,17 +1,7 @@
+// SPDX-License-Identifier: BSD-2-Clause-Patent
 //
-// bytewords.c
-//
-// Copyright © 2025 Krux Contributors
-// Licensed under the "BSD-2-Clause Plus Patent License"
-//
-// Implementation of Bytewords encoding/decoding as specified in:
+// Bytewords encoding/decoding, MINIMAL style only (2-char encoding):
 // https://github.com/BlockchainCommons/Research/blob/master/papers/bcr-2020-012-bytewords.md
-//
-// This is an independent implementation written using
-// foundation-ur-py as a reference for testing and validation.
-//
-// Note: Optimized for MINIMAL style only (2-char encoding)
-//
 
 #include "bytewords.h"
 #include "crc32.h"

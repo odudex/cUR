@@ -1,16 +1,6 @@
+// SPDX-License-Identifier: BSD-2-Clause-Patent
 //
-// fountain_encoder.c
-//
-// Copyright © 2025 Krux Contributors
-// Licensed under the "BSD-2-Clause Plus Patent License"
-//
-// Implementation of fountain codes for efficient multi-part data transmission.
-// Based on the specification:
-// https://github.com/BlockchainCommons/Research/blob/master/papers/bcr-2020-006-urtypes.md
-//
-// This is an independent implementation written using
-// foundation-ur-py as a reference for testing and validation.
-//
+// Fountain code encoder for multi-part data transmission.
 
 #include "fountain_encoder.h"
 #include "crc32.h"
