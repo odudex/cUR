@@ -146,10 +146,10 @@ multi_key_data_t *multi_key_from_data_item(cbor_value_t *data_item) {
     return NULL;
   }
 
-  // Every declared key must parse and be stored. Skipping unparseable or
-  // unsupported entries used to yield a policy with fewer cosigners than the
-  // CBOR declared - a descriptor that looks valid but does not describe the
-  // multisig it came from. Fail the whole decode instead.
+  // Every declared key must parse and be stored. Skipping an unparseable or
+  // unsupported entry would yield a policy with fewer cosigners than the CBOR
+  // declared - a descriptor that looks valid but does not describe the
+  // multisig it came from - so fail the whole decode instead.
   for (size_t i = 0; i < key_count; i++) {
     cbor_value_t *key_item = cbor_value_get_array_item(keys_val, i);
     if (!key_item || cbor_value_get_type(key_item) != CBOR_TYPE_TAG)

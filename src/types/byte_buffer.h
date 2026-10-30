@@ -25,8 +25,8 @@ UR_WARN_UNUSED_RESULT bool byte_buffer_append(byte_buffer_t *buf,
 uint8_t *byte_buffer_get_data(byte_buffer_t *buf);
 size_t byte_buffer_get_len(byte_buffer_t *buf);
 
-// Inlined here so toolchains that don't enable LTO (notably the K210
-// MaixPy build) don't pay the call overhead on the CBOR hot path.
+// Inlined here so builds without LTO don't pay the call overhead on the
+// CBOR hot path.
 static inline UR_WARN_UNUSED_RESULT bool
 byte_buffer_append_byte(byte_buffer_t *buf, uint8_t byte) {
   return byte_buffer_append(buf, &byte, 1);

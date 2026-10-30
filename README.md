@@ -1,16 +1,8 @@
 # cUR — C implementation of Blockchain Commons Uniform Resources
 
-A lightweight C implementation of the [Blockchain Commons Uniform Resources (UR)](https://github.com/BlockchainCommons/Research/blob/master/papers/bcr-2020-005-ur.md)
-specification — a method for encoding structured binary data optimized
-for transport via QR codes.
-
-Targets PC and ESP-IDF (e.g. ESP32, ESP32-P4) from a single source
-tree. SHA-256 backend is selected at compile time to use the
-platform's hardware when available.
-
-The implementation favors being small and easy to review. Optional
-performance paths exist, but every default is the simplest, smallest
-variant; see [Build options](#build-options).
+A small, reviewable C implementation of the [Blockchain Commons Uniform Resources (UR)](https://github.com/BlockchainCommons/Research/blob/master/papers/bcr-2020-005-ur.md)
+specification, which encodes binary data for transport in QR codes.
+One source tree builds for PC, ESP-IDF, MicroPython and CPython.
 
 ## Supported UR types
 
@@ -93,41 +85,29 @@ ur_encoder_free(enc);
 ```
 
 The decoder is a state machine: `ur_decoder_receive_part()` returns the
-state after each part (`ur_decoder_get_state()` polls it without feeding).
-`UR_DECODER_PROCESSING` means keep feeding parts; `UR_DECODER_OK` means
-done with a result available; terminal states (`UR_DECODER_OK`,
-`UR_DECODER_NO_RESULT`, `UR_DECODER_ERROR_INVALID_CHECKSUM`) are
-permanent, while every other error is transient — the offending frame was
-rejected, and it is safe to keep feeding parts (misread QR frames are
-expected during scanning).
+state after each part, and `ur_decoder_get_state()` reads it without
+feeding one. `UR_DECODER_PROCESSING` means keep feeding parts. The
+terminal states (`UR_DECODER_OK`, `UR_DECODER_NO_RESULT`,
+`UR_DECODER_ERROR_INVALID_CHECKSUM`) are permanent; any other error only
+rejects that frame, and scanning can continue.
 
-> **Migrating from the `is_complete`/`is_success`/`get_last_error` API:**
-> `ur_decoder_receive_part()` now returns `ur_decoder_state_t`, and
-> `UR_DECODER_OK == 0`, so a legacy `if (ur_decoder_receive_part(...))`
-> check silently inverts its meaning. Compare the return value against
-> the state constants (or use `ur_decoder_state_is_error()` /
-> `ur_decoder_state_is_terminal()`); never treat it as a boolean.
+API rules:
 
-> **Progress API type change:** `ur_decoder_estimated_percent_complete()`
-> and `ur_decoder_estimated_percent_complete_weighted()` (and the
-> `fountain_decoder_*` equivalents) now return single-precision `float`
-> instead of `double` — they are display-only estimates, and embedded
-> FPUs are single-precision. Fragment-selection interop math is unchanged
-> and deliberately remains `double`.
-
-> **Constructor validation:** `ur_new()`, `ur_encoder_new()` and
-> `ur_encoder_encode_single()` reject a `type` that is not a valid UR type
-> (`[a-z0-9-]+`, no leading or trailing `-`), and `fountain_encoder_new()`
-> rejects `max_fragment_len < 10`. Calls that used to succeed and then emit
-> parts every decoder rejects — or explode the fragment count — now fail at
-> construction with NULL/false.
-
-> **Account outputs:** `output_descriptor_from_cbor_account()` returns the
-> first output of a `crypto-account` only. Use
-> `output_descriptors_from_cbor_account()` to get every output (an entry is
-> NULL for an output that could not be decoded) and let the user choose one;
-> free the array with `output_descriptors_free()`. Both require the account's
-> master fingerprint and apply it to origins that lack one.
+- `UR_DECODER_OK` is 0, so the return value is not a success flag.
+  Compare it with the state constants or use
+  `ur_decoder_state_is_error()` / `ur_decoder_state_is_terminal()`.
+- The progress estimates (`ur_decoder_estimated_percent_complete*()` and
+  the `fountain_decoder_*` equivalents) return `float`. Fragment
+  selection uses `double`, as the reference implementations do.
+- `ur_new()`, `ur_encoder_new()` and `ur_encoder_encode_single()` reject
+  a `type` that is not a valid UR type (`[a-z0-9-]+`, no leading or
+  trailing `-`). `fountain_encoder_new()` rejects
+  `max_fragment_len < 10`.
+- `output_descriptor_from_cbor_account()` returns the first output of a
+  `crypto-account`; `output_descriptors_from_cbor_account()` returns all
+  of them (NULL for an output that could not be decoded), freed with
+  `output_descriptors_free()`. Both require the account's master
+  fingerprint and apply it to origins that lack one.
 
 Type-specific helpers (`bytes_from_cbor`, `psbt_from_cbor`,
 `output_from_descriptor_string`, etc.) live in `src/types/*.h`.
@@ -142,7 +122,7 @@ ESP-IDF Kconfig.
 
 | Option | Default | Effect |
 |--------|---------|--------|
-| `UR_CRC32_SLICE_BY_8` | off | Slice-by-8 CRC32: ~2.7x faster, +8 KB flash for a const table. The default 64-byte nibble table is rarely a bottleneck (CRCs run per fragment, a few hundred bytes each). |
+| `UR_CRC32_SLICE_BY_8` | off | Slice-by-8 CRC32: about 2.7x faster on ESP32-P4, +8 KB flash for a const table. |
 | `UR_XOR_ESP32P4_SIMD` | on (ESP32-P4 only) | PIE 128-bit vector XOR for fountain-code mixing, with transparent word-wise fallback on unaligned data. Only exists on ESP32-P4; Kconfig opt-out. |
 | `UR_ALLOC_PSRAM` | on (ESP targets) | Route the library's buffers to PSRAM with internal-RAM fallback, keeping fountain-decoder churn out of scarce internal heap. Kconfig opt-out; no-op elsewhere. |
 | `UR_ENVELOPE_ONLY` | off | CMake: build only the UR transport layer (bytewords, fountain, multi-part assembly), excluding the `src/types/` payload codecs, for integrators that do their own CBOR. |
@@ -182,9 +162,15 @@ the link fails with undefined references to `ur_bundled_sha256_*`
 ### MicroPython wrapper (`uUR.c`)
 
 `uUR.c` at the repo root wraps the C library as a MicroPython module
-exposing `URDecoder`, `UREncoder`, `UR`, and `FountainEncoder`. For
-vanilla MicroPython USERMOD builds the repo-root `micropython.mk`
-provides the wiring; legacy ports wire it in their own build instead.
+exposing `URDecoder`, `UREncoder`, `UR`, and `FountainEncoder`. On
+Make-based MicroPython ports, `micropython.mk` builds it with the
+bundled SHA-256 (point `USER_C_MODULES` at the directory containing this
+repo). Legacy ports wire it in their own build instead.
+
+### CPython module (`python/uUR.c`)
+
+`pip install .` builds the same `uUR` module for CPython, with the
+bundled SHA-256.
 
 ## Repository layout
 
@@ -192,17 +178,21 @@ provides the wiring; legacy ports wire it in their own build instead.
 src/
   ur_encoder.c, ur_decoder.c, ur.c   # top-level UR API
   fountain_encoder.c, fountain_decoder.c, fountain_utils.c
-  bytewords.c, crc32.c
+  bytewords.c, crc32.c, utils.c
   sha256/                            # bundled SHA-256 + backend selector
   types/                             # CBOR + per-type encode/decode
 tests/
-  test_ur_*.c                        # one per UR type + negative
+  test_ur_*.c                        # test suites, one binary each
   test_harness.{c,h}, test_utils.{c,h}
   test_cases/                        # fixtures organized by type
+  esp-idf-smoke/                     # ESP-IDF build check (CI)
+python/uUR.c                         # CPython binding
 scripts/coverage.sh                  # wrapped by `make coverage`
-uUR.c                                # MicroPython wrapper
-CMakeLists.txt                       # ESP-IDF component
-micropython.mk                       # vanilla MicroPython USERMOD
+uUR.c                                # MicroPython binding
+CMakeLists.txt, Kconfig              # ESP-IDF component
+micropython.mk                       # MicroPython USERMOD
+setup.py, pyproject.toml             # CPython package
+format-src.sh                        # clang-format the C sources
 ```
 
 ## License

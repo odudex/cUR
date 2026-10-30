@@ -20,11 +20,11 @@
 // (MP_DEFINE_CONST_OBJ_TYPE) landed in v1.20, and finaliser allocation moved
 // to mp_obj_malloc_with_finaliser in v1.23 — so each change is probed
 // independently rather than through one version gate. This binding supports
-// BOTH the modern API (e.g. MicroPython 1.27) and the older MaixPy-era API
-// (< 1.19, e.g. the build Krux runs on). The trivial differences are absorbed
-// by the two shims below so the body of this file uses one (modern) spelling;
-// the type definitions and module registration, which cannot be unified
-// cleanly, use explicit #if/#else with the legacy branch kept verbatim.
+// both the current API and the API before v1.19. The trivial differences are
+// absorbed by the two shims below so the body of this file uses one (modern)
+// spelling; the type definitions and module registration, which cannot be
+// unified cleanly, use explicit #if/#else with the legacy branch kept
+// verbatim.
 // ---------------------------------------------------------------------------
 
 // MP_ERROR_TEXT (compressed ROM error strings) arrived in v1.12; on older
