@@ -573,7 +573,6 @@ static PyObject *UREncoder_next_part(uUR_UREncoder *self, PyObject *ignored) {
   char *part = NULL;
   bool ok = ur_encoder_next_part(self->encoder, &part);
   if (!ok) {
-    free(part);
     PyErr_SetString(PyExc_RuntimeError, "Failed to generate next part");
     return NULL;
   }

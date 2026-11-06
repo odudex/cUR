@@ -551,9 +551,6 @@ static mp_obj_t ur_encoder_next_part_py(mp_obj_t self_in) {
   bool result = ur_encoder_next_part(self->encoder, &ur_part);
 
   if (!result) {
-    if (ur_part) {
-      free(ur_part);
-    }
     mp_raise_msg(&mp_type_RuntimeError,
                  MP_ERROR_TEXT("Failed to generate next part"));
   }
