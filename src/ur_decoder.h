@@ -38,6 +38,15 @@
  * feeding parts — stray or misread QR frames are expected during scanning.
  * Duplicate frames are accepted and stay in UR_DECODER_PROCESSING.
  *
+ * The first well-formed multi-part frame fixes what is being decoded: its UR
+ * type, sequence length, message length and checksum. Later frames that
+ * disagree are rejected (UR_DECODER_ERROR_INVALID_TYPE or
+ * UR_DECODER_ERROR_INVALID_PART) and the decoder keeps waiting for the
+ * message it started. Frames are not authenticated, so a stray frame from
+ * another animation that happens to be read first holds the decoder to a
+ * message that never arrives: a caller that sees only such errors for a while
+ * should free the decoder and start a new one.
+ *
  * ur_decoder_get_result() returns non-NULL if and only if the state is
  * UR_DECODER_OK.
  */
@@ -63,7 +72,10 @@ typedef enum {
   /* terminal: the message is well-formed but declares a sequence length or
    * total size beyond this build's configured limits. Unlike a misread frame
    * this can never succeed, however long the caller keeps scanning, so it is
-   * terminal and callers should report it rather than continue. */
+   * terminal and callers should report it rather than continue. Only the
+   * frame that starts a message can report it: once a message is in progress,
+   * an over-size frame belongs to some other message and is rejected with
+   * UR_DECODER_ERROR_INVALID_PART. */
   UR_DECODER_ERROR_UNSUPPORTED_SIZE
 } ur_decoder_state_t;
 
