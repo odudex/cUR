@@ -1452,10 +1452,10 @@ fountain_decoder_initialize(fountain_decoder_t *decoder,
 
   // A single simple pivot can resolve many cached mixed equations at once,
   // so size the work queue up front rather than growing it a step at a time.
-  // Bounded by UR_MAX_MIXED_PARTS, not QUEUE_MAX_CAPACITY: what the queue has to
-  // absorb in one burst is the equations held in the mixed table, and that is
-  // where the cap actually bites. Best-effort - queue_enqueue() still grows on
-  // demand if a message genuinely needs more.
+  // Bounded by UR_MAX_MIXED_PARTS, not QUEUE_MAX_CAPACITY: what the queue has
+  // to absorb in one burst is the equations held in the mixed table, and that
+  // is where the cap actually bites. Best-effort - queue_enqueue() still grows
+  // on demand if a message genuinely needs more.
   if (!queue_reserve(&decoder->queue, part->seq_len < UR_MAX_MIXED_PARTS
                                           ? part->seq_len
                                           : UR_MAX_MIXED_PARTS)) {

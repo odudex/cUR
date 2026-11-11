@@ -231,8 +231,8 @@ static void test_alloc_failure_keeps_meaning(void) {
     uint8_t *cbor = output ? output_to_cbor(output, &len) : NULL;
     output_free(output);
     char *expected = cbor ? decode_and_render(cbor, len) : NULL;
-    ASSERT(expected && strncmp(expected, DESCRIPTORS[i],
-                               strlen(DESCRIPTORS[i])) == 0,
+    ASSERT(expected &&
+               strncmp(expected, DESCRIPTORS[i], strlen(DESCRIPTORS[i])) == 0,
            "descriptor round-trips without allocation failures");
     if (expected) {
       sweep_cbor = cbor;
@@ -260,9 +260,9 @@ static void encode_step(void) {
 }
 
 static bool encode_check(void) {
-  bool ok = !encode_cbor ||
-            (encode_len == encode_expected_len &&
-             memcmp(encode_cbor, encode_expected, encode_len) == 0);
+  bool ok =
+      !encode_cbor || (encode_len == encode_expected_len &&
+                       memcmp(encode_cbor, encode_expected, encode_len) == 0);
   free(encode_cbor);
   encode_cbor = NULL;
   return ok;
@@ -372,7 +372,8 @@ static void selection_step(void) {
 // What a part mixes is derived, not transmitted: a selection that differs from
 // the sender's decodes to garbage, so there is no acceptable approximation.
 static bool selection_check(void) {
-  bool ok = !selection_ok || part_indexes_equal(&selection, &selection_expected);
+  bool ok =
+      !selection_ok || part_indexes_equal(&selection, &selection_expected);
   free(selection.indexes);
   selection = (part_indexes_t){0};
   return ok;
@@ -403,10 +404,10 @@ static void session_step(void) {
       (void)ur_decoder_estimated_percent_complete_weighted(dec);
     }
     ur_result_t *result = ur_decoder_get_result(dec);
-    session_ok = state == UR_DECODER_OK && result &&
-                 result->cbor_len == sizeof session_message &&
-                 memcmp(result->cbor_data, session_message,
-                        sizeof session_message) == 0;
+    session_ok =
+        state == UR_DECODER_OK && result &&
+        result->cbor_len == sizeof session_message &&
+        memcmp(result->cbor_data, session_message, sizeof session_message) == 0;
   }
   ur_decoder_free(dec);
   ur_encoder_free(enc);

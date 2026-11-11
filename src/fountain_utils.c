@@ -216,11 +216,9 @@ static size_t choose_degree(size_t seq_len, prng_state_t *prng,
   return degree;
 }
 
-static UR_WARN_UNUSED_RESULT bool
-choose_fragments_internal(uint32_t seq_num, size_t seq_len, uint32_t checksum,
-                          part_indexes_t *result,
-                          random_sampler_t *cached_sampler,
-                          part_index_t *scratch) {
+static UR_WARN_UNUSED_RESULT bool choose_fragments_internal(
+    uint32_t seq_num, size_t seq_len, uint32_t checksum, part_indexes_t *result,
+    random_sampler_t *cached_sampler, part_index_t *scratch) {
   if (!result || seq_len == 0 || seq_len > FOUNTAIN_MAX_SEQ_LEN)
     return false;
 
