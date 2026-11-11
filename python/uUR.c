@@ -520,6 +520,15 @@ static int UREncoder_init(uUR_UREncoder *self, PyObject *args, PyObject *kwds) {
     return -1;
   }
 
+  if (!ur_encoder_within_limits(ur_get_cbor_len(ur->ur),
+                                (size_t)max_fragment_len,
+                                (size_t)min_fragment_len)) {
+    PyErr_SetString(PyExc_ValueError,
+                    "UR payload needs more parts or bytes than a decoder "
+                    "accepts");
+    return -1;
+  }
+
   ur_encoder_t *encoder =
       ur_encoder_new(ur_get_type(ur->ur), ur_get_cbor(ur->ur),
                      ur_get_cbor_len(ur->ur), (size_t)max_fragment_len,

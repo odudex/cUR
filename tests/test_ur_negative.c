@@ -1550,6 +1550,52 @@ static void test_stray_frames(void) {
   ur_encoder_free(enc);
 }
 
+// The encoder must not produce a stream this library's decoder refuses.
+static void test_encoder_respects_decoder_limits(void) {
+  printf("\n=== encoder_respects_decoder_limits ===\n");
+
+  size_t big_len = UR_MAX_MESSAGE_LEN + 1000;
+  uint8_t *big = malloc(big_len);
+  if (!big) {
+    ASSERT(false, "allocated the test message");
+    return;
+  }
+  for (size_t i = 0; i < big_len; i++)
+    big[i] = (uint8_t)(i * 13);
+
+  // 10 bytes per part: UR_MAX_SEQ_LEN parts fit, one more does not.
+  size_t at_cap = (size_t)UR_MAX_SEQ_LEN * 10;
+  ur_encoder_t *enc = ur_encoder_new("bytes", big, at_cap, 10, 0, 10);
+  ur_decoder_t *dec = ur_decoder_new();
+  ASSERT(enc && ur_encoder_seq_len(enc) == UR_MAX_SEQ_LEN &&
+             feed_encoder(dec, enc, 1) == UR_DECODER_PROCESSING,
+         "a message of exactly UR_MAX_SEQ_LEN parts encodes and is accepted");
+  ur_decoder_free(dec);
+  ur_encoder_free(enc);
+
+  enc = ur_encoder_new("bytes", big, at_cap + 1, 10, 0, 5);
+  ASSERT(!enc && !ur_encoder_within_limits(at_cap + 1, 10, 5),
+         "one part over UR_MAX_SEQ_LEN is refused");
+  ur_encoder_free(enc);
+
+  enc = ur_encoder_new("bytes", big, big_len, 1000, 0, 10);
+  ASSERT(!enc, "a multi-part message over UR_MAX_MESSAGE_LEN is refused");
+  ur_encoder_free(enc);
+
+  // A single part is never reassembled, and has no such limit.
+  enc = ur_encoder_new("bytes", big, big_len, big_len, 0, 10);
+  dec = ur_decoder_new();
+  ASSERT(enc && ur_encoder_is_single_part(enc) &&
+             feed_encoder(dec, enc, 1) == UR_DECODER_OK,
+         "a single-part message of the same size encodes and decodes");
+  ur_decoder_free(dec);
+  ur_encoder_free(enc);
+
+  ASSERT(!ur_encoder_within_limits(5, 100, 10),
+         "a message shorter than min_fragment_len cannot be fragmented");
+  free(big);
+}
+
 int main(void) {
   printf("=== UR Negative-Path Tests ===\n");
   test_null_and_empty();
@@ -1580,6 +1626,7 @@ int main(void) {
   test_descriptor_text_strict();
   test_script_nesting();
   test_stray_frames();
+  test_encoder_respects_decoder_limits();
 
   printf("\n=== Summary ===\n");
   printf("Tests passed: %d/%d\n", asserts - failures, asserts);

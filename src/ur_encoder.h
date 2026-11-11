@@ -38,6 +38,22 @@ UR_WARN_UNUSED_RESULT bool ur_encoder_encode_single(const char *type,
                                                     char **ur_string_out);
 
 /**
+ * Whether a message can be encoded within the limits ur_decoder enforces
+ * (UR_MAX_SEQ_LEN parts and, when it takes more than one part,
+ * UR_MAX_MESSAGE_LEN bytes; see ur_decoder.h). ur_encoder_new() refuses a
+ * message that fails this, since this library's decoder would reject the
+ * stream as UR_DECODER_ERROR_UNSUPPORTED_SIZE.
+ * @param cbor_len Length of CBOR data
+ * @param max_fragment_len Maximum fragment length
+ * @param min_fragment_len Minimum fragment length
+ * @return true if it fits; false if it does not, or cannot be fragmented
+ *         with these lengths at all
+ */
+UR_WARN_UNUSED_RESULT bool ur_encoder_within_limits(size_t cbor_len,
+                                                    size_t max_fragment_len,
+                                                    size_t min_fragment_len);
+
+/**
  * Create new UR encoder for multi-part encoding
  * @param type Valid UR type: [a-z0-9-]+ with no leading/trailing dash
  * @param cbor_data CBOR-encoded data
@@ -45,7 +61,8 @@ UR_WARN_UNUSED_RESULT bool ur_encoder_encode_single(const char *type,
  * @param max_fragment_len Maximum fragment length
  * @param first_seq_num First sequence number (default 0)
  * @param min_fragment_len Minimum fragment length (default 10)
- * @return Pointer to encoder or NULL on error
+ * @return Pointer to encoder or NULL on error, including a message that is
+ *         not ur_encoder_within_limits()
  */
 UR_WARN_UNUSED_RESULT ur_encoder_t *
 ur_encoder_new(const char *type, const uint8_t *cbor_data, size_t cbor_len,

@@ -4,6 +4,7 @@
 
 #include "ur_encoder.h"
 #include "bytewords.h"
+#include "ur_decoder.h" // UR_MAX_SEQ_LEN, UR_MAX_MESSAGE_LEN
 #include "utils.h"
 #include <ctype.h>
 #include <inttypes.h>
@@ -83,10 +84,28 @@ bool ur_encoder_encode_single(const char *type, const uint8_t *cbor_data,
   return true;
 }
 
+bool ur_encoder_within_limits(size_t cbor_len, size_t max_fragment_len,
+                              size_t min_fragment_len) {
+  size_t fragment_len = fountain_encoder_find_nominal_fragment_length(
+      cbor_len, min_fragment_len, max_fragment_len);
+  if (fragment_len == 0)
+    return false;
+
+  // A single part is not reassembled, so only its own size limits it.
+  size_t seq_len = cbor_len / fragment_len + (cbor_len % fragment_len ? 1 : 0);
+  return seq_len == 1 ||
+         (seq_len <= UR_MAX_SEQ_LEN && cbor_len <= UR_MAX_MESSAGE_LEN);
+}
+
 ur_encoder_t *ur_encoder_new(const char *type, const uint8_t *cbor_data,
                              size_t cbor_len, size_t max_fragment_len,
                              uint32_t first_seq_num, size_t min_fragment_len) {
   if (!type || !is_ur_type(type) || !cbor_data || cbor_len == 0) {
+    return NULL;
+  }
+
+  // Refuse to produce a stream ur_decoder would reject as over its limits.
+  if (!ur_encoder_within_limits(cbor_len, max_fragment_len, min_fragment_len)) {
     return NULL;
   }
 
