@@ -162,7 +162,10 @@ registry_item_t *output_from_data_item(cbor_value_t *data_item) {
     return NULL;
   }
 
-  return output_to_registry_item(output);
+  registry_item_t *item = output_to_registry_item(output);
+  if (!item)
+    output_free(output);
+  return item;
 }
 
 // Registry item interface
@@ -194,15 +197,25 @@ cbor_value_t *output_to_data_item(output_data_t *output) {
     if (!m)
       return NULL;
     content = cbor_value_new_tag(CRYPTO_HDKEY_TAG, m);
+    if (!content)
+      cbor_value_free(m);
   } else {
     content = multi_key_to_data_item(output->crypto_key.multi_key);
   }
   if (!content)
     return NULL;
 
-  // Wrap with script expression tags (innermost to outermost)
-  for (int i = (int)output->script_expression_count - 1; i >= 0; i--)
-    content = cbor_value_new_tag(output->script_expressions[i]->tag, content);
+  // Wrap with script expression tags (innermost to outermost).
+  // cbor_value_new_tag() takes ownership of its content only on success.
+  for (size_t i = output->script_expression_count; i > 0; i--) {
+    cbor_value_t *tagged =
+        cbor_value_new_tag(output->script_expressions[i - 1]->tag, content);
+    if (!tagged) {
+      cbor_value_free(content);
+      return NULL;
+    }
+    content = tagged;
+  }
 
   return content;
 }

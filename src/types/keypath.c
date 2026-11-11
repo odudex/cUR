@@ -166,7 +166,10 @@ registry_item_t *keypath_from_data_item(cbor_value_t *data_item) {
   if (!keypath)
     return NULL;
 
-  return keypath_to_registry_item(keypath);
+  registry_item_t *item = keypath_to_registry_item(keypath);
+  if (!item)
+    keypath_free(keypath);
+  return item;
 }
 
 cbor_value_t *keypath_to_data_item(keypath_data_t *keypath) {

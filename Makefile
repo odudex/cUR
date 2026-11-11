@@ -52,7 +52,7 @@ TEST_STEMS = bytes_decoder bytes_encoder output_decoder output_encoder \
              weighted_progress gaussian negative envelope_api \
              fountain_utils
 
-# test_ur_alloc wraps malloc() at link time, which needs GNU ld.
+# test_ur_alloc wraps the allocator at link time, which needs GNU ld.
 ifeq ($(shell uname -s),Linux)
   TEST_STEMS += alloc
 endif
@@ -179,7 +179,7 @@ $(TEST_HARNESS_OBJECT): tests/test_harness.c tests/test_harness.h
 tests/test_ur_%: tests/test_ur_%.c $(TEST_SUPPORT_OBJECTS) $(TARGET)
 	$(CC) $(CFLAGS) $(INCLUDES) $< $(TEST_SUPPORT_OBJECTS) -L$(SRCDIR) -lur $(LDFLAGS) -o $@
 
-tests/test_ur_alloc: LDFLAGS += -Wl,--wrap=malloc
+tests/test_ur_alloc: LDFLAGS += -Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free
 
 # Generate a `test-<name>` phony target per stem that runs the corresponding binary.
 define TEST_RUN_RULE

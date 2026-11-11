@@ -102,7 +102,7 @@ for test_file in "${TEST_FILES[@]}"; do
     echo -e "  Building ${test_name}..."
     test_ldflags=""
     if [ "$test_name" = "test_ur_alloc" ]; then
-        test_ldflags="-Wl,--wrap=malloc"
+        test_ldflags="-Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free"
     fi
     gcc $CFLAGS $INCLUDES "$test_file" $SUPPORT_OBJS -Lsrc -lur_cov -lm $test_ldflags -o "tests/${test_name}_cov" --coverage
 

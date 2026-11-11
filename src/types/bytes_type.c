@@ -90,7 +90,10 @@ registry_item_t *bytes_from_data_item(cbor_value_t *data_item) {
   if (!bytes)
     return NULL;
 
-  return bytes_to_registry_item(bytes);
+  registry_item_t *item = bytes_to_registry_item(bytes);
+  if (!item)
+    bytes_free(bytes);
+  return item;
 }
 
 // Registry item interface for Bytes
