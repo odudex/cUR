@@ -169,6 +169,14 @@ static const char *const DESCRIPTORS[] = {
 };
 #define DESCRIPTOR_COUNT (sizeof DESCRIPTORS / sizeof DESCRIPTORS[0])
 
+// Decode a crypto-output and render it; NULL when either step fails.
+static char *decode_and_render(const uint8_t *cbor, size_t len) {
+  output_data_t *output = output_from_cbor(cbor, len);
+  char *descriptor = output ? output_descriptor(output, true) : NULL;
+  output_free(output);
+  return descriptor;
+}
+
 // Run `step` once to count its allocations, then once more per allocation with
 // that one failing. `check` judges each run and frees what it produced; a run
 // that leaves a block behind is a leak. Returns the number of runs that were
@@ -194,6 +202,49 @@ static long sweep(void (*step)(void), bool (*check)(void)) {
   return rejected;
 }
 
+static const uint8_t *sweep_cbor;
+static size_t sweep_cbor_len;
+static const char *sweep_expected;
+static char *sweep_descriptor;
+
+static void decode_step(void) {
+  sweep_descriptor = decode_and_render(sweep_cbor, sweep_cbor_len);
+}
+
+static bool decode_check(void) {
+  bool ok = !sweep_descriptor || strcmp(sweep_descriptor, sweep_expected) == 0;
+  free(sweep_descriptor);
+  sweep_descriptor = NULL;
+  return ok;
+}
+
+// A decode that runs out of memory must fail. Returning a descriptor anyway,
+// with an optional field (the origin path, the network) silently missing,
+// hands the caller a different wallet under a valid checksum.
+static void test_alloc_failure_keeps_meaning(void) {
+  printf("\n=== alloc_failure_keeps_meaning ===\n");
+
+  for (size_t i = 0; i < DESCRIPTOR_COUNT; i++) {
+    output_data_t *output = output_from_descriptor_string(DESCRIPTORS[i]);
+    size_t len = 0;
+    uint8_t *cbor = output ? output_to_cbor(output, &len) : NULL;
+    output_free(output);
+    char *expected = cbor ? decode_and_render(cbor, len) : NULL;
+    ASSERT(expected && strncmp(expected, DESCRIPTORS[i],
+                               strlen(DESCRIPTORS[i])) == 0,
+           "descriptor round-trips without allocation failures");
+    if (expected) {
+      sweep_cbor = cbor;
+      sweep_cbor_len = len;
+      sweep_expected = expected;
+      ASSERT(sweep(decode_step, decode_check) == 0,
+             "  -> and fails or decodes identically when any allocation fails");
+    }
+    free(expected);
+    free(cbor);
+  }
+}
+
 // --- encode: descriptor text -> crypto-output CBOR -------------------------
 
 static const char *encode_text;
@@ -216,6 +267,62 @@ static bool encode_check(void) {
   return ok;
 }
 
+// --- decode: crypto-account -> descriptors ---------------------------------
+
+static uint8_t account_cbor[1024];
+static size_t account_len;
+static char **account_descriptors;
+static size_t account_count;
+
+static void account_step(void) {
+  account_descriptors = output_descriptors_from_cbor_account(
+      account_cbor, account_len, &account_count);
+}
+
+// An output that could not be decoded is NULL; one that was must be right.
+static bool account_check(void) {
+  bool ok = !account_descriptors || account_count == DESCRIPTOR_COUNT;
+  for (size_t i = 0; ok && i < account_count; i++)
+    ok = !account_descriptors[i] ||
+         strncmp(account_descriptors[i], DESCRIPTORS[i],
+                 strlen(DESCRIPTORS[i])) == 0;
+  output_descriptors_free(account_descriptors, account_count);
+  account_descriptors = NULL;
+  return ok;
+}
+
+// {1: 0x3442193e, 2: [#6.308(output), ...]}
+static bool build_account(void) {
+  size_t n = 0;
+  account_cbor[n++] = 0xa2;
+  account_cbor[n++] = 0x01;
+  account_cbor[n++] = 0x1a;
+  account_cbor[n++] = 0x34;
+  account_cbor[n++] = 0x42;
+  account_cbor[n++] = 0x19;
+  account_cbor[n++] = 0x3e;
+  account_cbor[n++] = 0x02;
+  account_cbor[n++] = (uint8_t)(0x80 | DESCRIPTOR_COUNT);
+  for (size_t i = 0; i < DESCRIPTOR_COUNT; i++) {
+    output_data_t *output = output_from_descriptor_string(DESCRIPTORS[i]);
+    size_t len = 0;
+    uint8_t *cbor = output ? output_to_cbor(output, &len) : NULL;
+    output_free(output);
+    if (!cbor || n + 3 + len > sizeof account_cbor) {
+      free(cbor);
+      return false;
+    }
+    account_cbor[n++] = 0xd9; // tag 308
+    account_cbor[n++] = 0x01;
+    account_cbor[n++] = 0x34;
+    memcpy(account_cbor + n, cbor, len);
+    n += len;
+    free(cbor);
+  }
+  account_len = n;
+  return true;
+}
+
 // --- decode: the simple types ----------------------------------------------
 
 static bool simple_ok;
@@ -230,7 +337,8 @@ static void simple_step(void) {
   bip39_data_t *bip39 = bip39_from_cbor(words, sizeof words);
   size_t count = 0;
   char **list = bip39 ? bip39_get_words(bip39, &count) : NULL;
-  if (bip39 && (count != 2 || strcmp(list[0], "abc")))
+  if (bip39 && (count != 2 || strcmp(list[0], "abc") || !bip39->lang ||
+                strcmp(bip39->lang, "en")))
     simple_ok = false;
   bip39_free(bip39);
 
@@ -304,6 +412,8 @@ static void test_alloc_failure_sweeps(void) {
     free(encode_expected);
   }
 
+  ASSERT(build_account() && sweep(account_step, account_check) == 0,
+         "crypto-account to descriptors");
   ASSERT(sweep(simple_step, simple_check) == 0, "bip39, bytes and psbt");
 
   for (size_t i = 0; i < sizeof session_message; i++)
@@ -316,6 +426,7 @@ int main(void) {
   printf("=== UR Allocation Tests ===\n");
   test_reassembly_retry();
   test_cbor_length_checked_before_alloc();
+  test_alloc_failure_keeps_meaning();
   test_alloc_failure_sweeps();
   printf("\n=== Summary ===\n");
   printf("Tests passed: %d/%d\n", asserts - failures, asserts);

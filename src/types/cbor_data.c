@@ -178,13 +178,12 @@ cbor_value_t *cbor_map_get_int(cbor_value_t *map, int64_t key) {
   if (key < 0)
     return NULL; // Negative keys not used
 
-  cbor_value_t *key_val = cbor_value_new_unsigned_int((uint64_t)key);
-  if (!key_val)
-    return NULL;
-
-  cbor_value_t *result = cbor_map_get(map, key_val);
-  cbor_value_free(key_val);
-  return result;
+  // A stack key, not a heap one: an allocation failure here would read as
+  // "key absent", and callers treat an absent optional field (an origin path,
+  // a network) as a different, still valid, value.
+  cbor_value_t key_val = {.type = CBOR_TYPE_UNSIGNED_INT,
+                          .value.uint_val = (uint64_t)key};
+  return cbor_map_get(map, &key_val);
 }
 
 // CBOR value accessors
