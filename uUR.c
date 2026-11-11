@@ -379,13 +379,16 @@ static void ur_decoder_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
         return;
       }
 
-      // Create UR object
-      mp_obj_t type_str = mp_obj_new_str(result->type, strlen(result->type));
-      mp_obj_t cbor_bytes =
-          mp_obj_new_bytes(result->cbor_data, result->cbor_len);
-
-      mp_obj_t args[2] = {type_str, cbor_bytes};
-      dest[0] = ur_make_new(&mp_type_ur, 2, 0, args);
+      // Copy the result straight into a UR, wrapper first as in
+      // ur_make_new(). Going through ur_make_new() itself would copy the
+      // payload once more, into a bytes object made only to be its argument.
+      mp_obj_ur_t *ur = mp_obj_malloc_with_finaliser(mp_obj_ur_t, &mp_type_ur);
+      ur->ur = ur_new(result->type, result->cbor_data, result->cbor_len);
+      if (!ur->ur) {
+        mp_raise_msg(&mp_type_MemoryError,
+                     MP_ERROR_TEXT("Failed to create UR object"));
+      }
+      dest[0] = MP_OBJ_FROM_PTR(ur);
     } else if (attr == MP_QSTR_state) {
       // Closed decoder -> NULL -> DECODER_ERR_NULL_POINTER, matching the C
       // API's get_state(NULL) behavior.
