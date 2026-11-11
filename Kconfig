@@ -36,4 +36,19 @@ config UR_ALLOC_PSRAM
         chasing XOR throughput on ESP32-P4 or reserving PSRAM for
         framebuffers. Harmless no-op when SPIRAM is not configured.
 
+config UR_MAX_MIXED_PARTS
+    int "Fountain decoder: mixed parts kept at once"
+    range 16 4096
+    default 256
+    help
+        The most mixed parts (fountain frames not yet reduced to a
+        single fragment) the decoder keeps while a multi-part UR is
+        scanned. One arriving when the table is full is dropped, and
+        the animation has to supply another.
+
+        This only matters for messages of more than about this many
+        fragments scanned with many frames missed: raising it shortens
+        those scans at the cost of working memory, roughly one
+        fragment plus two bytes per fragment it mixes for each entry.
+
 endmenu

@@ -58,6 +58,10 @@ if(ESP_PLATFORM)
     if(CONFIG_UR_XOR_ESP32P4_SIMD)
         target_compile_definitions(${COMPONENT_LIB} PUBLIC UR_XOR_ESP32P4_SIMD)
     endif()
+    if(DEFINED CONFIG_UR_MAX_MIXED_PARTS)
+        target_compile_definitions(${COMPONENT_LIB} PRIVATE
+            UR_MAX_MIXED_PARTS=${CONFIG_UR_MAX_MIXED_PARTS})
+    endif()
     # PSRAM routing is default-on under ESP_PLATFORM so ESP builds that
     # bypass this CMakeLists still get it; the Kconfig opt-out therefore
     # maps to a negative define.
