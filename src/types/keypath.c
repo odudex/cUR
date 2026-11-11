@@ -21,6 +21,9 @@ keypath_data_t *keypath_new(path_component_t *components,
   if (component_count > 0 && !components)
     return NULL;
 
+  if (component_count > KEYPATH_MAX_COMPONENTS)
+    return NULL;
+
   keypath_data_t *keypath = safe_malloc(sizeof(keypath_data_t));
   if (!keypath)
     return NULL;
@@ -180,47 +183,41 @@ cbor_value_t *keypath_to_data_item(keypath_data_t *keypath) {
   if (!map)
     return NULL;
 
-  if (keypath->component_count > 0) {
-    cbor_value_t *arr = cbor_value_new_array();
-    if (!arr) {
-      cbor_value_free(map);
-      return NULL;
-    }
-    // A path that cannot be encoded in full must not be encoded at all: a
-    // silently shortened derivation path describes a different key. Every
-    // append is checked, and any failure abandons the whole map.
-    for (size_t i = 0; i < keypath->component_count; i++) {
-      cbor_value_t *index =
-          keypath->components[i].wildcard
-              ? cbor_value_new_array()
-              : cbor_value_new_unsigned_int(keypath->components[i].index);
-      if (!index || !cbor_array_append(arr, index)) {
-        cbor_value_free(index);
-        goto fail_arr;
-      }
-
-      cbor_value_t *hardened =
-          cbor_value_new_bool(keypath->components[i].hardened);
-      if (!hardened || !cbor_array_append(arr, hardened)) {
-        cbor_value_free(hardened);
-        goto fail_arr;
-      }
-    }
-
-    // cbor_map_set() takes ownership of both only when it succeeds.
-    cbor_value_t *components_key = cbor_value_new_unsigned_int(1);
-    if (!components_key || !cbor_map_set(map, components_key, arr)) {
-      cbor_value_free(components_key);
-      goto fail_arr;
-    }
-    goto components_done;
-
-  fail_arr:
-    cbor_value_free(arr);
+  // The components array is required (BCR-2020-007) and is written even when
+  // empty: a path that is only a source fingerprint, as in [fingerprint]xpub,
+  // is otherwise a map the decoder rejects.
+  cbor_value_t *arr = cbor_value_new_array();
+  if (!arr) {
     cbor_value_free(map);
     return NULL;
   }
-components_done:
+  // A path that cannot be encoded in full must not be encoded at all: a
+  // silently shortened derivation path describes a different key. Every
+  // append is checked, and any failure abandons the whole map.
+  for (size_t i = 0; i < keypath->component_count; i++) {
+    cbor_value_t *index =
+        keypath->components[i].wildcard
+            ? cbor_value_new_array()
+            : cbor_value_new_unsigned_int(keypath->components[i].index);
+    if (!index || !cbor_array_append(arr, index)) {
+      cbor_value_free(index);
+      goto fail_arr;
+    }
+
+    cbor_value_t *hardened =
+        cbor_value_new_bool(keypath->components[i].hardened);
+    if (!hardened || !cbor_array_append(arr, hardened)) {
+      cbor_value_free(hardened);
+      goto fail_arr;
+    }
+  }
+
+  // cbor_map_set() takes ownership of both only when it succeeds.
+  cbor_value_t *components_key = cbor_value_new_unsigned_int(1);
+  if (!components_key || !cbor_map_set(map, components_key, arr)) {
+    cbor_value_free(components_key);
+    goto fail_arr;
+  }
 
   if (keypath->source_fingerprint) {
     uint32_t fp = ((uint32_t)keypath->source_fingerprint[0] << 24) |
@@ -249,6 +246,11 @@ components_done:
   }
 
   return map;
+
+fail_arr:
+  cbor_value_free(arr);
+  cbor_value_free(map);
+  return NULL;
 }
 
 // Registry item interface

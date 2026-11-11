@@ -410,9 +410,9 @@ char *hd_key_bip32_key(hd_key_data_t *hd_key, bool include_derivation_path) {
 
   // Build full descriptor string with derivation paths
   char *derivation = NULL;
-  if (hd_key->origin && hd_key->origin->source_fingerprint &&
-      hd_key->origin->component_count > 0) {
-    // Format: [fingerprint/path]
+  if (hd_key->origin && hd_key->origin->source_fingerprint) {
+    // Format: [fingerprint/path], or [fingerprint] for a key of the master
+    // itself, whose path is empty.
     char fp_hex[9];
     sprintf(fp_hex, "%02x%02x%02x%02x", hd_key->origin->source_fingerprint[0],
             hd_key->origin->source_fingerprint[1],
@@ -430,7 +430,7 @@ char *hd_key_bip32_key(hd_key_data_t *hd_key, bool include_derivation_path) {
     }
     derivation = safe_malloc(strlen(fp_hex) + strlen(path) + 4); // [fp/path]
     if (derivation) {
-      sprintf(derivation, "[%s/%s]", fp_hex, path);
+      sprintf(derivation, *path ? "[%s/%s]" : "[%s]", fp_hex, path);
     }
     free(path);
     if (!derivation) {
