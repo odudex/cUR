@@ -49,30 +49,22 @@ void ur_decoder_free(ur_decoder_t *decoder) {
   free(decoder);
 }
 
-static UR_WARN_UNUSED_RESULT bool validate_part_type(ur_decoder_t *decoder,
-                                                     const char *type) {
-  if (!decoder || !type)
-    return false;
+// Whether a part of this type can belong to the message being decoded: any
+// valid type until a part has established one, only that type afterwards.
+static UR_WARN_UNUSED_RESULT bool part_type_matches(const ur_decoder_t *decoder,
+                                                    const char *type) {
+  return decoder->expected_type ? strcmp(decoder->expected_type, type) == 0
+                                : is_ur_type(type);
+}
 
-  if (!decoder->expected_type) {
-    if (!is_ur_type(type)) {
-      decoder->state = UR_DECODER_ERROR_INVALID_TYPE;
-      return false;
-    }
+// Fix the message type. Called only for a part that has passed every check,
+// so a misread or stray first frame cannot commit the decoder to a type the
+// real message does not have.
+static UR_WARN_UNUSED_RESULT bool establish_type(ur_decoder_t *decoder,
+                                                 const char *type) {
+  if (!decoder->expected_type)
     decoder->expected_type = safe_strdup(type);
-    if (!decoder->expected_type) {
-      decoder->state = UR_DECODER_ERROR_MEMORY;
-      return false;
-    }
-    return true;
-  }
-
-  if (strcmp(decoder->expected_type, type) != 0) {
-    decoder->state = UR_DECODER_ERROR_INVALID_TYPE;
-    return false;
-  }
-
-  return true;
+  return decoder->expected_type != NULL;
 }
 
 static UR_WARN_UNUSED_RESULT ur_result_t *decode_single_part(const char *type,
@@ -274,8 +266,10 @@ ur_decoder_state_t ur_decoder_receive_part(ur_decoder_t *decoder,
     return decoder->state;
   }
 
-  if (!validate_part_type(decoder, type))
+  if (!part_type_matches(decoder, type)) {
+    decoder->state = UR_DECODER_ERROR_INVALID_TYPE;
     goto cleanup;
+  }
 
   if (component_count == 1) {
     decoder->result = decode_single_part(type, components[0]);
@@ -383,8 +377,20 @@ ur_decoder_state_t ur_decoder_receive_part(ur_decoder_t *decoder,
   // scan on the strength of a path component alone: "ur:bytes/1-1025/notbyte"
   // is a misread frame, not an oversized message, and must stay transient so
   // the next frame still gets a chance.
+  //
+  // A message already in progress is within the limits, so an over-size frame
+  // cannot be part of it. That is a stray frame from another message, rejected
+  // like any other foreign frame and not a reason to abandon the scan.
   if (over_max_seq_len || cbor_message_len > UR_MAX_MESSAGE_LEN) {
-    decoder->state = UR_DECODER_ERROR_UNSUPPORTED_SIZE;
+    decoder->state =
+        fountain_decoder_expected_part_count(decoder->fountain_decoder) > 0
+            ? UR_DECODER_ERROR_INVALID_PART
+            : UR_DECODER_ERROR_UNSUPPORTED_SIZE;
+    goto cleanup;
+  }
+
+  if (!establish_type(decoder, type)) {
+    decoder->state = UR_DECODER_ERROR_MEMORY;
     goto cleanup;
   }
 

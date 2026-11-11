@@ -1476,6 +1476,80 @@ static void test_script_nesting(void) {
   ASSERT(!nesting_decodes(SCRIPT_EXPR_RAW, 0), "raw(key) rejected");
 }
 
+// Feed up to `max_parts` parts of `enc` to `dec`; returns the last state.
+static ur_decoder_state_t feed_encoder(ur_decoder_t *dec, ur_encoder_t *enc,
+                                       size_t max_parts) {
+  ur_decoder_state_t state = ur_decoder_get_state(dec);
+  for (size_t i = 0; i < max_parts && !ur_decoder_state_is_terminal(state);
+       i++) {
+    char *part = NULL;
+    if (!ur_encoder_next_part(enc, &part))
+      break;
+    state = ur_decoder_receive_part(dec, part);
+    free(part);
+  }
+  return state;
+}
+
+// Frames that do not belong to the message must not stop it from decoding.
+static void test_stray_frames(void) {
+  printf("\n=== stray_frames ===\n");
+
+  uint8_t message[300];
+  for (size_t i = 0; i < sizeof message; i++)
+    message[i] = (uint8_t)(i * 7);
+
+  // A frame that fails validation says nothing about the message, its type
+  // included: these name crypto-psbt, the stream that follows is bytes.
+  static const char *const misread[] = {
+      "ur:crypto-psbt/1-3/aaaaaaaaaaaa", // not bytewords
+      "ur:crypto-psbt/aeadaoaxaeadaoax", // single part, wrong CRC
+      "ur:crypto-psbt/1-3/aeadaoaxaeadaoax",
+  };
+  for (size_t i = 0; i < sizeof misread / sizeof misread[0]; i++) {
+    ur_encoder_t *enc =
+        ur_encoder_new("bytes", message, sizeof message, 50, 0, 10);
+    ur_decoder_t *dec = ur_decoder_new();
+    ur_decoder_state_t state = ur_decoder_receive_part(dec, misread[i]);
+    ASSERT(ur_decoder_state_is_error(state) &&
+               !ur_decoder_state_is_terminal(state),
+           misread[i]);
+    ASSERT(enc && feed_encoder(dec, enc, 40) == UR_DECODER_OK,
+           "  -> and a stream of another type still decodes");
+    ur_decoder_free(dec);
+    ur_encoder_free(enc);
+  }
+
+  // A validated frame does fix the type.
+  ur_encoder_t *enc =
+      ur_encoder_new("bytes", message, sizeof message, 50, 0, 10);
+  ur_encoder_t *other =
+      ur_encoder_new("crypto-psbt", message, sizeof message, 50, 0, 10);
+  ur_decoder_t *dec = ur_decoder_new();
+  ASSERT(enc && other && feed_encoder(dec, enc, 2) == UR_DECODER_PROCESSING,
+         "started a bytes message");
+  ASSERT(feed_encoder(dec, other, 1) == UR_DECODER_ERROR_INVALID_TYPE,
+         "a valid frame of another type is rejected");
+
+  // So does an over-size frame once a message is in progress: it cannot be
+  // part of that message, and must not end the scan.
+  char *oversize = make_multipart_ur(1, 2000, 20000, 0x11223344u, 10);
+  ASSERT(oversize &&
+             ur_decoder_receive_part(dec, oversize) ==
+                 UR_DECODER_ERROR_INVALID_PART,
+         "an over-size frame mid-message is a transient INVALID_PART");
+  free(oversize);
+  ur_result_t *result = NULL;
+  ASSERT(feed_encoder(dec, enc, 40) == UR_DECODER_OK &&
+             (result = ur_decoder_get_result(dec)) != NULL &&
+             result->cbor_len == sizeof message &&
+             memcmp(result->cbor_data, message, sizeof message) == 0,
+         "  -> and the message still completes");
+  ur_decoder_free(dec);
+  ur_encoder_free(other);
+  ur_encoder_free(enc);
+}
+
 int main(void) {
   printf("=== UR Negative-Path Tests ===\n");
   test_null_and_empty();
@@ -1505,6 +1579,7 @@ int main(void) {
   test_keypath_lengths();
   test_descriptor_text_strict();
   test_script_nesting();
+  test_stray_frames();
 
   printf("\n=== Summary ===\n");
   printf("Tests passed: %d/%d\n", asserts - failures, asserts);
