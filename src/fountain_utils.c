@@ -180,10 +180,13 @@ int random_sampler_next(random_sampler_t *sampler, prng_state_t *rng) {
   return (r2 < sampler->probs[i]) ? i : sampler->aliases[i];
 }
 
+// The number of fragments a part mixes, from 1 to seq_len, or 0 if the
+// sampler could not be built. There is no fallback degree: fragment selection
+// is derived from it, so a guess would select fragments the sender did not.
 static size_t choose_degree(size_t seq_len, prng_state_t *prng,
                             random_sampler_t *cached_sampler) {
   if (seq_len == 0)
-    return 1;
+    return 0;
 
   if (cached_sampler && cached_sampler->probs) {
     int degree_index = random_sampler_next(cached_sampler, prng);
@@ -192,7 +195,7 @@ static size_t choose_degree(size_t seq_len, prng_state_t *prng,
 
   double *degree_probs = safe_malloc(seq_len * sizeof(double));
   if (!degree_probs)
-    return 1;
+    return 0;
 
   for (size_t i = 0; i < seq_len; i++) {
     degree_probs[i] = 1.0 / (i + 1);
@@ -201,7 +204,7 @@ static size_t choose_degree(size_t seq_len, prng_state_t *prng,
   random_sampler_t sampler = {0};
   if (!random_sampler_init(&sampler, degree_probs, seq_len)) {
     free(degree_probs);
-    return 1;
+    return 0;
   }
 
   int degree_index = random_sampler_next(&sampler, prng);
@@ -216,8 +219,9 @@ static size_t choose_degree(size_t seq_len, prng_state_t *prng,
 static UR_WARN_UNUSED_RESULT bool
 choose_fragments_internal(uint32_t seq_num, size_t seq_len, uint32_t checksum,
                           part_indexes_t *result,
-                          random_sampler_t *cached_sampler, size_t *scratch) {
-  if (!result || seq_len == 0)
+                          random_sampler_t *cached_sampler,
+                          part_index_t *scratch) {
+  if (!result || seq_len == 0 || seq_len > FOUNTAIN_MAX_SEQ_LEN)
     return false;
 
   part_indexes_clear(result);
@@ -240,23 +244,26 @@ choose_fragments_internal(uint32_t seq_num, size_t seq_len, uint32_t checksum,
   prng_init_from_bytes(&rng, seed, 8);
 
   size_t degree = choose_degree(seq_len, &rng, cached_sampler);
+  if (degree == 0)
+    return false;
   size_t draws = (degree < seq_len) ? degree : seq_len;
 
   if (result->capacity < draws) {
-    size_t *grown = safe_realloc(result->indexes, draws * sizeof(size_t));
+    part_index_t *grown =
+        safe_realloc(result->indexes, draws * sizeof(part_index_t));
     if (!grown)
       return false;
     result->indexes = grown;
     result->capacity = draws;
   }
 
-  size_t *remaining_indexes =
-      scratch ? scratch : safe_malloc_uninit(seq_len * sizeof(size_t));
+  part_index_t *remaining_indexes =
+      scratch ? scratch : safe_malloc_uninit(seq_len * sizeof(part_index_t));
   if (!remaining_indexes)
     return false;
 
   for (size_t i = 0; i < seq_len; i++) {
-    remaining_indexes[i] = i;
+    remaining_indexes[i] = (part_index_t)i;
   }
 
   // Only the first `degree` drawn values matter. Stop after `degree`
@@ -275,7 +282,7 @@ choose_fragments_internal(uint32_t seq_num, size_t seq_len, uint32_t checksum,
       break;
     }
     memmove(remaining_indexes + idx, remaining_indexes + idx + 1,
-            (remaining_count - 1 - idx) * sizeof(size_t));
+            (remaining_count - 1 - idx) * sizeof(part_index_t));
     remaining_count--;
   }
 
@@ -300,7 +307,7 @@ bool choose_fragments_cached(uint32_t seq_num, size_t seq_len,
 bool choose_fragments_with_scratch(uint32_t seq_num, size_t seq_len,
                                    uint32_t checksum, part_indexes_t *result,
                                    random_sampler_t *cached_sampler,
-                                   size_t *scratch) {
+                                   part_index_t *scratch) {
   return choose_fragments_internal(seq_num, seq_len, checksum, result,
                                    cached_sampler, scratch);
 }
@@ -329,11 +336,11 @@ bool part_indexes_is_strict_subset(const part_indexes_t *a,
 }
 
 static UR_WARN_UNUSED_RESULT bool
-part_indexes_append_sorted(part_indexes_t *indexes, size_t value) {
+part_indexes_append_sorted(part_indexes_t *indexes, part_index_t value) {
   if (indexes->count >= indexes->capacity) {
     size_t new_capacity = indexes->capacity == 0 ? 4 : indexes->capacity * 2;
-    size_t *new_idx =
-        safe_realloc(indexes->indexes, new_capacity * sizeof(size_t));
+    part_index_t *new_idx =
+        safe_realloc(indexes->indexes, new_capacity * sizeof(part_index_t));
     if (!new_idx)
       return false;
     indexes->indexes = new_idx;
@@ -394,14 +401,15 @@ bool part_indexes_copy(const part_indexes_t *src, part_indexes_t *dst) {
     return true;
 
   if (dst->capacity < src->count) {
-    size_t *new_idx = safe_realloc(dst->indexes, src->count * sizeof(size_t));
+    part_index_t *new_idx =
+        safe_realloc(dst->indexes, src->count * sizeof(part_index_t));
     if (!new_idx)
       return false;
     dst->indexes = new_idx;
     dst->capacity = src->count;
   }
 
-  memcpy(dst->indexes, src->indexes, src->count * sizeof(size_t));
+  memcpy(dst->indexes, src->indexes, src->count * sizeof(part_index_t));
   dst->count = src->count;
   return true;
 }

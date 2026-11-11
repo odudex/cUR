@@ -80,7 +80,7 @@ int random_sampler_next(random_sampler_t *sampler, prng_state_t *rng);
 /**
  * Choose fragments for a fountain encoder part
  * @param seq_num Sequence number
- * @param seq_len Total sequence length
+ * @param seq_len Total sequence length, at most FOUNTAIN_MAX_SEQ_LEN
  * @param checksum Message checksum
  * @param result Output part indexes
  * @return true on success
@@ -112,7 +112,7 @@ choose_fragments_cached(uint32_t seq_num, size_t seq_len, uint32_t checksum,
  */
 UR_WARN_UNUSED_RESULT bool choose_fragments_with_scratch(
     uint32_t seq_num, size_t seq_len, uint32_t checksum, part_indexes_t *result,
-    random_sampler_t *cached_sampler, size_t *scratch);
+    random_sampler_t *cached_sampler, part_index_t *scratch);
 
 /**
  * Check if part_indexes_a is strict subset of part_indexes_b

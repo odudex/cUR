@@ -36,6 +36,9 @@ typedef struct fountain_encoder {
   // Degree sampler cached across next_part calls — the alias table depends
   // only on seq_len. Interop-critical double math; see fountain_utils.c.
   random_sampler_t degree_sampler;
+  // Work buffer for fragment selection, one entry per fragment, so that
+  // next_part does not allocate one for every part.
+  part_index_t *choose_scratch;
 } fountain_encoder_t;
 
 /**
@@ -64,7 +67,8 @@ fountain_encoder_partition_message(const uint8_t *message, size_t message_len,
 /**
  * Create new fountain encoder
  * @param message Message to encode
- * @param message_len Message length; must be >= min_fragment_len
+ * @param message_len Message length; must be >= min_fragment_len, and take
+ *                    at most FOUNTAIN_MAX_SEQ_LEN fragments
  * @param max_fragment_len Maximum fragment length; must be >= 10
  * @param first_seq_num First sequence number (default 0). The counter does not
  *                      wrap: once it reaches UINT32_MAX, next_part() fails.

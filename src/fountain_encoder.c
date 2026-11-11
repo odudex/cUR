@@ -362,7 +362,9 @@ fountain_encoder_t *fountain_encoder_new(const uint8_t *message,
   encoder->fragment_len = fountain_encoder_find_nominal_fragment_length(
       message_len, min_fragment_len, max_fragment_len);
 
-  if (encoder->fragment_len == 0) {
+  // Fragment numbers are part_index_t; see FOUNTAIN_MAX_SEQ_LEN.
+  if (encoder->fragment_len == 0 ||
+      (message_len - 1) / encoder->fragment_len >= FOUNTAIN_MAX_SEQ_LEN) {
     free(encoder);
     return NULL;
   }
@@ -403,6 +405,13 @@ fountain_encoder_t *fountain_encoder_new(const uint8_t *message,
     free(degree_probs);
   }
 
+  encoder->choose_scratch =
+      safe_malloc_uninit(encoder->fragments.count * sizeof(part_index_t));
+  if (!encoder->choose_scratch) {
+    fountain_encoder_free(encoder);
+    return NULL;
+  }
+
   return encoder;
 }
 
@@ -415,6 +424,7 @@ void fountain_encoder_free(fountain_encoder_t *encoder) {
   // Free indexes array only, not the struct itself (it's embedded)
   free(encoder->last_part_indexes.indexes);
   random_sampler_free(&encoder->degree_sampler);
+  free(encoder->choose_scratch);
   free(encoder);
 }
 
@@ -495,9 +505,10 @@ bool fountain_encoder_next_part(fountain_encoder_t *encoder,
     return false;
   }
 
-  if (!choose_fragments_cached(encoder->seq_num, encoder->fragments.count,
-                               encoder->checksum, indexes,
-                               &encoder->degree_sampler)) {
+  if (!choose_fragments_with_scratch(encoder->seq_num, encoder->fragments.count,
+                                     encoder->checksum, indexes,
+                                     &encoder->degree_sampler,
+                                     encoder->choose_scratch)) {
     part_indexes_free(indexes);
     return false;
   }

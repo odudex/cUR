@@ -751,6 +751,10 @@ static void test_fountain_part_validation(void) {
       {0, 2, 16, 8, false, "seq_num 0 rejected"},
       {1, 2, 20, 8, false, "fragments shorter than the message rejected"},
       {1, 2, 10, 8, false, "fragments longer than ceil(len/seq) rejected"},
+      {1, FOUNTAIN_MAX_SEQ_LEN, FOUNTAIN_MAX_SEQ_LEN, 1, true,
+       "FOUNTAIN_MAX_SEQ_LEN fragments accepted"},
+      {1, FOUNTAIN_MAX_SEQ_LEN + 1, FOUNTAIN_MAX_SEQ_LEN + 1, 1, false,
+       "more fragments than a part index can number rejected"},
   };
   for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
     fountain_decoder_t *d = fountain_decoder_new();
@@ -768,6 +772,20 @@ static void test_fountain_part_validation(void) {
     fountain_encoder_part_free(&part);
     fountain_decoder_free(d);
   }
+
+  // The encoder has the same bound: 10-byte fragments, one too many of them.
+  size_t message_len = ((size_t)FOUNTAIN_MAX_SEQ_LEN + 1) * 10;
+  uint8_t *message = calloc(message_len, 1);
+  fountain_encoder_t *enc =
+      message ? fountain_encoder_new(message, message_len, 10, 0, 10) : NULL;
+  ASSERT(message && !enc, "encoder refuses more fragments than it can number");
+  fountain_encoder_free(enc);
+  enc = message ? fountain_encoder_new(message, message_len - 10, 10, 0, 10)
+                : NULL;
+  ASSERT(enc && fountain_encoder_seq_len(enc) == FOUNTAIN_MAX_SEQ_LEN,
+         "encoder accepts FOUNTAIN_MAX_SEQ_LEN fragments");
+  fountain_encoder_free(enc);
+  free(message);
 }
 
 static void test_cbor_ambiguity_rejected(void) {
