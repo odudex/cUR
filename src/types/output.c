@@ -71,6 +71,46 @@ void output_free(output_data_t *output) {
   free(output);
 }
 
+// Whether the script expressions nest the way a descriptor can: an optional
+// sh, an optional wsh, then exactly one key expression. No expressions at all
+// is a bare key. addr() and raw() take no key, so they have no place around
+// one.
+static UR_WARN_UNUSED_RESULT bool
+script_expressions_nest(script_expression_t *const *expressions,
+                        size_t count) {
+  if (count == 0)
+    return true;
+
+  size_t i = 0;
+  bool in_sh = false, in_wsh = false;
+  if (expressions[i]->tag == SCRIPT_EXPR_SH) {
+    in_sh = true;
+    i++;
+  }
+  if (i < count && expressions[i]->tag == SCRIPT_EXPR_WSH) {
+    in_wsh = true;
+    i++;
+  }
+  if (i + 1 != count)
+    return false;
+
+  switch (expressions[i]->tag) {
+  case SCRIPT_EXPR_PK:
+  case SCRIPT_EXPR_PKH:
+  case SCRIPT_EXPR_MULTI:
+  case SCRIPT_EXPR_SORTEDMULTI:
+  case SCRIPT_EXPR_COSIGNER:
+    return true;
+  case SCRIPT_EXPR_WPKH:
+    return !in_wsh;
+  case SCRIPT_EXPR_COMBO:
+  case SCRIPT_EXPR_TR:
+    return !in_sh && !in_wsh;
+  default:
+    return false;
+  }
+}
+
 // Parse Output from CBOR data item
 registry_item_t *output_from_data_item(cbor_value_t *data_item) {
   if (!data_item)
@@ -113,6 +153,11 @@ registry_item_t *output_from_data_item(cbor_value_t *data_item) {
 
   output->script_expressions = expressions;
   output->script_expression_count = expr_count;
+
+  if (!script_expressions_nest(expressions, expr_count)) {
+    output_free(output);
+    return NULL;
+  }
 
   // Determine if this is a multisig output
   bool is_multi = false;
@@ -308,6 +353,75 @@ static UR_WARN_UNUSED_RESULT uint8_t *base58check_decode(const char *str,
   return result;
 }
 
+// Descriptor checksum algorithm (polymod)
+static uint64_t polymod(uint64_t c, int val) {
+  uint8_t c0 = (c >> 35) & 0xFF;
+  c = ((c & 0x7FFFFFFFF) << 5) ^ val;
+  if (c0 & 1)
+    c ^= 0xF5DEE51989ULL;
+  if (c0 & 2)
+    c ^= 0xA9FDCA3312ULL;
+  if (c0 & 4)
+    c ^= 0x1BAB10E32DULL;
+  if (c0 & 8)
+    c ^= 0x3706B1677AULL;
+  if (c0 & 16)
+    c ^= 0x644D626FFDULL;
+  return c;
+}
+
+static const char INPUT_CHARSET[] = "0123456789()[],'/"
+                                    "*abcdefgh@:$%{}IJKLMNOPQRSTUVWXYZ&+-.;<=>?"
+                                    "!^_|~ijklmnopqrstuvwxyzABCDEFGH`#\"\\ ";
+static const char CHECKSUM_CHARSET[] = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+
+// BIP-380 checksum of descriptor[0..len), written as 8 characters and a NUL.
+// Fails on a character outside the descriptor character set.
+static UR_WARN_UNUSED_RESULT bool
+descriptor_checksum(const char *descriptor, size_t len, char checksum[9]) {
+  if (!descriptor)
+    return false;
+
+  uint64_t c = 1;
+  int cls = 0;
+  int clscount = 0;
+
+  for (size_t i = 0; i < len; i++) {
+    // strchr() would match the terminator of INPUT_CHARSET for a NUL.
+    const char *pos_ptr =
+        descriptor[i] ? strchr(INPUT_CHARSET, descriptor[i]) : NULL;
+    if (!pos_ptr)
+      return false; // Invalid character
+
+    int pos = pos_ptr - INPUT_CHARSET;
+    c = polymod(c, pos & 31);
+    cls = cls * 3 + (pos >> 5);
+    clscount++;
+
+    if (clscount == 3) {
+      c = polymod(c, cls);
+      cls = 0;
+      clscount = 0;
+    }
+  }
+
+  if (clscount > 0) {
+    c = polymod(c, cls);
+  }
+
+  for (int i = 0; i < 8; i++) {
+    c = polymod(c, 0);
+  }
+  c ^= 1;
+
+  for (int i = 0; i < 8; i++) {
+    checksum[i] = CHECKSUM_CHARSET[(c >> (5 * (7 - i))) & 31];
+  }
+  checksum[8] = '\0';
+
+  return true;
+}
+
 static const script_expression_t *
 get_script_expression_by_name(const char *name, size_t len) {
   for (size_t i = 0; SCRIPT_EXPRESSIONS[i].expression != NULL; i++)
@@ -337,6 +451,10 @@ static UR_WARN_UNUSED_RESULT bool append_decimal_digit_u32(uint32_t *value,
   return true;
 }
 
+// Parse "44'/0h/*" into components. Each one is an index or '*', optionally
+// hardened, and is followed by '/' or the end of the path. Anything else,
+// an empty component included, is an error: skipping what the parser does not
+// understand would encode a different path from the one written.
 static UR_WARN_UNUSED_RESULT bool
 parse_keypath_components(const char *path, size_t len,
                          path_component_t **out_components, size_t *out_count) {
@@ -352,21 +470,17 @@ parse_keypath_components(const char *path, size_t len,
   if (!comp)
     return false;
 
+  // Every pass but the first has consumed a '/', so idx stays below max_count.
   size_t idx = 0;
   const char *p = path, *end = path + len;
-  while (p < end && idx < max_count) {
-    if (*p == '/') {
-      p++;
-      continue;
-    }
-
-    path_component_t *c = &comp[idx];
+  for (;;) {
+    path_component_t *c = &comp[idx++];
     c->hardened = false;
-    if (*p == '*') {
+    if (p < end && *p == '*') {
       c->wildcard = true;
       c->index = 0;
       p++;
-    } else if (isdigit((unsigned char)*p)) {
+    } else if (p < end && isdigit((unsigned char)*p)) {
       c->wildcard = false;
       c->index = 0;
       while (p < end && isdigit((unsigned char)*p)) {
@@ -386,13 +500,23 @@ parse_keypath_components(const char *path, size_t len,
       c->hardened = true;
       p++;
     }
-    idx++;
+    if (p == end)
+      break;
+    if (*p != '/') {
+      free(comp);
+      return false;
+    }
+    p++;
   }
 
   *out_components = comp;
   *out_count = idx;
   return true;
 }
+
+// An xpub is 78 bytes and a 4-byte checksum, at most 112 base58 characters.
+// Longer text is not one, and base58 decoding is quadratic in its length.
+#define XPUB_MAX_CHARS 112
 
 // Parse "[fingerprint/path]xpub/children" into hd_key_data_t
 static UR_WARN_UNUSED_RESULT hd_key_data_t *
@@ -426,16 +550,15 @@ parse_hd_key_from_string(const char *str, size_t len) {
     }
     p += 8;
 
+    // The fingerprint alone, or a '/' and a path.
     path_component_t *origin_comp = NULL;
     size_t origin_count = 0;
-    if (p < bracket_end && *p == '/') {
-      p++;
-      if (bracket_end - p > 0 &&
-          !parse_keypath_components(p, bracket_end - p, &origin_comp,
-                                    &origin_count)) {
-        hd_key_free(hd_key);
-        return NULL;
-      }
+    if (p < bracket_end &&
+        (*p != '/' ||
+         !parse_keypath_components(p + 1, (size_t)(bracket_end - p - 1),
+                                   &origin_comp, &origin_count))) {
+      hd_key_free(hd_key);
+      return NULL;
     }
     hd_key->origin =
         keypath_new(origin_comp, origin_count, fp, (int)origin_count);
@@ -454,7 +577,8 @@ parse_hd_key_from_string(const char *str, size_t len) {
 
   // Decode xpub/tpub
   size_t xpub_len = xpub_end - xpub_start;
-  char *xpub_str = safe_malloc(xpub_len + 1);
+  char *xpub_str =
+      xpub_len <= XPUB_MAX_CHARS ? safe_malloc(xpub_len + 1) : NULL;
   if (!xpub_str) {
     hd_key_free(hd_key);
     return NULL;
@@ -537,11 +661,17 @@ output_data_t *output_from_descriptor_string(const char *descriptor) {
   if (!descriptor)
     return NULL;
 
-  // Strip checksum if present
+  // A checksum, when present, must be the right one: it is there to catch a
+  // mistyped or damaged descriptor, and that is what a mismatch means.
   size_t desc_len = strlen(descriptor);
   const char *hash = strchr(descriptor, '#');
-  if (hash)
-    desc_len = hash - descriptor;
+  if (hash) {
+    desc_len = (size_t)(hash - descriptor);
+    char checksum[9];
+    if (!descriptor_checksum(descriptor, desc_len, checksum) ||
+        strcmp(hash + 1, checksum) != 0)
+      return NULL;
+  }
 
   output_data_t *output = output_new();
   if (!output)
@@ -575,10 +705,20 @@ output_data_t *output_from_descriptor_string(const char *descriptor) {
   output->script_expressions = expressions;
   output->script_expression_count = expr_count;
 
-  // Strip trailing ')'
-  const char *content_end = end;
-  while (content_end > p && *(content_end - 1) == ')')
-    content_end--;
+  // One ')' closes each expression and nothing follows the last. A stray
+  // parenthesis inside the key text fails where the key is parsed.
+  if (!script_expressions_nest(expressions, expr_count) ||
+      (size_t)(end - p) < expr_count) {
+    output_free(output);
+    return NULL;
+  }
+  const char *content_end = end - expr_count;
+  for (size_t i = 0; i < expr_count; i++) {
+    if (content_end[i] != ')') {
+      output_free(output);
+      return NULL;
+    }
+  }
 
   bool is_multi =
       expr_count > 0 &&
@@ -586,6 +726,8 @@ output_data_t *output_from_descriptor_string(const char *descriptor) {
        strcmp(expressions[expr_count - 1]->expression, "sortedmulti") == 0);
 
   if (is_multi) {
+    // "threshold,key,key": a comma after the threshold and between keys,
+    // none after the last key.
     uint32_t threshold = 0;
     size_t threshold_digits = 0;
     while (p < content_end && isdigit((unsigned char)*p)) {
@@ -597,16 +739,12 @@ output_data_t *output_from_descriptor_string(const char *descriptor) {
       threshold_digits++;
       p++;
     }
-    if (threshold_digits == 0) {
+    if (threshold_digits == 0 || threshold == 0 || p == content_end ||
+        *p != ',') {
       output_free(output);
       return NULL;
     }
-    if (threshold == 0) {
-      output_free(output);
-      return NULL;
-    }
-    if (p < content_end && *p == ',')
-      p++;
+    p++;
 
     multi_key_data_t *mk = multi_key_new(threshold);
     if (!mk) {
@@ -614,7 +752,7 @@ output_data_t *output_from_descriptor_string(const char *descriptor) {
       return NULL;
     }
 
-    while (p < content_end) {
+    for (;;) {
       const char *comma = memchr(p, ',', content_end - p);
       const char *key_end = comma ? comma : content_end;
       hd_key_data_t *hk = parse_hd_key_from_string(p, key_end - p);
@@ -624,9 +762,11 @@ output_data_t *output_from_descriptor_string(const char *descriptor) {
         output_free(output);
         return NULL;
       }
-      p = comma ? comma + 1 : content_end;
+      if (!comma)
+        break;
+      p = comma + 1;
     }
-    if (mk->hd_key_count == 0 || threshold > mk->hd_key_count) {
+    if (threshold > mk->hd_key_count) {
       multi_key_free(mk);
       output_free(output);
       return NULL;
@@ -644,74 +784,6 @@ output_data_t *output_from_descriptor_string(const char *descriptor) {
   }
 
   return output;
-}
-
-// Descriptor checksum algorithm (polymod)
-static uint64_t polymod(uint64_t c, int val) {
-  uint8_t c0 = (c >> 35) & 0xFF;
-  c = ((c & 0x7FFFFFFFF) << 5) ^ val;
-  if (c0 & 1)
-    c ^= 0xF5DEE51989ULL;
-  if (c0 & 2)
-    c ^= 0xA9FDCA3312ULL;
-  if (c0 & 4)
-    c ^= 0x1BAB10E32DULL;
-  if (c0 & 8)
-    c ^= 0x3706B1677AULL;
-  if (c0 & 16)
-    c ^= 0x644D626FFDULL;
-  return c;
-}
-
-static const char INPUT_CHARSET[] = "0123456789()[],'/"
-                                    "*abcdefgh@:$%{}IJKLMNOPQRSTUVWXYZ&+-.;<=>?"
-                                    "!^_|~ijklmnopqrstuvwxyzABCDEFGH`#\"\\ ";
-static const char CHECKSUM_CHARSET[] = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
-
-static UR_WARN_UNUSED_RESULT char *descriptor_checksum(const char *descriptor) {
-  if (!descriptor)
-    return NULL;
-
-  uint64_t c = 1;
-  int cls = 0;
-  int clscount = 0;
-
-  for (const char *ptr = descriptor; *ptr; ptr++) {
-    const char *pos_ptr = strchr(INPUT_CHARSET, *ptr);
-    if (!pos_ptr)
-      return NULL; // Invalid character
-
-    int pos = pos_ptr - INPUT_CHARSET;
-    c = polymod(c, pos & 31);
-    cls = cls * 3 + (pos >> 5);
-    clscount++;
-
-    if (clscount == 3) {
-      c = polymod(c, cls);
-      cls = 0;
-      clscount = 0;
-    }
-  }
-
-  if (clscount > 0) {
-    c = polymod(c, cls);
-  }
-
-  for (int i = 0; i < 8; i++) {
-    c = polymod(c, 0);
-  }
-  c ^= 1;
-
-  char *checksum = safe_malloc(9);
-  if (!checksum)
-    return NULL;
-
-  for (int i = 0; i < 8; i++) {
-    checksum[i] = CHECKSUM_CHARSET[(c >> (5 * (7 - i))) & 31];
-  }
-  checksum[8] = '\0';
-
-  return checksum;
 }
 
 static UR_WARN_UNUSED_RESULT char *
@@ -829,24 +901,21 @@ output_descriptor_finish(char *descriptor, bool include_checksum) {
   // The two are different descriptors, and the unchecksummed form would be
   // accepted downstream as though it had been verified - a semantic downgrade
   // driven by an allocation failure. Fail the call instead.
-  char *checksum = descriptor_checksum(descriptor);
-  if (!checksum) {
+  char checksum[9];
+  if (!descriptor_checksum(descriptor, strlen(descriptor), checksum)) {
     free(descriptor);
     return NULL;
   }
 
-  // Size from the actual checksum rather than assuming 8 characters.
   size_t total = strlen(descriptor) + 1 + strlen(checksum) + 1;
   char *result = safe_malloc(total);
   if (!result) {
-    free(checksum);
     free(descriptor);
     return NULL;
   }
 
   snprintf(result, total, "%s#%s", descriptor, checksum);
   free(descriptor);
-  free(checksum);
   return result;
 }
 
