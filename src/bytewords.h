@@ -24,11 +24,11 @@ UR_WARN_UNUSED_RESULT bool bytewords_encode(const uint8_t *data,
 void bytewords_free(void *ptr);
 
 /**
- * Raw bytewords minimal decode (no CRC32 validation) - for internal UR use
+ * Decode a bytewords minimal string, verifying and removing its CRC32
  * @param encoded Encoded bytewords string
- * @param decoded Output decoded bytes (allocated)
+ * @param decoded Output decoded bytes, without the CRC32 (allocated)
  * @param decoded_len Output decoded length
- * @return true on success, false on error
+ * @return true on success; false on a malformed string or a CRC32 mismatch
  */
 UR_WARN_UNUSED_RESULT bool bytewords_decode_raw(const char *encoded,
                                                 uint8_t **decoded,

@@ -39,6 +39,12 @@ Sanitizer build — swaps `-O2` for `-O0 -fsanitize=address,undefined`:
 make clean && make DEBUG=1 test
 ```
 
+Two of the suites go beyond fixed cases. `test_ur_alloc` fails every
+allocation in turn along the encode and decode paths and checks that
+nothing leaks and nothing wrong is returned. `test_ur_fuzz` runs mutated
+payloads, descriptors and lossy or hostile multi-part streams from a
+fixed seed; `tests/test_ur_fuzz <seed> <rounds>` tries others.
+
 Coverage report (requires `lcov`):
 
 ```bash
@@ -88,8 +94,15 @@ The decoder is a state machine: `ur_decoder_receive_part()` returns the
 state after each part, and `ur_decoder_get_state()` reads it without
 feeding one. `UR_DECODER_PROCESSING` means keep feeding parts. The
 terminal states (`UR_DECODER_OK`, `UR_DECODER_NO_RESULT`,
-`UR_DECODER_ERROR_INVALID_CHECKSUM`) are permanent; any other error only
+`UR_DECODER_ERROR_INVALID_CHECKSUM`,
+`UR_DECODER_ERROR_UNSUPPORTED_SIZE`) are permanent; any other error only
 rejects that frame, and scanning can continue.
+
+The first well-formed multi-part frame fixes the message being decoded:
+its type, length and checksum. Frames are not authenticated, so if that
+frame came from another animation the decoder waits for a message that
+never arrives, rejecting every real frame. A caller that sees nothing
+but errors for a while should free the decoder and start a new one.
 
 API rules:
 
@@ -103,6 +116,18 @@ API rules:
   a `type` that is not a valid UR type (`[a-z0-9-]+`, no leading or
   trailing `-`). `fountain_encoder_new()` rejects
   `max_fragment_len < 10`.
+- `ur_encoder_new()` refuses a message its own decoder would reject as
+  over the limits below; `ur_encoder_within_limits()` tells that apart
+  from an allocation failure.
+- `output_from_descriptor_string()` is strict. Text it does not
+  understand is an error, script expressions must nest as an optional
+  `sh`, an optional `wsh` and one key expression, and a `#checksum`,
+  when present, must be correct.
+- An hd-key carries a key's depth and child number only through its
+  origin path. An xpub written without an origin, or with one shorter
+  than its depth, therefore comes back as different xpub text for the
+  same public key and chain code. Give each key its full origin if the
+  text has to survive.
 - `output_descriptor_from_cbor_account()` returns the first output of a
   `crypto-account`; `output_descriptors_from_cbor_account()` returns all
   of them (NULL for an output that could not be decoded), freed with
@@ -126,6 +151,24 @@ ESP-IDF Kconfig.
 | `UR_XOR_ESP32P4_SIMD` | on (ESP32-P4 only) | PIE 128-bit vector XOR for fountain-code mixing, with transparent word-wise fallback on unaligned data. Only exists on ESP32-P4; Kconfig opt-out. |
 | `UR_ALLOC_PSRAM` | on (ESP targets) | Route the library's buffers to PSRAM with internal-RAM fallback, keeping fountain-decoder churn out of scarce internal heap. Kconfig opt-out; no-op elsewhere. |
 | `UR_ENVELOPE_ONLY` | off | CMake: build only the UR transport layer (bytewords, fountain, multi-part assembly), excluding the `src/types/` payload codecs, for integrators that do their own CBOR. |
+
+### Limits
+
+The decoder bounds what a scanned frame can make it allocate. Each limit
+is a compile-time definition (`-DNAME=value`):
+
+| Definition | Default | Bounds |
+|------------|---------|--------|
+| `UR_MAX_SEQ_LEN` | 1024 | Fragments in a multi-part message. |
+| `UR_MAX_MESSAGE_LEN` | 262144 | Bytes in a multi-part message. |
+| `UR_MAX_MIXED_PARTS` | 256 | Mixed (not yet reduced) parts the fountain decoder keeps at once. |
+
+A message over the first two is refused with
+`UR_DECODER_ERROR_UNSUPPORTED_SIZE`. `UR_MAX_MIXED_PARTS` trades memory
+for frames: a mixed part that arrives when the table is full is dropped
+and the stream has to supply another. That only costs frames for
+messages of more than about that many fragments scanned with many frames
+missed, where raising it shortens the scan.
 
 ## Platform integration
 

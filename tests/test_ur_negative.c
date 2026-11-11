@@ -1509,6 +1509,35 @@ static ur_decoder_state_t feed_encoder(ur_decoder_t *dec, ur_encoder_t *enc,
   return state;
 }
 
+// An hd-key has no field for a key's depth or child number: they come from
+// its origin path. An xpub written without one comes back as other text, and
+// what must survive is the key itself.
+static void test_bare_xpub_keeps_its_key(void) {
+  printf("\n=== bare_xpub_keeps_its_key ===\n");
+
+  char text[256];
+  snprintf(text, sizeof text, "wpkh(%s/0/*)", XPUB_84);
+  char *rendered = descriptor_roundtrip(text);
+  output_data_t *before = output_from_descriptor_string(text);
+  output_data_t *after =
+      rendered ? output_from_descriptor_string(rendered) : NULL;
+  ASSERT(before && after, "an xpub without an origin round-trips");
+  if (before && after) {
+    const hd_key_data_t *a = before->crypto_key.hd_key;
+    const hd_key_data_t *b = after->crypto_key.hd_key;
+    ASSERT(a->key_len == 33 && b->key_len == 33 &&
+               memcmp(a->key, b->key, 33) == 0 &&
+               memcmp(a->chain_code, b->chain_code, 32) == 0 &&
+               a->network == b->network,
+           "  -> with the same public key, chain code and network");
+    ASSERT(strcmp(rendered, text) != 0 && strstr(rendered, "/0/*)"),
+           "  -> as different xpub text, the depth and child number gone");
+  }
+  output_free(after);
+  output_free(before);
+  free(rendered);
+}
+
 // Frames that do not belong to the message must not stop it from decoding.
 static void test_stray_frames(void) {
   printf("\n=== stray_frames ===\n");
@@ -1680,6 +1709,7 @@ int main(void) {
   test_keypath_lengths();
   test_descriptor_text_strict();
   test_script_nesting();
+  test_bare_xpub_keeps_its_key();
   test_stray_frames();
   test_encoder_respects_decoder_limits();
   test_dropped_parts_are_taken_again();
