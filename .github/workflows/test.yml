@@ -38,6 +38,9 @@ jobs:
       - name: Run all tests (slice-by-8 CRC)
         run: make clean && make test UR_CRC32_SLICE_BY_8=1
 
+      - name: Run all tests (ASan + UBSan)
+        run: make clean && make DEBUG=1 test
+
   esp-idf:
     name: ESP-IDF ${{ matrix.idf }} build (${{ matrix.target }})
     runs-on: ubuntu-latest
