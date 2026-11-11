@@ -76,8 +76,7 @@ void output_free(output_data_t *output) {
 // is a bare key. addr() and raw() take no key, so they have no place around
 // one.
 static UR_WARN_UNUSED_RESULT bool
-script_expressions_nest(script_expression_t *const *expressions,
-                        size_t count) {
+script_expressions_nest(script_expression_t *const *expressions, size_t count) {
   if (count == 0)
     return true;
 

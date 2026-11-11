@@ -1552,9 +1552,8 @@ static void test_stray_frames(void) {
   // So does an over-size frame once a message is in progress: it cannot be
   // part of that message, and must not end the scan.
   char *oversize = make_multipart_ur(1, 2000, 20000, 0x11223344u, 10);
-  ASSERT(oversize &&
-             ur_decoder_receive_part(dec, oversize) ==
-                 UR_DECODER_ERROR_INVALID_PART,
+  ASSERT(oversize && ur_decoder_receive_part(dec, oversize) ==
+                         UR_DECODER_ERROR_INVALID_PART,
          "an over-size frame mid-message is a transient INVALID_PART");
   free(oversize);
   ur_result_t *result = NULL;

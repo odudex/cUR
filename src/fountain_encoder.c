@@ -505,10 +505,9 @@ bool fountain_encoder_next_part(fountain_encoder_t *encoder,
     return false;
   }
 
-  if (!choose_fragments_with_scratch(encoder->seq_num, encoder->fragments.count,
-                                     encoder->checksum, indexes,
-                                     &encoder->degree_sampler,
-                                     encoder->choose_scratch)) {
+  if (!choose_fragments_with_scratch(
+          encoder->seq_num, encoder->fragments.count, encoder->checksum,
+          indexes, &encoder->degree_sampler, encoder->choose_scratch)) {
     part_indexes_free(indexes);
     return false;
   }
