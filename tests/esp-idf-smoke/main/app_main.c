@@ -28,8 +28,9 @@ void app_main(void) {
   }
   ur_decoder_free(dec);
 
-  // Encoder round-trip over a one-byte CBOR byte string (0x41 0xaa).
-  const uint8_t cbor[] = {0x41, 0xaa};
+  // Encoder round-trip over a CBOR byte string. It has to be at least
+  // min_fragment_len bytes long, or there is nothing to fragment.
+  const uint8_t cbor[] = {0x4b, 0xaa, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
   ur_encoder_t *enc = ur_encoder_new("bytes", cbor, sizeof(cbor),
                                      /*max_fragment_len=*/200,
                                      /*first_seq_num=*/0,
