@@ -50,7 +50,7 @@ struct fountain_decoder {
   size_t received_count;
 
   // Work buffer for fragment selection, expected_seq_len entries.
-  size_t *choose_scratch;
+  part_index_t *choose_scratch;
 
   // Hash-based mixed parts storage
   mixed_parts_hash_t *mixed_parts_hash;
@@ -572,7 +572,7 @@ void part_indexes_free(part_indexes_t *indexes) {
 }
 
 bool part_indexes_add(part_indexes_t *indexes, size_t index) {
-  if (!indexes)
+  if (!indexes || index >= FOUNTAIN_MAX_SEQ_LEN)
     return false;
 
   // Binary search for insertion point (keeps array sorted)
@@ -593,8 +593,8 @@ bool part_indexes_add(part_indexes_t *indexes, size_t index) {
   if (indexes->count >= indexes->capacity) {
     size_t new_capacity = indexes->capacity == 0 ? INDEXES_INITIAL_CAPACITY
                                                  : indexes->capacity * 2;
-    size_t *new_indexes =
-        safe_realloc(indexes->indexes, sizeof(size_t) * new_capacity);
+    part_index_t *new_indexes =
+        safe_realloc(indexes->indexes, sizeof(part_index_t) * new_capacity);
     if (!new_indexes)
       return false;
 
@@ -604,8 +604,8 @@ bool part_indexes_add(part_indexes_t *indexes, size_t index) {
 
   // Shift elements to make room for new index
   memmove(indexes->indexes + left + 1, indexes->indexes + left,
-          (indexes->count - left) * sizeof(size_t));
-  indexes->indexes[left] = index;
+          (indexes->count - left) * sizeof(part_index_t));
+  indexes->indexes[left] = (part_index_t)index;
   indexes->count++;
   return true;
 }
@@ -642,7 +642,7 @@ static void part_indexes_subtract(part_indexes_t *set,
                                   const part_indexes_t *sub) {
   size_t kept = 0, j = 0;
   for (size_t i = 0; i < set->count; i++) {
-    size_t index = set->indexes[i];
+    part_index_t index = set->indexes[i];
     while (j < sub->count && sub->indexes[j] < index)
       j++;
     if (j < sub->count && sub->indexes[j] == index) {
@@ -745,7 +745,7 @@ is_simple_part(const decoder_part_t *const part) {
   return part && part->indexes.count == 1;
 }
 
-static size_t get_part_index(const decoder_part_t *const part) {
+static part_index_t get_part_index(const decoder_part_t *const part) {
   if (!part || part->indexes.count == 0)
     return 0;
   return part->indexes.indexes[0];
@@ -841,8 +841,8 @@ add_mixed_part(fountain_decoder_t *const decoder, decoder_part_t *const part,
   // original, unreduced equation. Stored equations can live for the rest of
   // the scan, so give the slack back (best effort).
   if (part->indexes.capacity > part->indexes.count) {
-    size_t *shrunk = safe_realloc(part->indexes.indexes,
-                                  part->indexes.count * sizeof(size_t));
+    part_index_t *shrunk = safe_realloc(
+        part->indexes.indexes, part->indexes.count * sizeof(part_index_t));
     if (shrunk) {
       part->indexes.indexes = shrunk;
       part->indexes.capacity = part->indexes.count;
@@ -1334,7 +1334,7 @@ static void process_mixed_part(fountain_decoder_t *const decoder,
   // which needs a strict subset, this stops with one index left.
   size_t remaining = indexes->count, kept = 0;
   for (size_t i = 0; i < indexes->count; i++) {
-    size_t index = indexes->indexes[i];
+    part_index_t index = indexes->indexes[i];
     if (remaining > 1 && is_received(decoder, index)) {
       ur_xor_inplace(part->data, decoder->fragments[index], len);
       remaining--;
@@ -1391,7 +1391,7 @@ static void process_queue_item(fountain_decoder_t *const decoder) {
     return;
 
   if (is_simple_part(&part)) {
-    size_t index = get_part_index(&part);
+    part_index_t index = get_part_index(&part);
     part_indexes_t key = {.indexes = &index, .count = 1, .capacity = 1};
     const uint8_t *data = part.data;
 
@@ -1413,13 +1413,15 @@ fountain_decoder_initialize(fountain_decoder_t *decoder,
                             const fountain_encoder_part_t *part) {
   // Every fragment is ceil(message_len / seq_len) bytes, the last one
   // zero-padded, so the fragments cover the message exactly.
-  if (part->seq_len == 0 || part->message_len == 0 ||
+  if (part->seq_len == 0 || part->seq_len > FOUNTAIN_MAX_SEQ_LEN ||
+      part->message_len == 0 ||
       part->data_len != part->message_len / part->seq_len +
                             (part->message_len % part->seq_len ? 1 : 0))
     return false;
 
   decoder->fragments = safe_malloc(part->seq_len * sizeof(uint8_t *));
-  decoder->choose_scratch = safe_malloc_uninit(part->seq_len * sizeof(size_t));
+  decoder->choose_scratch =
+      safe_malloc_uninit(part->seq_len * sizeof(part_index_t));
   if (!decoder->fragments || !decoder->choose_scratch) {
     fountain_decoder_clear_initialization(decoder);
     return false;

@@ -6,6 +6,7 @@
  * the Makefile builds this test on Linux).
  */
 
+#include "../src/fountain_utils.h"
 #include "../src/types/bip39.h"
 #include "../src/types/bytes_type.h"
 #include "../src/types/output.h"
@@ -359,6 +360,24 @@ static void simple_step(void) {
 
 static bool simple_check(void) { return simple_ok; }
 
+// --- fragment selection, without a cached sampler ---------------------------
+
+static part_indexes_t selection, selection_expected;
+static bool selection_ok;
+
+static void selection_step(void) {
+  selection_ok = choose_fragments(50, 20, 0x12345678u, &selection);
+}
+
+// What a part mixes is derived, not transmitted: a selection that differs from
+// the sender's decodes to garbage, so there is no acceptable approximation.
+static bool selection_check(void) {
+  bool ok = !selection_ok || part_indexes_equal(&selection, &selection_expected);
+  free(selection.indexes);
+  selection = (part_indexes_t){0};
+  return ok;
+}
+
 // --- multi-part: encoder -> lossy channel -> decoder ------------------------
 
 static uint8_t session_message[600];
@@ -415,6 +434,12 @@ static void test_alloc_failure_sweeps(void) {
   ASSERT(build_account() && sweep(account_step, account_check) == 0,
          "crypto-account to descriptors");
   ASSERT(sweep(simple_step, simple_check) == 0, "bip39, bytes and psbt");
+
+  ASSERT(choose_fragments(50, 20, 0x12345678u, &selection_expected) &&
+             selection_expected.count > 1 &&
+             sweep(selection_step, selection_check) == 0,
+         "fragment selection");
+  free(selection_expected.indexes);
 
   for (size_t i = 0; i < sizeof session_message; i++)
     session_message[i] = (uint8_t)(i * 131 + 17);

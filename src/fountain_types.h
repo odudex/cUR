@@ -7,9 +7,19 @@
 
 #include "ur_attributes.h"
 
+// A fragment number. A mixed part lists the fragments it combines, and for a
+// long message that list outweighs its payload (about 137 entries on average
+// at 1000 fragments), so the entries are 16 bits wide rather than size_t.
+typedef uint16_t part_index_t;
+
+// The most fragments a message can have at the fountain layer, so that every
+// fragment number fits a part_index_t. ur_decoder applies the much lower
+// UR_MAX_SEQ_LEN policy limit on top.
+#define FOUNTAIN_MAX_SEQ_LEN 65536u
+
 // Part indexes set (simplified as dynamic array for C)
 typedef struct {
-  size_t *indexes;
+  part_index_t *indexes;
   size_t count;
   size_t capacity;
 } part_indexes_t;
