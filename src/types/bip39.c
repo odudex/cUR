@@ -99,17 +99,19 @@ registry_item_t *bip39_from_data_item(cbor_value_t *data_item) {
     }
   }
 
-  // Get lang (key 2) if present
+  // Get lang (key 2) if present. One that cannot be copied fails the decode:
+  // the words are in that language.
   char *lang = NULL;
   cbor_value_t *lang_val = get_map_value(data_item, 2);
-  if (lang_val && cbor_value_get_type(lang_val) == CBOR_TYPE_STRING) {
-    const char *lang_str = cbor_value_get_string(lang_val);
-    lang = safe_strdup(lang_str);
-  }
+  bool lang_present =
+      lang_val && cbor_value_get_type(lang_val) == CBOR_TYPE_STRING;
+  if (lang_present)
+    lang = safe_strdup(cbor_value_get_string(lang_val));
 
   // Build the bip39 directly instead of going through bip39_new, which
   // would strdup every word a second time.
-  bip39_data_t *bip39 = safe_malloc(sizeof(bip39_data_t));
+  bip39_data_t *bip39 =
+      lang_present && !lang ? NULL : safe_malloc(sizeof(bip39_data_t));
   if (!bip39) {
     for (size_t i = 0; i < word_count; i++)
       free(words[i]);
@@ -121,7 +123,10 @@ registry_item_t *bip39_from_data_item(cbor_value_t *data_item) {
   bip39->word_count = word_count;
   bip39->lang = lang;
 
-  return bip39_to_registry_item(bip39);
+  registry_item_t *item = bip39_to_registry_item(bip39);
+  if (!item)
+    bip39_free(bip39);
+  return item;
 }
 
 // Registry item interface for BIP39

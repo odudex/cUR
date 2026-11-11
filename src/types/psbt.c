@@ -43,7 +43,10 @@ registry_item_t *psbt_from_data_item(cbor_value_t *data_item) {
   if (!psbt)
     return NULL;
 
-  return psbt_to_registry_item(psbt);
+  registry_item_t *item = psbt_to_registry_item(psbt);
+  if (!item)
+    psbt_free(psbt);
+  return item;
 }
 
 // Registry item interface for PSBT
