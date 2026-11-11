@@ -9,6 +9,10 @@
 // Keypath tag number
 #define CRYPTO_KEYPATH_TAG 304
 
+// A path is at most this long: its length is the key's BIP32 depth, which
+// is one byte. keypath_new() refuses anything longer.
+#define KEYPATH_MAX_COMPONENTS 255
+
 // Path component structure
 typedef struct {
   uint32_t index; // Path index (ignored if wildcard is true)

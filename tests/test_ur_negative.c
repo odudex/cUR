@@ -1256,6 +1256,91 @@ static void test_account_outputs(void) {
   free(cbor);
 }
 
+// Descriptor text -> CBOR -> descriptor text, without the checksum. NULL if
+// any step fails.
+static char *descriptor_roundtrip(const char *descriptor) {
+  size_t len = 0;
+  uint8_t *cbor = descriptor_cbor(descriptor, &len);
+  output_data_t *output = cbor ? output_from_cbor(cbor, len) : NULL;
+  free(cbor);
+  char *rendered = output ? output_descriptor(output, false) : NULL;
+  output_free(output);
+  return rendered;
+}
+
+// The master key of the BIP32 test vector 1 seed (fingerprint 3442193e).
+static const char XPUB_MASTER[] =
+    "xpub661MyMwAqRbcFtXgS5sYJABqqG9YLmC4Q1Rdap9gSE8NqtwybGhePY2gZ29ESFjqJoCu1R"
+    "upje8YtGqsefD265TMg7usUDFdp6W1EGMcet8";
+
+static void test_keypath_lengths(void) {
+  printf("\n=== keypath_lengths ===\n");
+
+  // [fingerprint]xpub: an origin that is only a source fingerprint. Its
+  // components array is empty, and must still be encoded.
+  char text[512];
+  snprintf(text, sizeof text, "wpkh([3442193e]%s/84'/0'/0'/0/*)", XPUB_MASTER);
+  char *rendered = descriptor_roundtrip(text);
+  ASSERT(rendered && strcmp(rendered, text) == 0,
+         "fingerprint-only origin round-trips through CBOR");
+  free(rendered);
+
+  char *descriptor = NULL;
+  cbor_value_t *map = hdkey_map();
+  cbor_value_t *origin = keypath_item(NULL, NULL, 0);
+  map_put(cbor_value_get_tag_content(origin), 2,
+          cbor_value_new_unsigned_int(0xdeadbeef));
+  map_put(map, 6, origin);
+  ASSERT(decode_wpkh(map, &descriptor) == RENDERED && descriptor &&
+             strncmp(descriptor, "wpkh([deadbeef]xpub", 19) == 0,
+         "empty origin path with a fingerprint renders as [fingerprint]");
+  free(descriptor);
+
+  // A path's length is the key's BIP32 depth, which is one byte.
+  static uint64_t index[KEYPATH_MAX_COMPONENTS + 1];
+  static bool hardened[KEYPATH_MAX_COMPONENTS + 1];
+  for (size_t length = KEYPATH_MAX_COMPONENTS;
+       length <= KEYPATH_MAX_COMPONENTS + 1; length++) {
+    map = hdkey_map();
+    origin = keypath_item(index, hardened, length);
+    map_put(cbor_value_get_tag_content(origin), 2,
+            cbor_value_new_unsigned_int(0xdeadbeef));
+    map_put(map, 6, origin);
+    if (length <= KEYPATH_MAX_COMPONENTS)
+      ASSERT(decode_wpkh(map, NULL) == RENDERED, "255-component path accepted");
+    else
+      ASSERT(decode_wpkh(map, NULL) == REJECTED, "256-component path rejected");
+  }
+
+  // The same path one component too long, as text: every piece has a fixed
+  // length, so the buffer is sized from them.
+  static const char HEAD[] = "wpkh([3442193e";
+  char long_text[sizeof HEAD + 2 * (KEYPATH_MAX_COMPONENTS + 1) +
+                 sizeof XPUB_84 + 2];
+  char *end = long_text;
+  memcpy(end, HEAD, sizeof HEAD - 1);
+  end += sizeof HEAD - 1;
+  for (size_t i = 0; i <= KEYPATH_MAX_COMPONENTS; i++) {
+    *end++ = '/';
+    *end++ = '0';
+  }
+  *end++ = ']';
+  memcpy(end, XPUB_84, sizeof XPUB_84 - 1);
+  end += sizeof XPUB_84 - 1;
+  *end++ = ')';
+  *end = '\0';
+  output_data_t *parsed = output_from_descriptor_string(long_text);
+  ASSERT(!parsed, "256-component path in descriptor text rejected");
+  output_free(parsed);
+
+  // One component fewer parses, so the rejection above is the length's.
+  memmove(long_text + sizeof HEAD - 1, long_text + sizeof HEAD + 1,
+          strlen(long_text + sizeof HEAD + 1) + 1);
+  parsed = output_from_descriptor_string(long_text);
+  ASSERT(parsed, "255-component path in descriptor text accepted");
+  output_free(parsed);
+}
+
 int main(void) {
   printf("=== UR Negative-Path Tests ===\n");
   test_null_and_empty();
@@ -1282,6 +1367,7 @@ int main(void) {
   test_use_info();
   test_account_master_fingerprint();
   test_account_outputs();
+  test_keypath_lengths();
 
   printf("\n=== Summary ===\n");
   printf("Tests passed: %d/%d\n", asserts - failures, asserts);
