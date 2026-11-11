@@ -168,7 +168,8 @@ A message over the first two is refused with
 for frames: a mixed part that arrives when the table is full is dropped
 and the stream has to supply another. That only costs frames for
 messages of more than about that many fragments scanned with many frames
-missed, where raising it shortens the scan.
+missed, where raising it shortens the scan. On ESP-IDF it is also a
+Kconfig option of the same name.
 
 ## Platform integration
 
