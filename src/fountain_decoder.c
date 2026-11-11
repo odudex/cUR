@@ -64,6 +64,11 @@ struct fountain_decoder {
   // Cached degree sampler (avoids repeated allocation per fountain fragment)
   random_sampler_t degree_sampler;
 
+  // Per-fragment scores for the weighted progress estimate, expected_seq_len
+  // entries. Allocated by the first call that needs it and then reused, since
+  // callers ask for the estimate on every frame.
+  float *weighted_scratch;
+
   // Equation elimination can reduce the mixed-frame coverage score even as
   // the decoder gains information. Keep the public weighted estimate
   // monotonic, as documented, by remembering its high-water mark.
@@ -80,6 +85,10 @@ struct fountain_decoder {
   // extended, or the message could not be assembled for lack of memory.
   // Cleared at the start of each receive_part().
   bool alloc_failed;
+  // The part being received was a mixed part that could not be stored: the
+  // table was at UR_MAX_MIXED_PARTS, or its entry could not be allocated.
+  // Cleared at the start of each receive_part().
+  bool part_dropped;
 
 #ifdef DEBUG_STATS
   // Statistics for resource tracking
@@ -107,7 +116,15 @@ struct fountain_decoder {
 #define INDEXES_INITIAL_CAPACITY 4
 #define HASH_MIN_CAPACITY 64
 #define HASH_CAPACITY_MULTIPLIER 1
-#define MAX_MIXED_PARTS 256 // Limit mixed parts to prevent memory explosion
+// The most mixed parts (equations not yet reduced to a single fragment) kept
+// at once. A mixed part arriving at the limit is dropped, and the stream has to
+// supply another, so the limit trades working memory for frames: it starts to
+// cost frames once a message has more than about this many fragments and many
+// of its frames are missed. Each entry holds a fragment-sized payload and its
+// index list. Integrators with memory to spare can raise it at compile time.
+#ifndef UR_MAX_MIXED_PARTS
+#define UR_MAX_MIXED_PARTS 256
+#endif
 #define MAX_DUPLICATE_TRACKING 512 // Limit duplicate tracking set size
 
 #ifdef ENABLE_CROSS_REDUCTION
@@ -687,6 +704,7 @@ void fountain_decoder_free(fountain_decoder_t *decoder) {
 
   free_fragments(decoder);
   free(decoder->choose_scratch);
+  free(decoder->weighted_scratch);
 
   // Free hash table for mixed parts
   if (decoder->mixed_parts_hash) {
@@ -824,7 +842,7 @@ static void assemble_message(fountain_decoder_t *decoder) {
 }
 
 // Store a mixed equation, taking ownership of *part on success. Fails, leaving
-// *part with the caller, at MAX_MIXED_PARTS, on a duplicate, or on OOM.
+// *part with the caller, at UR_MAX_MIXED_PARTS, on a duplicate, or on OOM.
 static UR_WARN_UNUSED_RESULT bool
 add_mixed_part(fountain_decoder_t *const decoder, decoder_part_t *const part,
                const mixed_part_source_t source) {
@@ -833,7 +851,7 @@ add_mixed_part(fountain_decoder_t *const decoder, decoder_part_t *const part,
 
   // Limit mixed parts to prevent memory explosion on embedded devices
   // When limit is reached, skip adding new mixed parts but continue processing
-  if (decoder->mixed_parts_hash->count >= MAX_MIXED_PARTS) {
+  if (decoder->mixed_parts_hash->count >= UR_MAX_MIXED_PARTS) {
     return false; // Limit reached, skip adding this mixed part
   }
 
@@ -883,6 +901,7 @@ static void fountain_decoder_clear_initialization(fountain_decoder_t *decoder) {
 
   free_fragments(decoder);
   safe_free(decoder->choose_scratch);
+  safe_free(decoder->weighted_scratch);
   if (decoder->mixed_parts_hash) {
     mixed_hash_free(decoder->mixed_parts_hash);
     safe_free(decoder->mixed_parts_hash);
@@ -1363,11 +1382,15 @@ static void process_mixed_part(fountain_decoder_t *const decoder,
   }
 
   reduce_mixed_by(decoder, indexes, part->data);
+  bool known = mixed_hash_find(hash, indexes, hash_indexes(indexes)) != NULL;
   if (!add_mixed_part(decoder, part, MIXED_SOURCE_FRAGMENT)) {
-    // The table is at MAX_MIXED_PARTS, the equation is a duplicate, or the
+    // The table is at UR_MAX_MIXED_PARTS, the equation is a duplicate, or the
     // allocation failed. Dropping it is the documented behaviour of the cap:
     // the fountain stream keeps supplying parts, so the message still
-    // converges, just from more frames.
+    // converges, just from more frames. A part dropped for want of room is
+    // flagged, so that it is not remembered as seen: an animation that loops
+    // over a fixed set of frames will show it again, when there may be room.
+    decoder->part_dropped = !known;
 #ifdef ENABLE_CROSS_REDUCTION
   } else {
     // A newly stored mixed equation may combine with equations already in
@@ -1429,13 +1452,13 @@ fountain_decoder_initialize(fountain_decoder_t *decoder,
 
   // A single simple pivot can resolve many cached mixed equations at once,
   // so size the work queue up front rather than growing it a step at a time.
-  // Bounded by MAX_MIXED_PARTS, not QUEUE_MAX_CAPACITY: what the queue has to
+  // Bounded by UR_MAX_MIXED_PARTS, not QUEUE_MAX_CAPACITY: what the queue has to
   // absorb in one burst is the equations held in the mixed table, and that is
   // where the cap actually bites. Best-effort - queue_enqueue() still grows on
   // demand if a message genuinely needs more.
-  if (!queue_reserve(&decoder->queue, part->seq_len < MAX_MIXED_PARTS
+  if (!queue_reserve(&decoder->queue, part->seq_len < UR_MAX_MIXED_PARTS
                                           ? part->seq_len
-                                          : MAX_MIXED_PARTS)) {
+                                          : UR_MAX_MIXED_PARTS)) {
     // Best effort - queue_enqueue() still grows on demand.
   }
 
@@ -1531,6 +1554,7 @@ bool fountain_decoder_receive_part(fountain_decoder_t *decoder,
   }
 
   decoder->alloc_failed = false;
+  decoder->part_dropped = false;
 
   decoder_part_t decoder_part;
   if (!create_decoder_part_from_encoder_part(decoder, part, &decoder_part)) {
@@ -1541,12 +1565,6 @@ bool fountain_decoder_receive_part(fountain_decoder_t *decoder,
   if (hash_set_contains(&decoder->received_fragments_hashes, fragment_hash)) {
     decoder_part_free(&decoder_part);
     return true;
-  }
-
-  if (!hash_set_add(&decoder->received_fragments_hashes, fragment_hash)) {
-    // Best effort. Losing an entry only costs the cheap duplicate short-circuit
-    // above; a fragment that slips through is filtered again by the fragment
-    // table before it can be applied twice.
   }
 
   if (!queue_enqueue(&decoder->queue, &decoder_part)) {
@@ -1570,6 +1588,15 @@ bool fountain_decoder_receive_part(fountain_decoder_t *decoder,
            !queue_is_empty(&decoder->queue)) {
       process_queue_item(decoder);
     }
+  }
+
+  // Remember the part as seen only now that it has been used. One that was
+  // dropped is worth taking again the next time it is shown.
+  if (!decoder->part_dropped && !decoder->alloc_failed &&
+      !hash_set_add(&decoder->received_fragments_hashes, fragment_hash)) {
+    // Best effort. Losing an entry only costs the cheap duplicate short-circuit
+    // above; a fragment that slips through is filtered again by the fragment
+    // table before it can be applied twice.
   }
 
   decoder->processed_parts_count++;
@@ -1645,8 +1672,11 @@ float fountain_decoder_estimated_percent_complete_weighted(
     // the Python dict `mixed_index_scoring`. If the scratch allocation fails,
     // mixed_score stays 0 — still the weighted metric, just without partial
     // credit, so the value never jumps to a different scale.
-    float *scoring = safe_malloc(parts * sizeof(float));
+    if (!decoder->weighted_scratch)
+      decoder->weighted_scratch = safe_malloc_uninit(parts * sizeof(float));
+    float *scoring = decoder->weighted_scratch;
     if (scoring) {
+      memset(scoring, 0, parts * sizeof(float));
       for (size_t b = 0; b < hash->capacity; b++) {
         for (hash_entry_t *entry = hash->buckets[b]; entry;
              entry = entry->next) {
@@ -1661,7 +1691,6 @@ float fountain_decoder_estimated_percent_complete_weighted(
       for (size_t i = 0; i < parts; i++) {
         mixed_score += scoring[i] < 0.75f ? scoring[i] : 0.75f;
       }
-      safe_free(scoring);
     }
   }
 

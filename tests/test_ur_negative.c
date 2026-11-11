@@ -1614,6 +1614,44 @@ static void test_encoder_respects_decoder_limits(void) {
   free(big);
 }
 
+// A mixed part dropped because the decoder had no room for it must not be
+// remembered as already seen: an animation looping over a fixed set of frames
+// shows it again, and by then there may be room.
+static void test_dropped_parts_are_taken_again(void) {
+  printf("\n=== dropped_parts_are_taken_again ===\n");
+
+  // 600 fragments, joined after the pure ones: every frame is a mixed part,
+  // and far more of them arrive than the decoder keeps at once.
+  enum { SEQ_LEN = 600, FRAMES = 450, REPEATED = 100 };
+  static uint8_t message[SEQ_LEN * 10];
+  for (size_t i = 0; i < sizeof message; i++)
+    message[i] = (uint8_t)(i * 29 + 3);
+  static char *frames[FRAMES];
+
+  ur_encoder_t *enc =
+      ur_encoder_new("bytes", message, sizeof message, 10, SEQ_LEN, 10);
+  ur_decoder_t *dec = ur_decoder_new();
+  bool built = enc && dec && ur_encoder_seq_len(enc) == SEQ_LEN;
+  for (size_t i = 0; built && i < FRAMES; i++) {
+    built = ur_encoder_next_part(enc, &frames[i]);
+    if (built)
+      (void)!ur_decoder_receive_part(dec, frames[i]);
+  }
+  ASSERT(built && ur_decoder_get_state(dec) == UR_DECODER_PROCESSING,
+         "fed more mixed parts than the decoder keeps");
+
+  size_t before = ur_decoder_processed_parts_count(dec);
+  for (size_t i = FRAMES - REPEATED; built && i < FRAMES; i++)
+    (void)!ur_decoder_receive_part(dec, frames[i]);
+  ASSERT(built && ur_decoder_processed_parts_count(dec) > before,
+         "parts dropped for want of room are processed when shown again");
+
+  for (size_t i = 0; i < FRAMES; i++)
+    free(frames[i]);
+  ur_decoder_free(dec);
+  ur_encoder_free(enc);
+}
+
 int main(void) {
   printf("=== UR Negative-Path Tests ===\n");
   test_null_and_empty();
@@ -1645,6 +1683,7 @@ int main(void) {
   test_script_nesting();
   test_stray_frames();
   test_encoder_respects_decoder_limits();
+  test_dropped_parts_are_taken_again();
 
   printf("\n=== Summary ===\n");
   printf("Tests passed: %d/%d\n", asserts - failures, asserts);
