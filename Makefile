@@ -50,7 +50,7 @@ TEST_STEMS = bytes_decoder bytes_encoder output_decoder output_encoder \
              PSBT_decoder PSBT_encoder bip39_decoder \
              account_descriptor_decoder output_descriptor_roundtrip \
              weighted_progress gaussian negative envelope_api \
-             fountain_utils
+             fountain_utils fuzz
 
 # test_ur_alloc wraps the allocator at link time, which needs GNU ld.
 ifeq ($(shell uname -s),Linux)
