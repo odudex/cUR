@@ -1341,6 +1341,136 @@ static void test_keypath_lengths(void) {
   output_free(parsed);
 }
 
+static bool descriptor_parses(const char *descriptor) {
+  output_data_t *output = output_from_descriptor_string(descriptor);
+  output_free(output);
+  return output != NULL;
+}
+
+// Descriptor text is parsed strictly: what the parser does not understand is
+// an error, because skipping it would encode a different descriptor.
+static void test_descriptor_text_strict(void) {
+  printf("\n=== descriptor_text_strict ===\n");
+
+  // %1$s-style reuse is not C99, so each case spells the key out with K.
+#define K                                                                      \
+  "xpub6C1HVMz946r433QEjZGpYYWYcspxXXBPys5PBGkmQboRXE6RLfFiStEkKbWKCZaPgDrzZh" \
+  "9nUEunxuiuy6MNdw23du2Ek7GoKYMJVH8eK5E"
+  static const char BASE[] = "wpkh([3442193e/84'/0'/0']" K "/0/*)";
+
+  static const char *const accepted[] = {
+      BASE,
+      "wpkh([3442193e/84h/0h/0h]" K "/0/*)",
+      "wpkh([3442193E/84'/0'/0']" K ")",
+      "wpkh(" K "/0/*)",
+      "sh(wsh(multi(1,[3442193e/84'/0'/0']" K "/0/*," K ")))",
+  };
+  for (size_t i = 0; i < sizeof accepted / sizeof accepted[0]; i++)
+    ASSERT(descriptor_parses(accepted[i]), accepted[i]);
+
+  static const struct {
+    const char *text, *what;
+  } rejected[] = {
+      {"wpkh([3442193e/84'/0'/0'5]" K "/0/*)", "digits after a hardened index"},
+      {"wpkh([3442193e/84'/0'/0']" K "/0*)", "wildcard glued to an index"},
+      {"wpkh([3442193e/84'/0'/0']" K "/*5)", "index glued to a wildcard"},
+      {"wpkh([3442193e/84'//0']" K "/0/*)", "empty path component"},
+      {"wpkh([3442193e/84'/0'/0'/]" K "/0/*)", "origin path ending in '/'"},
+      {"wpkh([3442193e/]" K "/0/*)", "origin '/' without a path"},
+      {"wpkh([3442193e84'/0'/0']" K "/0/*)", "origin path without its '/'"},
+      {"wpkh([3442193e/84'/0'/0']" K "/0/*/)", "children path ending in '/'"},
+      {"wpkh([3442193e/84'/0'/0']" K "/0/*", "missing ')'"},
+      {"wpkh([3442193e/84'/0'/0']" K "/0/*))", "extra ')'"},
+      {"sh(wpkh([3442193e/84'/0'/0']" K "/0/*)", "one ')' for two expressions"},
+      {"wpkh([3442193e/84'/0'/0']" K "/0/*)x", "text after the last ')'"},
+      {"wsh(multi(1" K "," K "))", "no comma after the threshold"},
+      {"wsh(multi(1," K "," K ",))", "comma after the last key"},
+      {"wsh(multi(1," K ",," K "))", "empty key between commas"},
+      {"wsh(multi(1,))", "multi without keys"},
+      {"wpkh(pkh(" K "))", "key expression inside a key expression"},
+      {"multi(wpkh(" K "))", "multi around another expression"},
+      {"wsh(wpkh(" K "))", "wpkh inside wsh"},
+      {"sh(tr(" K "))", "tr inside sh"},
+      {"wsh(sh(pkh(" K ")))", "sh inside wsh"},
+      {"sh(" K ")", "sh around a bare key"},
+      {"addr(" K ")", "addr around a key"},
+      {"wpkh(" K K ")", "key text longer than an xpub"},
+  };
+  for (size_t i = 0; i < sizeof rejected / sizeof rejected[0]; i++)
+    ASSERT(!descriptor_parses(rejected[i].text), rejected[i].what);
+#undef K
+
+  // A checksum is optional, but one that is present is verified.
+  output_data_t *output = output_from_descriptor_string(BASE);
+  char *checked = output ? output_descriptor(output, true) : NULL;
+  output_free(output);
+  size_t len = checked ? strlen(checked) : 0;
+  ASSERT(len > 9 && checked[len - 9] == '#' && descriptor_parses(checked),
+         "correct checksum accepted");
+  if (len > 9) {
+    // One fingerprint digit changed: still valid text, no longer what the
+    // checksum was computed over.
+    checked[6] = '4';
+    ASSERT(!descriptor_parses(checked), "checksum of another body rejected");
+    checked[len - 9] = '\0';
+    ASSERT(descriptor_parses(checked), "  -> which parses without it");
+    checked[len - 9] = '#';
+    checked[6] = '3';
+
+    checked[len - 1] = checked[len - 1] == 'q' ? 'p' : 'q';
+    ASSERT(!descriptor_parses(checked), "wrong checksum rejected");
+    checked[len - 1] = '\0';
+    ASSERT(!descriptor_parses(checked), "7-character checksum rejected");
+    checked[len - 8] = '\0';
+    ASSERT(!descriptor_parses(checked), "empty checksum rejected");
+  }
+  free(checked);
+}
+
+// #6.<outer>(#6.<inner>(#6.303(hdkey))) as a crypto-output; inner 0 leaves
+// that level out. Returns whether it decodes.
+static bool nesting_decodes(uint64_t outer, uint64_t inner) {
+  cbor_value_t *item = cbor_value_new_tag(CRYPTO_HDKEY_TAG, hdkey_map());
+  if (inner)
+    item = cbor_value_new_tag(inner, item);
+  item = cbor_value_new_tag(outer, item);
+  size_t len = 0;
+  uint8_t *cbor = cbor_encode(item, &len);
+  cbor_value_free(item);
+  output_data_t *output = cbor ? output_from_cbor(cbor, len) : NULL;
+  free(cbor);
+  output_free(output);
+  return output != NULL;
+}
+
+// The same nesting rules apply to script expression tags read from CBOR.
+static void test_script_nesting(void) {
+  printf("\n=== script_nesting ===\n");
+
+  ASSERT(nesting_decodes(SCRIPT_EXPR_WPKH, 0), "wpkh(key) accepted");
+  ASSERT(nesting_decodes(SCRIPT_EXPR_TR, 0), "tr(key) accepted");
+  ASSERT(nesting_decodes(SCRIPT_EXPR_SH, SCRIPT_EXPR_WPKH),
+         "sh(wpkh(key)) accepted");
+  ASSERT(nesting_decodes(SCRIPT_EXPR_WSH, SCRIPT_EXPR_PKH),
+         "wsh(pkh(key)) accepted");
+  ASSERT(nesting_decodes(SCRIPT_EXPR_SH, SCRIPT_EXPR_COSIGNER),
+         "sh(cosigner(key)) accepted");
+
+  ASSERT(!nesting_decodes(SCRIPT_EXPR_WPKH, SCRIPT_EXPR_PKH),
+         "wpkh(pkh(key)) rejected");
+  ASSERT(!nesting_decodes(SCRIPT_EXPR_MULTI, SCRIPT_EXPR_WPKH),
+         "multi(wpkh(key)) rejected");
+  ASSERT(!nesting_decodes(SCRIPT_EXPR_WSH, SCRIPT_EXPR_WPKH),
+         "wsh(wpkh(key)) rejected");
+  ASSERT(!nesting_decodes(SCRIPT_EXPR_WSH, SCRIPT_EXPR_SH),
+         "wsh(sh(key)) rejected");
+  ASSERT(!nesting_decodes(SCRIPT_EXPR_SH, SCRIPT_EXPR_TR),
+         "sh(tr(key)) rejected");
+  ASSERT(!nesting_decodes(SCRIPT_EXPR_SH, 0), "sh(key) rejected");
+  ASSERT(!nesting_decodes(SCRIPT_EXPR_ADDR, 0), "addr(key) rejected");
+  ASSERT(!nesting_decodes(SCRIPT_EXPR_RAW, 0), "raw(key) rejected");
+}
+
 int main(void) {
   printf("=== UR Negative-Path Tests ===\n");
   test_null_and_empty();
@@ -1368,6 +1498,8 @@ int main(void) {
   test_account_master_fingerprint();
   test_account_outputs();
   test_keypath_lengths();
+  test_descriptor_text_strict();
+  test_script_nesting();
 
   printf("\n=== Summary ===\n");
   printf("Tests passed: %d/%d\n", asserts - failures, asserts);
