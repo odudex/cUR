@@ -513,6 +513,13 @@ static mp_obj_t ur_encoder_make_new(const mp_obj_type_t *type, size_t n_args,
                  MP_ERROR_TEXT("UR payload is shorter than min_fragment_len"));
   }
 
+  if (!ur_encoder_within_limits(cbor_len, max_fragment_len, min_fragment_len)) {
+    mp_raise_msg(
+        &mp_type_ValueError,
+        MP_ERROR_TEXT(
+            "UR payload needs more parts or bytes than a decoder accepts"));
+  }
+
   // Wrapper first, as in ur_make_new(). with_finaliser so __del__
   // (ur_encoder_del) runs on GC.
   mp_obj_ur_encoder_t *self =
