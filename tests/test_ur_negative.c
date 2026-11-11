@@ -788,6 +788,11 @@ static void test_cbor_ambiguity_rejected(void) {
   const uint8_t trailing[] = {0xa1, 0x01, 0x81, 0x61, 'a', 0x00};
   ASSERT(bip39_from_cbor(trailing, sizeof trailing) == NULL,
          "trailing bytes after the item rejected");
+
+  // {1: ["a\0b"]}
+  const uint8_t embedded_nul[] = {0xa1, 0x01, 0x81, 0x63, 'a', 0x00, 'b'};
+  ASSERT(bip39_from_cbor(embedded_nul, sizeof embedded_nul) == NULL,
+         "text string with an embedded NUL rejected, not truncated");
 }
 
 // Path and sequence components split the way the reference decoders do.

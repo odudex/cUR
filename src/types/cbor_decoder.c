@@ -122,7 +122,9 @@ decode_string(urtypes_cbor_decoder_t *decoder, uint8_t additional) {
   if (!str)
     return NULL;
 
-  if (!read_bytes(decoder, (uint8_t *)str, slen)) {
+  // Strings are kept NUL-terminated, so one with a NUL inside it would be
+  // cut short there while other decoders read all of it.
+  if (!read_bytes(decoder, (uint8_t *)str, slen) || memchr(str, '\0', slen)) {
     free(str);
     return NULL;
   }
